@@ -1,0 +1,68 @@
+import { PrismaClient } from "@prisma/client";
+import { SYMBOLS } from "@mock-kabu/shared";
+import bcrypt from "bcryptjs";
+
+const prisma = new PrismaClient();
+
+const BOT_COUNT = 10;
+export const BOT_PASSWORD = "botpassword";
+const BOT_INITIAL_CASH = 1_000_000_000n; // 봇당 10억
+const BOT_INITIAL_QTY = 50_000; // 봇당 종목별 5만 주
+
+async function main() {
+  // 종목
+  for (const s of SYMBOLS) {
+    await prisma.marketSymbol.upsert({
+      where: { symbol: s.symbol },
+      update: {},
+      create: {
+        symbol: s.symbol,
+        name: s.name,
+        initialPrice: s.initialPrice,
+        tickSize: s.tickSize,
+        lastPrice: s.initialPrice,
+      },
+    });
+  }
+  console.log(`symbols: ${SYMBOLS.length} upserted`);
+
+  // 봇 유저/계좌/보유자산
+  const passwordHash = await bcrypt.hash(BOT_PASSWORD, 10);
+  for (let i = 1; i <= BOT_COUNT; i++) {
+    const email = `bot${i}@bots.local`;
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) continue;
+
+    await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: { email, passwordHash, nickname: `봇#${i}`, isBot: true },
+      });
+      const account = await tx.account.create({
+        data: { userId: user.id, balance: BOT_INITIAL_CASH },
+      });
+      await tx.ledgerEntry.create({
+        data: {
+          accountId: account.id,
+          delta: BOT_INITIAL_CASH,
+          balanceAfter: BOT_INITIAL_CASH,
+          reason: "SEED",
+        },
+      });
+      for (const s of SYMBOLS) {
+        await tx.holding.create({
+          data: { accountId: account.id, symbol: s.symbol, qty: BOT_INITIAL_QTY },
+        });
+      }
+    });
+    console.log(`bot created: ${email}`);
+  }
+
+  console.log("seed done");
+}
+
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(() => prisma.$disconnect());

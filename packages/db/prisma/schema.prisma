@@ -1,0 +1,166 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["auth", "account", "order", "matching", "market"]
+}
+
+// ── auth ──────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  nickname     String
+  isBot        Boolean  @default(false) @map("is_bot")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+  @@schema("auth")
+}
+
+// ── account ───────────────────────────────────────────
+
+model Account {
+  id         String   @id @default(uuid())
+  userId     String   @unique @map("user_id")
+  balance    BigInt   @default(0)
+  holdAmount BigInt   @default(0) @map("hold_amount")
+  version    Int      @default(0)
+  /// 분산 락 fencing token — 뒤처진(락을 잃은) 프로세스의 쓰기를 거부하는 단조 증가 값
+  fencingToken BigInt @default(0) @map("fencing_token")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  holdings Holding[]
+  ledger   LedgerEntry[]
+
+  @@map("accounts")
+  @@schema("account")
+}
+
+model Holding {
+  id        String @id @default(uuid())
+  accountId String @map("account_id")
+  symbol    String
+  qty       Int    @default(0)
+  holdQty   Int    @default(0) @map("hold_qty")
+  version   Int    @default(0)
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@unique([accountId, symbol])
+  @@map("holdings")
+  @@schema("account")
+}
+
+/// append-only 현금 원장: sum(delta) == accounts.balance 가 항상 성립해야 한다
+model LedgerEntry {
+  id           BigInt   @id @default(autoincrement())
+  accountId    String   @map("account_id")
+  delta        BigInt
+  balanceAfter BigInt   @map("balance_after")
+  reason       String // SIGNUP_BONUS | TRANSFER_IN | TRANSFER_OUT | TRADE_BUY | TRADE_SELL | SEED
+  refId        String?  @map("ref_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@map("ledger_entries")
+  @@schema("account")
+}
+
+/// 이벤트 중복 소비 방지 (정산 멱등성)
+model ProcessedEvent {
+  eventId     String   @id @map("event_id")
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("processed_events")
+  @@schema("account")
+}
+
+// ── order ─────────────────────────────────────────────
+
+model Order {
+  id        String   @id @default(uuid())
+  accountId String   @map("account_id")
+  symbol    String
+  side      String // BUY | SELL
+  type      String // LIMIT | MARKET
+  price     Int?
+  qty       Int
+  filledQty Int      @default(0) @map("filled_qty")
+  status    String   @default("OPEN") // OPEN | PARTIAL | FILLED | CANCELED | REJECTED
+  /// BUY: 홀드한 현금 단가 (LIMIT=지정가, MARKET=추정가). SELL: 0 (수량은 holdings.hold_qty로 홀드)
+  holdPerUnit BigInt @default(0) @map("hold_per_unit")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([accountId, createdAt])
+  @@index([symbol, status])
+  @@map("orders")
+  @@schema("order")
+}
+
+/// Transactional Outbox — orders와 동일 트랜잭션으로 커밋, relayer가 발행
+model Outbox {
+  eventId     String    @id @map("event_id")
+  topic       String
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at")
+  publishedAt DateTime? @map("published_at")
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox")
+  @@schema("order")
+}
+
+// ── matching ──────────────────────────────────────────
+
+model Trade {
+  id              String   @id @default(uuid())
+  symbol          String
+  price           Int
+  qty             Int
+  buyOrderId      String   @map("buy_order_id")
+  sellOrderId     String   @map("sell_order_id")
+  buyerAccountId  String   @map("buyer_account_id")
+  sellerAccountId String   @map("seller_account_id")
+  takerSide       String   @map("taker_side") // BUY | SELL
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([symbol, createdAt])
+  @@map("trades")
+  @@schema("matching")
+}
+
+// ── market ────────────────────────────────────────────
+
+model MarketSymbol {
+  symbol       String @id
+  name         String
+  initialPrice Int    @map("initial_price")
+  tickSize     Int    @map("tick_size")
+  lastPrice    Int    @map("last_price")
+
+  @@map("symbols")
+  @@schema("market")
+}
+
+model Candle {
+  symbol   String
+  interval String // "1m"
+  ts       DateTime
+  open     Int
+  high     Int
+  low      Int
+  close    Int
+  volume   BigInt @default(0)
+
+  @@id([symbol, interval, ts])
+  @@map("candles")
+  @@schema("market")
+}
