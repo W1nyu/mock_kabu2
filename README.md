@@ -28,23 +28,55 @@ docker-compose: PostgreSQL 16 + Redis 7
 
 ## 실행 방법
 
+### 최초 1회 — 환경 설정 + 첫 실행
+
 ```bash
+# 1. 의존성 설치
 pnpm install
 
-# 1. 인프라 (PostgreSQL + Redis)
+# 2. 환경변수 파일 생성 (기본값 그대로 사용 가능)
+cp .env.example .env
+
+# 3. 인프라 (PostgreSQL + Redis)
 docker compose up -d
 
-# 2. DB 마이그레이션 + 시드 (종목 5개, 봇 계정 10개)
+# 4. DB 마이그레이션 + 시드 (종목 5개, 봇 계정 10개) — 최초 1회만
 pnpm db:migrate
 pnpm db:seed
 
-# 3. 전체 기동 (api + matching-engine + bots + web)
+# 5. 전체 기동 (api + matching-engine + bots + web)
 pnpm dev
 ```
 
 → http://localhost:3000 접속 → 회원가입(가상 현금 1,000만원 지급) → 종목 선택 → 매수/매도.
 
 봇 계정: `bot1@bots.local` ~ `bot10@bots.local` / 비밀번호 `botpassword` (각 10억 + 종목별 5만 주)
+
+### 2번째 실행부터
+
+DB 데이터는 Docker 볼륨에 보존되므로 마이그레이션/시드 없이 두 명령이면 됩니다:
+
+```bash
+docker compose up -d   # PostgreSQL + Redis 기동 (이미 떠 있으면 그대로 통과)
+pnpm dev               # 전체 앱 기동
+```
+
+### 종료 방법
+
+```bash
+# 1. 앱 종료: pnpm dev 실행 중인 터미널에서 Ctrl+C
+
+# 2. 인프라 종료 (데이터는 볼륨에 유지됨)
+docker compose stop
+```
+
+DB/Redis 데이터까지 완전히 초기화하려면:
+
+```bash
+docker compose down -v   # 컨테이너 + 볼륨 삭제
+```
+
+이후 다시 실행할 때는 최초 실행처럼 `docker compose up -d` → `pnpm db:migrate` → `pnpm db:seed`부터 진행합니다.
 
 ## 락 전략 전환 (스펙 4.2)
 
