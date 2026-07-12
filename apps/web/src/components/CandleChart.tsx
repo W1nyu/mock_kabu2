@@ -75,6 +75,8 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       .catch(() => {});
 
     const unsub = subscribe([`trades:${symbol}`], ({ data }) => {
+      // 오염된 페이로드가 차트를 죽이지 않도록 방어 (NaN이 들어가면 시리즈 전체가 깨짐)
+      if (!Number.isFinite(data?.price) || !Number.isFinite(data?.ts)) return;
       const price: number = data.price;
       const bucket = (Math.floor(data.ts / 60_000) * 60) as UTCTimestamp;
       const last = lastCandleRef.current;

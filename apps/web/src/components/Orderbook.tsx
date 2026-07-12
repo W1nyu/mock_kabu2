@@ -43,6 +43,12 @@ export default function Orderbook({
     ...(snap?.bids ?? []).map((l) => l.qty),
   );
 
+  // 항상 8행씩 렌더해 호가 수가 변해도 컴포넌트 높이가 흔들리지 않게 고정
+  const pad = (levels: Level[]): (Level | null)[] => [
+    ...levels.slice(0, 8),
+    ...Array<null>(Math.max(0, 8 - levels.length)).fill(null),
+  ];
+
   return (
     <div className="rounded-lg border border-neutral-800 bg-neutral-900">
       <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold text-neutral-400">
@@ -51,19 +57,35 @@ export default function Orderbook({
       <div className="text-xs tabular-nums">
         {/* 매도(asks): 낮은 가격이 아래로 */}
         <div className="flex flex-col-reverse">
-          {(snap?.asks ?? []).slice(0, 8).map((l) => (
-            <Row key={`a${l.price}`} level={l} side="ask" maxQty={maxQty} onClick={onPriceClick} />
-          ))}
+          {pad(snap?.asks ?? []).map((l, i) =>
+            l ? (
+              <Row key={`a${l.price}`} level={l} side="ask" maxQty={maxQty} onClick={onPriceClick} />
+            ) : (
+              <EmptyRow key={`a-empty-${i}`} />
+            ),
+          )}
         </div>
         <div className="border-y border-neutral-800 px-3 py-1.5 text-center text-sm font-bold text-neutral-100">
           {snap?.lastPrice != null ? fmt.format(snap.lastPrice) : "—"}
         </div>
         <div>
-          {(snap?.bids ?? []).slice(0, 8).map((l) => (
-            <Row key={`b${l.price}`} level={l} side="bid" maxQty={maxQty} onClick={onPriceClick} />
-          ))}
+          {pad(snap?.bids ?? []).map((l, i) =>
+            l ? (
+              <Row key={`b${l.price}`} level={l} side="bid" maxQty={maxQty} onClick={onPriceClick} />
+            ) : (
+              <EmptyRow key={`b-empty-${i}`} />
+            ),
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function EmptyRow() {
+  return (
+    <div className="flex w-full justify-between px-3 py-0.5 text-neutral-700">
+      <span>&nbsp;</span>
     </div>
   );
 }

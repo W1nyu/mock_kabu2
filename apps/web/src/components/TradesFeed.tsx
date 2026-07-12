@@ -34,7 +34,10 @@ export default function TradesFeed({ symbol }: { symbol: string }) {
       .catch(() => {});
 
     return subscribe([`trades:${symbol}`], ({ data }) => {
-      setTicks((prev) => [data as Tick, ...prev].slice(0, 30));
+      // 재연결 직후 등 같은 체결이 중복 수신되면 무시 (key 중복 방지)
+      setTicks((prev) =>
+        prev[0]?.tradeId === data.tradeId ? prev : [data as Tick, ...prev].slice(0, 30),
+      );
     });
   }, [symbol]);
 
