@@ -50,7 +50,12 @@ async function main() {
       });
       for (const s of SYMBOLS) {
         await tx.holding.create({
-          data: { accountId: account.id, symbol: s.symbol, qty: BOT_INITIAL_QTY },
+          data: {
+            accountId: account.id,
+            symbol: s.symbol,
+            qty: BOT_INITIAL_QTY,
+            costBasis: BigInt(BOT_INITIAL_QTY) * BigInt(s.initialPrice),
+          },
         });
       }
     });

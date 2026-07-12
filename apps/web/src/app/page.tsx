@@ -18,6 +18,10 @@ interface HoldingRow {
   availableQty: number;
   lastPrice: number;
   value: number;
+  costBasis: number;
+  avgCost: number;
+  pnl: number;
+  pnlRate: number;
 }
 interface SymbolRow {
   symbol: string;
@@ -57,14 +61,26 @@ export default function DashboardPage() {
 
   const stockValue = holdings.reduce((sum, h) => sum + h.value, 0);
   const total = (account?.balance ?? 0) + stockValue;
+  const totalCost = holdings.reduce((sum, h) => sum + h.costBasis, 0);
+  const totalPnl = holdings.reduce((sum, h) => sum + h.pnl, 0);
+  const totalPnlRate = totalCost > 0 ? totalPnl / totalCost : 0;
 
   return (
     <div className="space-y-6">
-      <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <section className="grid grid-cols-2 gap-4 md:grid-cols-5">
         <Stat label="총 자산" value={won(total)} highlight />
         <Stat label="현금 잔액" value={won(account?.balance ?? 0)} />
         <Stat label="주문 가능" value={won(account?.available ?? 0)} />
         <Stat label="주식 평가금액" value={won(stockValue)} />
+        <Stat
+          label="평가손익 (전체 수익률)"
+          value={
+            holdings.length > 0
+              ? `${totalPnl >= 0 ? "+" : ""}${won(totalPnl)} (${totalPnl >= 0 ? "+" : ""}${(totalPnlRate * 100).toFixed(2)}%)`
+              : "—"
+          }
+          tone={holdings.length === 0 ? undefined : totalPnl >= 0 ? "up" : "down"}
+        />
       </section>
 
       <section>
@@ -124,8 +140,10 @@ export default function DashboardPage() {
                   <th className="px-4 py-2">종목</th>
                   <th className="px-4 py-2 text-right">보유 수량</th>
                   <th className="px-4 py-2 text-right">매도 대기</th>
+                  <th className="px-4 py-2 text-right">평단가</th>
                   <th className="px-4 py-2 text-right">현재가</th>
                   <th className="px-4 py-2 text-right">평가금액</th>
+                  <th className="px-4 py-2 text-right">평가손익 (수익률)</th>
                 </tr>
               </thead>
               <tbody>
@@ -140,8 +158,18 @@ export default function DashboardPage() {
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-400">
                       {fmt.format(h.holdQty)}
                     </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {fmt.format(Math.round(h.avgCost))}
+                    </td>
                     <td className="px-4 py-2 text-right tabular-nums">{fmt.format(h.lastPrice)}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{won(h.value)}</td>
+                    <td
+                      className={`px-4 py-2 text-right tabular-nums ${h.pnl >= 0 ? "text-red-400" : "text-blue-400"}`}
+                    >
+                      {h.pnl >= 0 ? "+" : ""}
+                      {won(h.pnl)} ({h.pnl >= 0 ? "+" : ""}
+                      {(h.pnlRate * 100).toFixed(2)}%)
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -153,13 +181,22 @@ export default function DashboardPage() {
   );
 }
 
-function Stat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function Stat({
+  label,
+  value,
+  highlight,
+  tone,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  tone?: "up" | "down";
+}) {
+  const color = highlight ? "text-amber-400" : tone === "up" ? "text-red-400" : tone === "down" ? "text-blue-400" : "";
   return (
     <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
       <p className="text-xs text-neutral-400">{label}</p>
-      <p className={`mt-1 text-lg font-bold tabular-nums ${highlight ? "text-amber-400" : ""}`}>
-        {value}
-      </p>
+      <p className={`mt-1 text-lg font-bold tabular-nums ${color}`}>{value}</p>
     </div>
   );
 }

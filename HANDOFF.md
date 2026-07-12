@@ -6,14 +6,28 @@
 
 로컬 모의 거래소 모노레포(pnpm + turbo): `apps/web`(Next.js 15 :3000) ↔ `apps/api`(NestJS :4000, REST + socket.io) ↔ `apps/matching-engine`(Redis Streams 매칭) + `apps/bots`(봇 10개 상시 거래). 인프라는 docker-compose(PostgreSQL 16 + Redis 7).
 
-## 현재 상태
+## 현재 상태 (작업 로그)
 
-- 베이스 커밋: `9659626` (M1~M4 전체 구현 완료, main 브랜치)
-- **미커밋 변경 5개 파일 존재** (아래 "이번 세션에서 한 일"). 검증 완료 상태이며 커밋만 안 됨. 사용자가 커밋을 요청하지 않아 보류 중.
-- `error.md` — 사용자가 브라우저 에러를 붙여넣는 스크래치 파일 (커밋 대상 아님). 기록된 2개 이슈는 해결 완료.
-- `apps/web/tsconfig.tsbuildinfo` — `tsc --noEmit` 부산물 (커밋 대상 아님).
+- `9659626` — M1~M4 전체 구현 (main)
+- `be579e5` — 웹 실시간 채널 필터링 버그 수정 + 호가창 높이 고정 (아래 "실시간 버그 수정" 참고)
+- `a3a63e4` — README 실행 가이드 재구성 + HANDOFF/AGENTS 문서
+- (최신) — **보유종목 평단가·수익률 + 봇 역할 다양화** (아래 참고). 브라우저·DB·정합성 검사로 검증 완료.
+- `error.md` — 사용자가 브라우저 에러를 붙여넣는 스크래치 파일 (gitignore됨)
 
-## 이번 세션에서 한 일 (미커밋 diff의 의도)
+## 평단가·수익률 기능 (최신 작업)
+
+**목표**: 대시보드에서 종목별 평단가·평가손익·수익률과 전체 수익률을 보여준다.
+
+- **DB**: `Holding.costBasis BigInt` (총 매입원가, 원) 추가 — 평단가 = costBasis/qty. 마이그레이션 `20260712100000_add_holding_cost_basis`는 기존 보유분을 종목 `initial_price`로 근사 백필. 시드도 costBasis 포함(`packages/db/prisma/seed.ts`).
+- **정산**(`apps/api/src/account/settlement.consumer.ts`): 매수 시 costBasis += 체결금액, 매도 시 비례 차감 `costBasis × 매도수량 / 보유수량` (BigInt 내림 — qty가 0이 되면 costBasis도 정확히 0). 정산 컨슈머는 단일 프로세스 순차 처리라 이 read-then-update가 안전함.
+- **API**(`account.service.ts` getHoldings): `costBasis, avgCost, pnl, pnlRate` 필드 추가. BigInt는 api main.ts의 전역 toJSON으로 number 직렬화.
+- **웹**(`apps/web/src/app/page.tsx`): 보유 자산 테이블에 평단가·평가손익(수익률) 컬럼, 상단 Stat에 "평가손익 (전체 수익률)" 타일. 이익=빨강, 손실=파랑.
+
+## 봇 역할 다양화 (최신 작업)
+
+`apps/bots/src/main.ts` — 10계정 역할 재배치: **마켓메이커 x3**(5종목 분담, 3레벨 양측 호가), **소액개미 x3**(1~5주, 최근 체결 추세를 65% 확률로 추종), **고래 x1**(15~45초 간격 100~400주, 시장가 또는 호가 관통 지정가 — 가격 충격 생성), **노이즈 x2**(순수 랜덤), **모멘텀 x1**. 고래의 대량 시장가는 호가 잔량을 소진하면 잔여분 CANCELED — 의도된 동작(IOC성 잔여 취소).
+
+## 이전 세션에서 한 일
 
 ### 1. WebSocket 채널 필터링 버그 수정 — 근본 원인
 
@@ -60,6 +74,11 @@
 - 대시보드 종목 시세 5초 폴링 → WebSocket 실시간화
 
 스펙상 후속 마일스톤(README 하단): k3d/Helm(M5), k6+Grafana(M6), isolation-lab, AWS(M7+).
+
+## Prisma 마이그레이션 주의 (중요)
+
+- **`prisma migrate dev`는 쓰지 말 것** — init 마이그레이션(`20260712000000_init`)이 적용 후 UTF-16→UTF-8로 재인코딩되어 체크섬이 불일치, migrate dev가 DB 리셋을 요구함. 대신 **마이그레이션 SQL을 수동 작성**(`prisma/migrations/<timestamp>_<name>/migration.sql`)하고 `pnpm db:migrate`(migrate deploy)로 적용할 것. deploy는 체크섬을 재검증하지 않음.
+- **`prisma generate`는 `pnpm dev` 실행 중이면 EPERM으로 실패** — 실행 중인 api/matching-engine이 query engine DLL을 잠그기 때문. 엔진 버전이 같으면 생성된 client JS/타입은 이미 갱신된 상태라 무해하지만, `pnpm build`/`pnpm test`(turbo가 db build를 선행)는 dev를 끄고 돌려야 통과함. 테스트만 빨리 돌리려면 각 패키지 디렉토리에서 `npx vitest run`.
 
 ## 주의사항 (이 코드베이스 특유)
 

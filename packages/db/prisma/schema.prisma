@@ -47,6 +47,8 @@ model Holding {
   symbol    String
   qty       Int    @default(0)
   holdQty   Int    @default(0) @map("hold_qty")
+  /// 총 매입원가(원). 평단가 = costBasis / qty. 매수 시 체결금액만큼 증가, 매도 시 비례 차감
+  costBasis BigInt @default(0) @map("cost_basis")
   version   Int    @default(0)
 
   account Account @relation(fields: [accountId], references: [id])

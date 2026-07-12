@@ -83,6 +83,56 @@ async function runMarketMaker(client: ApiClient, def: SymbolDef, ref: ReferenceP
   }
 }
 
+/** 소액 개미 투자자: 1~5주 소량, 추세 추종 성향 (오르면 사고 내리면 파는 경향) */
+async function runRetailTrader(client: ApiClient, ref: ReferencePrice, name: string) {
+  while (true) {
+    try {
+      const def = SYMBOLS[randInt(0, SYMBOLS.length - 1)];
+      // 최근 체결 흐름을 보고 65% 확률로 추세를 따라간다
+      let side: "BUY" | "SELL" = Math.random() < 0.5 ? "BUY" : "SELL";
+      const trades = await client.recentTrades(def.symbol, 6);
+      if (trades.length >= 3) {
+        const up = trades[0].price >= trades[trades.length - 1].price;
+        side = Math.random() < 0.65 ? (up ? "BUY" : "SELL") : up ? "SELL" : "BUY";
+      }
+      const qty = randInt(1, 5);
+      if (Math.random() < 0.5) {
+        await client.placeOrder({ symbol: def.symbol, side, type: "MARKET", qty });
+      } else {
+        const drift = side === "BUY" ? rand(0.997, 1.001) : rand(0.999, 1.003);
+        const price = toTick(ref.get(def.symbol) * drift, def);
+        await client.placeOrder({ symbol: def.symbol, side, type: "LIMIT", price, qty });
+      }
+    } catch (e) {
+      if (!isRejection(e)) console.error(`[retail:${name}]`, e instanceof Error ? e.message : e);
+    }
+    await sleep(rand(1000, 3500));
+  }
+}
+
+/** 고래: 낮은 빈도로 대량 주문 — 가격에 충격을 주고 추세를 만든다 */
+async function runWhale(client: ApiClient, ref: ReferencePrice, name: string) {
+  while (true) {
+    await sleep(rand(15_000, 45_000));
+    try {
+      const def = SYMBOLS[randInt(0, SYMBOLS.length - 1)];
+      const side = Math.random() < 0.5 ? "BUY" : "SELL";
+      const qty = randInt(100, 400);
+      if (Math.random() < 0.5) {
+        await client.placeOrder({ symbol: def.symbol, side, type: "MARKET", qty });
+      } else {
+        // 호가를 몇 단계 관통하는 공격적 지정가
+        const drift = side === "BUY" ? 1.004 : 0.996;
+        const price = toTick(ref.get(def.symbol) * drift, def);
+        await client.placeOrder({ symbol: def.symbol, side, type: "LIMIT", price, qty });
+      }
+      console.log(`[whale:${name}] ${def.symbol} ${side} ${qty}주`);
+    } catch (e) {
+      if (!isRejection(e)) console.error(`[whale:${name}]`, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
 /** 노이즈 트레이더: 랜덤 방향·랜덤 간격의 소량 주문 */
 async function runNoiseTrader(client: ApiClient, ref: ReferencePrice, name: string) {
   while (true) {
@@ -169,15 +219,19 @@ async function main() {
   const ref = new ReferencePrice(SYMBOLS);
   setInterval(() => ref.tick(), 1500);
 
-  // 봇 1~5: 심볼별 마켓메이커
-  SYMBOLS.forEach((def, i) => void runMarketMaker(clients[i], def, ref));
-  // 봇 6~9: 노이즈 트레이더
-  for (let i = 5; i < 9; i++) void runNoiseTrader(clients[i], ref, `bot${i + 1}`);
-  // 봇 10: 모멘텀 트레이더
+  // 봇 1~3: 마켓메이커 (5종목 분담 — 유동성 공급)
+  SYMBOLS.forEach((def, i) => void runMarketMaker(clients[i % 3], def, ref));
+  // 봇 4~6: 소액 개미 투자자 (소량·추세추종)
+  for (let i = 3; i < 6; i++) void runRetailTrader(clients[i], ref, `bot${i + 1}`);
+  // 봇 7: 고래 (대량·저빈도, 가격 충격)
+  void runWhale(clients[6], ref, "bot7");
+  // 봇 8~9: 노이즈 트레이더 (순수 랜덤)
+  for (let i = 7; i < 9; i++) void runNoiseTrader(clients[i], ref, `bot${i + 1}`);
+  // 봇 10: 모멘텀 트레이더 (추세 가속)
   void runMomentumTrader(clients[9], "bot10");
-  void runJanitor(clients.slice(5));
+  void runJanitor(clients.slice(3));
 
-  console.log("[bots] market makers x5, noise x4, momentum x1 running");
+  console.log("[bots] market makers x3(5종목), retail x3, whale x1, noise x2, momentum x1 running");
 }
 
 main().catch((e) => {

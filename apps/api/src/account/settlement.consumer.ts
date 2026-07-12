@@ -137,15 +137,27 @@ export class SettlementConsumer implements OnModuleInit, OnModuleDestroy {
       await ledger(ev.buyerAccountId, -cost, "TRADE_BUY");
       await ledger(ev.sellerAccountId, cost, "TRADE_SELL");
 
-      // 보유자산: 매수자 +qty, 매도자 -qty(홀드분 소진)
+      // 보유자산: 매수자 +qty(매입원가 가산), 매도자 -qty(홀드분 소진, 매입원가 비례 차감)
       await ctx.tx.holding.upsert({
         where: { accountId_symbol: { accountId: ev.buyerAccountId, symbol: ev.symbol } },
-        update: { qty: { increment: ev.qty } },
-        create: { accountId: ev.buyerAccountId, symbol: ev.symbol, qty: ev.qty },
+        update: { qty: { increment: ev.qty }, costBasis: { increment: cost } },
+        create: { accountId: ev.buyerAccountId, symbol: ev.symbol, qty: ev.qty, costBasis: cost },
       });
+      const sellerHolding = await ctx.tx.holding.findUniqueOrThrow({
+        where: { accountId_symbol: { accountId: ev.sellerAccountId, symbol: ev.symbol } },
+      });
+      // 평단가 유지: 매도 수량만큼 원가를 비례 차감 (qty가 0이 되면 costBasis도 정확히 0)
+      const basisReduction =
+        sellerHolding.qty > 0
+          ? (sellerHolding.costBasis * BigInt(ev.qty)) / BigInt(sellerHolding.qty)
+          : 0n;
       await ctx.tx.holding.update({
         where: { accountId_symbol: { accountId: ev.sellerAccountId, symbol: ev.symbol } },
-        data: { qty: { decrement: ev.qty }, holdQty: { decrement: ev.qty } },
+        data: {
+          qty: { decrement: ev.qty },
+          holdQty: { decrement: ev.qty },
+          costBasis: { decrement: basisReduction },
+        },
       });
 
       // 주문 진행 상태 갱신 (종결은 order.closed가 담당)

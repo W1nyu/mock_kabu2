@@ -36,14 +36,24 @@ export class AccountService {
     });
     const symbols = await this.prisma.marketSymbol.findMany();
     const lastPrice = new Map(symbols.map((s) => [s.symbol, s.lastPrice]));
-    return holdings.map((h) => ({
-      symbol: h.symbol,
-      qty: h.qty,
-      holdQty: h.holdQty,
-      availableQty: h.qty - h.holdQty,
-      lastPrice: lastPrice.get(h.symbol) ?? 0,
-      value: (lastPrice.get(h.symbol) ?? 0) * h.qty,
-    }));
+    return holdings.map((h) => {
+      const price = lastPrice.get(h.symbol) ?? 0;
+      const value = price * h.qty;
+      const costBasis = Number(h.costBasis);
+      const pnl = value - costBasis;
+      return {
+        symbol: h.symbol,
+        qty: h.qty,
+        holdQty: h.holdQty,
+        availableQty: h.qty - h.holdQty,
+        lastPrice: price,
+        value,
+        costBasis,
+        avgCost: h.qty > 0 ? costBasis / h.qty : 0,
+        pnl,
+        pnlRate: costBasis > 0 ? pnl / costBasis : 0,
+      };
+    });
   }
 
   async getLedger(accountId: string, limit = 50) {
