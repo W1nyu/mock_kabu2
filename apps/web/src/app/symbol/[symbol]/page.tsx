@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 import CandleChart from "@/components/CandleChart";
 import MyOpenOrders from "@/components/MyOpenOrders";
+import MyPosition from "@/components/MyPosition";
 import OrderForm from "@/components/OrderForm";
 import Orderbook from "@/components/Orderbook";
 import TradesFeed from "@/components/TradesFeed";
@@ -43,6 +44,8 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
         </div>
         <Orderbook symbol={symbol} onPriceClick={setPriceHint} />
       </div>
+
+      <MyPosition symbol={symbol} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <OrderForm symbol={symbol} priceHint={priceHint} />
