@@ -9,7 +9,8 @@
     "test": "turbo run test",
     "db:migrate": "pnpm --filter @mock-kabu/db migrate:deploy",
     "db:seed": "pnpm --filter @mock-kabu/db seed",
-    "check:consistency": "pnpm --filter @mock-kabu/db check:consistency"
+    "check:consistency": "pnpm --filter @mock-kabu/db check:consistency",
+    "recover:settlement": "pnpm --filter @mock-kabu/db recover:settlement"
   },
   "devDependencies": {
     "turbo": "^2.5.0",

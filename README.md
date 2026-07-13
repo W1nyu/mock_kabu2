@@ -13,7 +13,7 @@ apps/web (Next.js :3000) ──REST/WebSocket──> apps/api (NestJS :4000)
                                               └─ 정산 컨슈머 <── Redis Streams(trades)
 apps/matching-engine ── orders 스트림 소비 → 심볼별 오더북 매칭 → trades 발행
                         └─ 호가/체결 Redis Pub/Sub → api gateway → 브라우저 push
-apps/bots ── 봇 계정 10개로 api REST 호출 (GBM 기준가 + 마켓메이커/소액개미/고래/노이즈/모멘텀)
+apps/bots ── 봇 계정 10개로 api REST 호출 (추세·변동성 군집 기준가 + 마켓메이커/소액개미/고래/노이즈/모멘텀)
 docker-compose: PostgreSQL 16 + Redis 7
 ```
 
@@ -50,6 +50,24 @@ pnpm dev
 
 → http://localhost:3000 접속 → 회원가입(가상 현금 1,000만원 지급) → 종목 선택 → 매수/매도.
 
+### 실제 과거 시세 리플레이
+
+상단 메뉴의 **실전 리플레이**(`/replay`)에서는 기존 KABU·MOCK 등 로컬 거래소와 분리된
+가상 계좌로 AAPL·MSFT·NVDA의 과거 일봉을 한 봉씩 공개하며 연습할 수 있습니다.
+
+- **실제 시세**: 봇 없이 과거 OHLCV 경로 그대로 재생합니다.
+- **봇 혼합**: seed 기반의 가상 유동성 압력이 실제 기준 경로의 ±1/±2.5/±5% 범위 안에서만
+  추가됩니다. 기존 `apps/bots`, 오더북, 주문, 계좌·정산에는 영향을 주지 않습니다.
+- **기간·재생 속도**: 1개월부터 5년·10년·상장 이후 전체(`max`)까지의 일봉과 x0.25 / x0.5 / x1 / x2,
+  한 봉 진행, 새 시나리오를 지원합니다.
+- 기본 상태에서는 외부 시세를 자동 요청하지 않습니다. 사용자가 권한을 가진 로컬 CSV 또는
+  `ALPHA_VANTAGE_API_KEY`를 명시적으로 설정했을 때만 실제 과거 일봉을 사용하며, AAPL은 작은
+  MIT 라이선스 Plotly fixture를 오프라인 학습용으로 사용할 수 있습니다. 5년·10년·`max`는
+  해당 범위를 제공할 권한이 있는 데이터 소스가 필요합니다.
+
+온라인 실제 데이터와 오프라인 fixture의 범위·제약, 캐시와 혼합 모드의 봇 분리는
+[실전 리플레이 데이터 가이드](docs/replay-data-guide.md)를 참고하세요.
+
 봇 계정: `bot1@bots.local` ~ `bot10@bots.local` / 비밀번호 `botpassword` (각 10억 + 종목별 5만 주)
 
 ### 2번째 실행부터
@@ -70,13 +88,45 @@ pnpm dev               # 전체 앱 기동
 docker compose stop
 ```
 
+```bash
+wsl --shutdown   # vmmemWSL 종료
+```
+
+
 DB/Redis 데이터까지 완전히 초기화하려면:
 
 ```bash
 docker compose down -v   # 컨테이너 + 볼륨 삭제
 ```
 
+
 이후 다시 실행할 때는 최초 실행처럼 `docker compose up -d` → `pnpm db:migrate` → `pnpm db:seed`부터 진행합니다.
+
+### 손상된 로컬 거래 데이터 복구
+
+정산 프로세스가 비정상 종료된 뒤에는 먼저 비파괴 dry-run을 실행합니다. 이 도구는
+`matching.trades`를 기준으로 미정산 체결과 주문·예약 상태를 함께 검증하며, 모순이 있으면
+어떤 데이터도 변경하지 않습니다.
+
+```bash
+# api / matching-engine / bots를 먼저 중지한 뒤 실행
+pnpm recover:settlement
+
+# 출력이 SAFE일 때만 명시적으로 적용
+pnpm run recover:settlement -- --apply --confirm=RECOVER_UNSETTLED_TRADES
+pnpm check:consistency
+```
+
+체결 이력 자체가 주문 수량과 모순되는 경우 자동 복구는 안전하지 않으므로 차단됩니다. 이
+로컬 개발 환경에서는 다음 초기화·시드 절차로 깨끗한 시장 상태를 다시 만들 수 있습니다.
+
+```bash
+docker compose down -v
+docker compose up -d
+pnpm db:migrate
+pnpm db:seed
+pnpm check:consistency
+```
 
 ## 락 전략 전환 (스펙 4.2)
 
@@ -103,7 +153,7 @@ pnpm check:consistency    # 원장 합계=잔액, 음수 잔액/보유 0건, 홀
 apps/
   api/              NestJS 모듈러 모놀리스 (auth·account·order·market·admin·gateway·정산)
   matching-engine/  순수 TS 프로세스 — 오더북(순수 함수) + Redis Streams 컨슈머
-  bots/             시장 참여자 봇 (GBM 기준가, 마켓메이커 x3 / 소액개미 x3 / 고래 x1 / 노이즈 x2 / 모멘텀 x1)
+  bots/             시장 참여자 봇 (추세·변동성 군집 기준가, 마켓메이커 x3 / 소액개미 x3 / 고래 x1 / 노이즈 x2 / 모멘텀 x1)
   web/              Next.js — 대시보드·호가창·캔들차트·주문·이체·관전 모드
 packages/
   shared/           타입·이벤트 스키마·상수 (종목, 스트림/채널 키)

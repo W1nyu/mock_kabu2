@@ -7,6 +7,7 @@ import { clearSession, getUser, type SessionUser } from "@/lib/api";
 
 const links = [
   { href: "/", label: "대시보드" },
+  { href: "/replay", label: "실전 리플레이" },
   { href: "/orders", label: "주문내역" },
   { href: "/transfer", label: "이체" },
   { href: "/admin", label: "동시성 실험" },

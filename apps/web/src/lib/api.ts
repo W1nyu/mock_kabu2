@@ -18,14 +18,20 @@ export function getUser(): SessionUser | null {
   return raw ? (JSON.parse(raw) as SessionUser) : null;
 }
 
+function notifySessionChange() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("mock-kabu:session-change"));
+}
+
 export function saveSession(token: string, user: SessionUser) {
   localStorage.setItem("mk_token", token);
   localStorage.setItem("mk_user", JSON.stringify(user));
+  notifySessionChange();
 }
 
 export function clearSession() {
   localStorage.removeItem("mk_token");
   localStorage.removeItem("mk_user");
+  notifySessionChange();
 }
 
 export class ApiError extends Error {

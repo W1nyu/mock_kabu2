@@ -139,6 +139,30 @@ model Trade {
   @@schema("matching")
 }
 
+/// matching-engine의 orders stream 중복 소비 방지. Redis Streams와 order outbox는
+/// at-least-once이므로, 체결 원장과 같은 DB 트랜잭션에서 event_id를 claim한다.
+model MatchingProcessedOrderEvent {
+  eventId     String   @id @map("event_id")
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("processed_order_events")
+  @@schema("matching")
+}
+
+/// 매칭 원장과 같은 트랜잭션으로 기록하는 정산 이벤트 outbox.
+/// Redis XADD 전 프로세스가 종료돼도 publishedAt IS NULL 행을 다시 발행할 수 있다.
+model MatchingOutboxEvent {
+  id          BigInt    @id @default(autoincrement())
+  eventId     String    @unique @map("event_id")
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at")
+  publishedAt DateTime? @map("published_at")
+
+  @@index([publishedAt, id])
+  @@map("outbox_events")
+  @@schema("matching")
+}
+
 // ── market ────────────────────────────────────────────
 
 model MarketSymbol {

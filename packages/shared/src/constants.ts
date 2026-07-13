@@ -51,3 +51,27 @@ export const CONSUMER_GROUPS = {
 
 /** 시장가 매수 주문의 잔액 홀드 안전 계수 (최근가 * qty * 계수) */
 export const MARKET_BUY_HOLD_FACTOR = 1.1;
+
+/**
+ * The market-maker keeps roughly this much notional on each side of a book.
+ * Shares alone are not comparable between a ₩100 and a ₩100,000 symbol, so
+ * bot liquidity derives its per-level quantities from this common budget.
+ */
+export const LIQUIDITY_TARGET_NOTIONAL_PER_SIDE = 48_000_000;
+
+/**
+ * A price-normalised ladder remains bounded even for a future penny-priced
+ * listing. The current symbols are all well inside this range.
+ */
+export const LIQUIDITY_MIN_TOTAL_QTY = 120;
+export const LIQUIDITY_MAX_TOTAL_QTY = 500_000;
+
+/** Extra inventory covers a live ladder plus its safe cancel/replace overlap. */
+export const LIQUIDITY_RESERVE_OVERLAP_MULTIPLIER = 3;
+
+/** Quantity required for one side of a price-normalised reserve ladder. */
+export function liquidityTotalQtyForPrice(referencePrice: number): number {
+  const price = Number.isFinite(referencePrice) && referencePrice > 0 ? referencePrice : 1;
+  const raw = Math.round(LIQUIDITY_TARGET_NOTIONAL_PER_SIDE / price);
+  return Math.min(LIQUIDITY_MAX_TOTAL_QTY, Math.max(LIQUIDITY_MIN_TOTAL_QTY, raw));
+}

@@ -1,4 +1,5 @@
 node_modules/
+.pnpm-store/
 dist/
 .next/
 .turbo/
@@ -12,3 +13,6 @@ error.md
 
 # 개인 로컬 설정
 .claude/settings.local.json
+
+# 비파괴 로컬 재시드 전 PostgreSQL 포렌식 백업
+tmp/*.dump

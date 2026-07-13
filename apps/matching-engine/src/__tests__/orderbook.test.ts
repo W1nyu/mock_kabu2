@@ -147,4 +147,23 @@ describe("orderbook 매칭 (가격-시간 우선)", () => {
     ]);
     expect(asks).toEqual([{ price: 101, qty: 4 }]);
   });
+
+  test("prevents a self-cross by canceling the incoming remainder", () => {
+    const book = createBook("MOCK");
+    applyOrder(book, order({ orderId: "own-ask", accountId: "bot-1", side: "SELL", price: 100, qty: 5 }));
+    applyOrder(book, order({ orderId: "other-ask", accountId: "bot-2", side: "SELL", price: 101, qty: 5 }));
+
+    const res = applyOrder(book, order({ orderId: "own-buy", accountId: "bot-1", side: "BUY", type: "MARKET", qty: 8 }));
+
+    expect(res.fills).toEqual([]);
+    expect(res.canceledQty).toBe(8);
+    expect(res.closedOrders).toContainEqual({
+      orderId: "own-buy",
+      accountId: "bot-1",
+      side: "BUY",
+      filledQty: 0,
+      status: "CANCELED",
+    });
+    expect(book.asks.map((resting) => resting.orderId)).toEqual(["own-ask", "other-ask"]);
+  });
 });

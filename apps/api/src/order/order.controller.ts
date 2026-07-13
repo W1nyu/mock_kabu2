@@ -19,7 +19,17 @@ export class OrderController {
   }
 
   @Get()
-  myOrders(@CurrentUser() user: JwtUser, @Query("limit") limit?: string) {
-    return this.orders.myOrders(user.accountId, limit ? Number(limit) : undefined);
+  myOrders(
+    @CurrentUser() user: JwtUser,
+    @Query("limit") limit?: string,
+    @Query("symbol") symbol?: string,
+    @Query("status") status?: string,
+  ) {
+    // Existing /orders calls keep their all-status behavior.  status=live is
+    // purpose-built for market makers that must not page through history.
+    return this.orders.myOrders(user.accountId, limit ? Number(limit) : undefined, {
+      symbol,
+      liveOnly: status === "live",
+    });
   }
 }

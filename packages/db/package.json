@@ -10,7 +10,8 @@
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
-    "check:consistency": "tsx scripts/check-consistency.ts"
+    "check:consistency": "tsx scripts/check-consistency.ts",
+    "recover:settlement": "tsx scripts/recover-unsettled-trades.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.8.0",

@@ -16,6 +16,52 @@ export class MarketController {
     return this.prisma.marketSymbol.findMany({ orderBy: { symbol: "asc" } });
   }
 
+  /** KST 당일 체결 기준 시세 요약. 캔들 개수 제한과 무관하게 하루 전체를 집계한다. */
+  @Get("summary/:symbol")
+  async summary(@Param("symbol") symbol: string) {
+    const sessionStart = koreaDayStart();
+    const [marketSymbol, [stats]] = await Promise.all([
+      this.prisma.marketSymbol.findUnique({ where: { symbol } }),
+      this.prisma.$queryRaw<
+        {
+          high: number | null;
+          low: number | null;
+          volume: bigint;
+          turnover: bigint;
+          buy_volume: bigint;
+          sell_volume: bigint;
+          last_trade_ts: Date | null;
+        }[]
+      >`
+        SELECT
+          MAX(price) AS high,
+          MIN(price) AS low,
+          COALESCE(SUM(qty), 0) AS volume,
+          COALESCE(SUM(price * qty), 0) AS turnover,
+          COALESCE(SUM(qty) FILTER (WHERE taker_side = 'BUY'), 0) AS buy_volume,
+          COALESCE(SUM(qty) FILTER (WHERE taker_side = 'SELL'), 0) AS sell_volume,
+          MAX(created_at) AS last_trade_ts
+        FROM matching.trades
+        WHERE symbol = ${symbol} AND created_at >= ${sessionStart}
+      `,
+    ]);
+    if (!marketSymbol) throw new NotFoundException(`없는 종목: ${symbol}`);
+
+    return {
+      symbol,
+      referencePrice: marketSymbol.initialPrice,
+      lastPrice: marketSymbol.lastPrice,
+      high: stats?.high ?? null,
+      low: stats?.low ?? null,
+      volume: Number(stats?.volume ?? 0n),
+      turnover: Number(stats?.turnover ?? 0n),
+      buyVolume: Number(stats?.buy_volume ?? 0n),
+      sellVolume: Number(stats?.sell_volume ?? 0n),
+      // 클라이언트는 이 watermark 뒤의 WebSocket tick만 스냅샷에 덧붙인다.
+      lastTradeTs: stats?.last_trade_ts?.getTime() ?? null,
+    };
+  }
+
   @Get("orderbook/:symbol")
   async orderbook(@Param("symbol") symbol: string) {
     const json = await this.redis.get(KEYS.orderbookSnapshot(symbol));
@@ -50,4 +96,11 @@ export class MarketController {
       take: Math.min(Number(limit) || 50, 200),
     });
   }
+}
+
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+function koreaDayStart(now = Date.now()): Date {
+  const shifted = new Date(now + KST_OFFSET_MS);
+  return new Date(Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - KST_OFFSET_MS);
 }

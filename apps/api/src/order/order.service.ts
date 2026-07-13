@@ -27,6 +27,15 @@ export interface PlaceOrderDto {
   qty: number;
 }
 
+export interface MyOrdersFilter {
+  /** Restrict the account-owned order list to one market symbol. */
+  symbol?: string;
+  /** Only orders that can still appear in the matching engine's book. */
+  liveOnly?: boolean;
+}
+
+const LIVE_ORDER_STATUSES = ["OPEN", "PARTIAL"];
+
 @Injectable()
 export class OrderService {
   constructor(
@@ -134,9 +143,14 @@ export class OrderService {
     return { ok: true };
   }
 
-  async myOrders(accountId: string, limit = 50) {
+  async myOrders(accountId: string, limit = 50, filter: MyOrdersFilter = {}) {
+    const symbol = filter.symbol?.trim() || undefined;
     return this.prisma.order.findMany({
-      where: { accountId },
+      where: {
+        accountId,
+        ...(symbol ? { symbol } : {}),
+        ...(filter.liveOnly ? { status: { in: LIVE_ORDER_STATUSES } } : {}),
+      },
       orderBy: { createdAt: "desc" },
       take: Math.min(limit, 200),
     });

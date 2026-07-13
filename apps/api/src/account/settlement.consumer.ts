@@ -11,8 +11,14 @@ import {
 import Redis from "ioredis";
 import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
+import { closeMustWaitForTrades, stateAfterClose, stateAfterTrade } from "./settlement-state";
 
 type StreamReply = [key: string, messages: [id: string, fields: string[]][]][] | null;
+type StreamMessages = [id: string, fields: string[]][];
+type AutoClaimReply = [nextId: string, messages: StreamMessages, deletedIds: string[]];
+
+const CLAIM_IDLE_MS = 30_000;
+const CLAIM_INTERVAL_MS = 5_000;
 
 /**
  * 체결 정산 컨슈머 (스펙 3.2의 4단계).
@@ -48,18 +54,66 @@ export class SettlementConsumer implements OnModuleInit, OnModuleDestroy {
     this.stream.disconnect();
   }
 
+  private async processMessages(messages: StreamMessages) {
+    for (const [id, fields] of messages) {
+      let eventId = id;
+      try {
+        const idx = fields.indexOf("payload");
+        if (idx < 0 || !fields[idx + 1]) throw new Error("stream message has no payload");
+
+        const ev = JSON.parse(fields[idx + 1]) as TradeStreamEvent;
+        eventId = ev.eventId;
+        if (ev.topic === "trade.executed") await this.settleTrade(ev);
+        else if (ev.topic === "order.closed") await this.closeOrder(ev);
+        else throw new Error(`unsupported settlement topic: ${(ev as { topic?: string }).topic ?? "unknown"}`);
+
+        await this.stream.xack(STREAMS.TRADES, CONSUMER_GROUPS.SETTLEMENT, id);
+      } catch (e) {
+        // Financial events must never be silently discarded.  The pending entry
+        // is reclaimed after an idle period, including by a new process after a restart.
+        console.error(`[settlement] event failed (retained for retry) ${eventId}`, e);
+      }
+    }
+  }
+
+  private async reclaimPending(consumer: string, cursor: string) {
+    const reply = (await this.stream.xautoclaim(
+      STREAMS.TRADES,
+      CONSUMER_GROUPS.SETTLEMENT,
+      consumer,
+      CLAIM_IDLE_MS,
+      cursor,
+      "COUNT",
+      100,
+    )) as unknown as AutoClaimReply;
+    return { nextCursor: reply?.[0] ?? "0-0", messages: reply?.[1] ?? [] };
+  }
+
   private async loop() {
     const consumer = `settlement-${process.pid}`;
-    // 크래시 전 미ack 메시지부터 처리 (멱등하므로 그대로 재처리)
-    let cursor: string = "0";
+    let claimCursor = "0-0";
+    let lastClaimAt = 0;
+
     while (this.running) {
+      if (Date.now() - lastClaimAt >= CLAIM_INTERVAL_MS) {
+        try {
+          const claimed = await this.reclaimPending(consumer, claimCursor);
+          claimCursor = claimed.nextCursor;
+          await this.processMessages(claimed.messages);
+        } catch (e) {
+          if (!this.running) return;
+          console.error("[settlement] xautoclaim error, retrying", e);
+        }
+        lastClaimAt = Date.now();
+      }
+
       let reply: StreamReply = null;
       try {
         reply = (await this.stream.xreadgroup(
           "GROUP", CONSUMER_GROUPS.SETTLEMENT, consumer,
           "COUNT", 100,
           "BLOCK", 5000,
-          "STREAMS", STREAMS.TRADES, cursor,
+          "STREAMS", STREAMS.TRADES, ">",
         )) as StreamReply;
       } catch (e) {
         if (!this.running) return;
@@ -68,26 +122,7 @@ export class SettlementConsumer implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
-      const messages = reply?.[0]?.[1] ?? [];
-      if (cursor === "0" && messages.length === 0) {
-        cursor = ">"; // pending 소진 → 라이브 소비로 전환
-        continue;
-      }
-
-      for (const [id, fields] of messages) {
-        const idx = fields.indexOf("payload");
-        if (idx >= 0) {
-          const ev = JSON.parse(fields[idx + 1]) as TradeStreamEvent;
-          try {
-            if (ev.topic === "trade.executed") await this.settleTrade(ev);
-            else if (ev.topic === "order.closed") await this.closeOrder(ev);
-          } catch (e) {
-            // 멱등 테이블이 있으므로 로그 후 ack (poison 방지)
-            console.error(`[settlement] event failed (ack & skip) ${ev.eventId}`, e);
-          }
-        }
-        await this.stream.xack(STREAMS.TRADES, CONSUMER_GROUPS.SETTLEMENT, id);
-      }
+      await this.processMessages(reply?.[0]?.[1] ?? []);
     }
   }
 
@@ -162,24 +197,22 @@ export class SettlementConsumer implements OnModuleInit, OnModuleDestroy {
 
       // 주문 진행 상태 갱신 (종결은 order.closed가 담당)
       for (const order of [buyOrder, sellOrder]) {
-        const filled = order.filledQty + ev.qty;
+        const next = stateAfterTrade(order, ev.qty);
         await ctx.tx.order.update({
           where: { id: order.id },
-          data: {
-            filledQty: filled,
-            status: order.status === "OPEN" || order.status === "PARTIAL"
-              ? (filled >= order.qty ? "FILLED" : "PARTIAL")
-              : order.status,
-          },
+          data: next,
         });
       }
       return true;
     });
 
+    // Candles are rebuilt from durable trades, so this is safe on a redelivery
+    // even when the balance transaction was already committed.
+    await this.updateMarket(ev);
+
     if (!settled) return;
 
-    // 락 밖: 시세/캔들 반영 + 실시간 알림
-    await this.updateMarket(ev);
+    // 락 밖: 실시간 알림
     this.realtime.notifyAccount(ev.buyerAccountId, { type: "account_update" });
     this.realtime.notifyAccount(ev.sellerAccountId, { type: "account_update" });
   }
@@ -188,18 +221,30 @@ export class SettlementConsumer implements OnModuleInit, OnModuleDestroy {
     await this.mutator.withAccountLock([ev.accountId], async (ctx) => {
       const dup = await ctx.tx.processedEvent.findUnique({ where: { eventId: ev.eventId } });
       if (dup) return;
-      await ctx.tx.processedEvent.create({ data: { eventId: ev.eventId } });
 
       const order = await ctx.tx.order.findUnique({ where: { id: ev.orderId } });
+      // A different settlement consumer can receive a later close message
+      // while this order's earlier trade messages are still committing.  Do
+      // not mark the event processed or release a reservation in that window;
+      // keeping it pending lets XAUTOCLAIM retry it after the fills are durable.
+      if (order && closeMustWaitForTrades(order, ev)) {
+        throw new Error(
+          `order.closed is ahead of settled fills for ${ev.orderId}: ${ev.filledQty}/${order.filledQty}`,
+        );
+      }
+
+      await ctx.tx.processedEvent.create({ data: { eventId: ev.eventId } });
       if (!order) return;
-      if (["CANCELED", "REJECTED"].includes(order.status)) return;
+      // 이미 종결됐거나, 현재 정산 수량보다 오래된 close 이벤트는 예약금을 다시 풀면 안 된다.
+      const next = stateAfterClose(order, ev);
+      if (!next) return;
 
       await ctx.tx.order.update({
         where: { id: ev.orderId },
-        data: { status: ev.status, filledQty: ev.filledQty },
+        data: { status: next.status, filledQty: next.filledQty },
       });
 
-      const remainingQty = order.qty - ev.filledQty;
+      const remainingQty = next.remainingQty;
       if (remainingQty <= 0) return;
 
       if (ev.side === "BUY") {
@@ -225,38 +270,27 @@ export class SettlementConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   private async updateMarket(ev: TradeExecutedEvent) {
-    await this.prisma.marketSymbol.update({
-      where: { symbol: ev.symbol },
-      data: { lastPrice: ev.price },
-    });
-
     const bucket = new Date(Math.floor(ev.ts / 60_000) * 60_000);
-    const existing = await this.prisma.candle.findUnique({
-      where: { symbol_interval_ts: { symbol: ev.symbol, interval: "1m", ts: bucket } },
+    const bucketEnd = new Date(bucket.getTime() + 60_000);
+    const trades = await this.prisma.trade.findMany({
+      where: {
+        symbol: ev.symbol,
+        createdAt: { gte: bucket, lt: bucketEnd },
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
-    if (existing) {
-      await this.prisma.candle.update({
-        where: { symbol_interval_ts: { symbol: ev.symbol, interval: "1m", ts: bucket } },
-        data: {
-          high: Math.max(existing.high, ev.price),
-          low: Math.min(existing.low, ev.price),
-          close: ev.price,
-          volume: existing.volume + BigInt(ev.qty),
-        },
-      });
-    } else {
-      await this.prisma.candle.create({
-        data: {
-          symbol: ev.symbol,
-          interval: "1m",
-          ts: bucket,
-          open: ev.price,
-          high: ev.price,
-          low: ev.price,
-          close: ev.price,
-          volume: BigInt(ev.qty),
-        },
-      });
-    }
+    if (trades.length === 0) return;
+
+    const open = trades[0].price;
+    const close = trades[trades.length - 1].price;
+    const high = Math.max(...trades.map((trade) => trade.price));
+    const low = Math.min(...trades.map((trade) => trade.price));
+    const volume = trades.reduce((total, trade) => total + BigInt(trade.qty), 0n);
+
+    await this.prisma.candle.upsert({
+      where: { symbol_interval_ts: { symbol: ev.symbol, interval: "1m", ts: bucket } },
+      update: { open, high, low, close, volume },
+      create: { symbol: ev.symbol, interval: "1m", ts: bucket, open, high, low, close, volume },
+    });
   }
 }

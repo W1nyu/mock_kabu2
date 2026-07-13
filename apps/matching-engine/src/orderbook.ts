@@ -66,6 +66,14 @@ export function createBook(symbol: string, lastPrice: number | null = null): Ord
   return { symbol, bids: [], asks: [], lastPrice, seq: 0 };
 }
 
+/**
+ * 프로세스 재시작 시 DB 주문 상태가 정산 이벤트보다 늦을 수 있다. 이미 기록된 체결 수량도
+ * 함께 고려해, 완료된 주문을 다시 호가창에 올리지 않는다.
+ */
+export function remainingRestingQty(totalQty: number, persistedFilledQty: number, recordedTradeQty: number): number {
+  return Math.max(0, totalQty - Math.max(persistedFilledQty, recordedTradeQty));
+}
+
 /** 정렬 기준을 지키며 삽입: bids는 가격 내림차순, asks는 오름차순, 동가는 seq 오름차순 */
 function insertResting(book: Orderbook, order: RestingOrder): void {
   const list = order.side === "BUY" ? book.bids : book.asks;
@@ -95,6 +103,21 @@ export function applyOrder(book: Orderbook, incoming: IncomingOrder): MatchResul
 
   while (remaining > 0 && opposite.length > 0 && crosses(opposite[0])) {
     const maker = opposite[0];
+    // Never let a bot (or user) execute against its own resting order. Cancel
+    // the incoming remainder rather than skipping past the quote: skipping
+    // would violate price priority and letting a crossing LIMIT rest would
+    // leave an executable self-cross on the book.
+    if (maker.accountId === incoming.accountId) {
+      result.canceledQty = remaining;
+      result.closedOrders.push({
+        orderId: incoming.orderId,
+        accountId: incoming.accountId,
+        side: incoming.side,
+        filledQty: incoming.qty - remaining,
+        status: "CANCELED",
+      });
+      return result;
+    }
     const qty = Math.min(remaining, maker.qty);
 
     result.fills.push({

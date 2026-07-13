@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, getToken, getUser, won } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 
@@ -29,17 +29,82 @@ interface SymbolRow {
   lastPrice: number;
   initialPrice: number;
 }
+interface MarketSummary {
+  turnover: number | string | null;
+  lastTradeTs: number | string | null;
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+interface TradeTick {
+  id: string;
+  price: number;
+  qty: number;
+  ts: number;
+}
+
+function parseTradeTick(data: any): TradeTick | null {
+  const price = finiteNumber(data?.price);
+  const qty = finiteNumber(data?.qty);
+  const ts = finiteNumber(data?.ts);
+  if (price == null || qty == null || ts == null || qty < 0) return null;
+  const id = typeof data?.tradeId === "string" ? data.tradeId : `${ts}:${price}:${qty}`;
+  return { id, price, qty, ts };
+}
+
+function formatTurnoverManWon(turnover: number | undefined): string {
+  if (turnover == null || !Number.isFinite(turnover)) return "—";
+  return `${fmt.format(Math.round(turnover / 10_000))}만 원`;
+}
 
 export default function DashboardPage() {
   const router = useRouter();
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
   const [symbols, setSymbols] = useState<SymbolRow[]>([]);
+  const [livePrices, setLivePrices] = useState<Record<string, number>>({});
+  const [turnovers, setTurnovers] = useState<Record<string, number>>({});
+  const turnoverWatermarksRef = useRef(new Map<string, number>());
+  const pendingTurnoverTicksRef = useRef(new Map<string, Map<string, TradeTick>>());
 
-  const refresh = useCallback(() => {
+  const refreshAccount = useCallback(() => {
     api<AccountInfo>("/account").then(setAccount).catch(() => {});
     api<HoldingRow[]>("/account/holdings").then(setHoldings).catch(() => {});
-    api<SymbolRow[]>("/market/symbols", { auth: false }).then(setSymbols).catch(() => {});
+  }, []);
+
+  const refreshSymbols = useCallback(() => {
+    api<SymbolRow[]>("/market/symbols", { auth: false })
+      .then(async (rows) => {
+        setSymbols(rows);
+        const summaries = await Promise.all(
+          rows.map(async ({ symbol }) => ({
+            symbol,
+            summary: await api<MarketSummary>(`/market/summary/${symbol}`, { auth: false }),
+          })),
+        );
+
+        const nextTurnovers: Record<string, number> = {};
+        for (const { symbol, summary } of summaries) {
+          const watermark = finiteNumber(summary.lastTradeTs) ?? Number.NEGATIVE_INFINITY;
+          const pending = pendingTurnoverTicksRef.current.get(symbol);
+          let pendingTurnover = 0;
+          if (pending) {
+            for (const [id, tick] of pending) {
+              if (tick.ts > watermark) pendingTurnover += tick.price * tick.qty;
+              else pending.delete(id);
+            }
+          }
+          nextTurnovers[symbol] = Math.max(0, finiteNumber(summary.turnover) ?? 0) + pendingTurnover;
+          turnoverWatermarksRef.current.set(symbol, watermark);
+        }
+        // 스냅샷과 동시에 도착한 tick은 watermark 뒤의 것만 다시 더한다.
+        setTurnovers(() => nextTurnovers);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -47,22 +112,83 @@ export default function DashboardPage() {
       router.push("/login");
       return;
     }
-    refresh();
-    const interval = setInterval(refresh, 5000);
+    refreshAccount();
+    refreshSymbols();
     const user = getUser();
     const unsub = user
-      ? subscribe([`account:${user.accountId}`], () => refresh())
+      ? subscribe([`account:${user.accountId}`], () => refreshAccount())
       : () => {};
+    // WebSocket push가 주 경로이며, 재연결 사이에 놓친 이벤트는 느린 폴백으로 보정한다.
+    const fallback = window.setInterval(() => {
+      refreshAccount();
+      refreshSymbols();
+    }, 15_000);
     return () => {
-      clearInterval(interval);
+      window.clearInterval(fallback);
       unsub();
     };
-  }, [refresh, router]);
+  }, [refreshAccount, refreshSymbols, router]);
 
-  const stockValue = holdings.reduce((sum, h) => sum + h.value, 0);
+  useEffect(() => {
+    const channels = symbols.map(({ symbol }) => `trades:${symbol}`);
+    if (channels.length === 0) return;
+
+    return subscribe(channels, ({ channel, data }) => {
+      const tick = parseTradeTick(data);
+      if (!tick) return;
+      const symbol = channel.slice("trades:".length);
+      let pending = pendingTurnoverTicksRef.current.get(symbol);
+      if (!pending) {
+        pending = new Map();
+        pendingTurnoverTicksRef.current.set(symbol, pending);
+      }
+      if (pending.has(tick.id)) return;
+      pending.set(tick.id, tick);
+
+      setLivePrices((current) =>
+        current[symbol] === tick.price ? current : { ...current, [symbol]: tick.price },
+      );
+
+      const watermark = turnoverWatermarksRef.current.get(symbol);
+      if (watermark == null || tick.ts > watermark) {
+        setTurnovers((current) => ({
+          ...current,
+          [symbol]: (current[symbol] ?? 0) + tick.price * tick.qty,
+        }));
+      }
+    });
+  }, [symbols]);
+
+  const liveSymbols = useMemo(
+    () =>
+      symbols.map((symbol) => ({
+        ...symbol,
+        lastPrice: livePrices[symbol.symbol] ?? symbol.lastPrice,
+        turnover: turnovers[symbol.symbol],
+      })),
+    [livePrices, symbols, turnovers],
+  );
+  const liveHoldings = useMemo(
+    () =>
+      holdings.map((holding) => {
+        const lastPrice = livePrices[holding.symbol] ?? holding.lastPrice;
+        const value = lastPrice * holding.qty;
+        const pnl = value - holding.costBasis;
+        return {
+          ...holding,
+          lastPrice,
+          value,
+          pnl,
+          pnlRate: holding.costBasis > 0 ? pnl / holding.costBasis : 0,
+        };
+      }),
+    [holdings, livePrices],
+  );
+
+  const stockValue = liveHoldings.reduce((sum, h) => sum + h.value, 0);
   const total = (account?.balance ?? 0) + stockValue;
-  const totalCost = holdings.reduce((sum, h) => sum + h.costBasis, 0);
-  const totalPnl = holdings.reduce((sum, h) => sum + h.pnl, 0);
+  const totalCost = liveHoldings.reduce((sum, h) => sum + h.costBasis, 0);
+  const totalPnl = liveHoldings.reduce((sum, h) => sum + h.pnl, 0);
   const totalPnlRate = totalCost > 0 ? totalPnl / totalCost : 0;
 
   return (
@@ -90,13 +216,19 @@ export default function DashboardPage() {
             <thead className="bg-neutral-900 text-left text-neutral-400">
               <tr>
                 <th className="px-4 py-2">종목</th>
+                <th className="px-4 py-2 text-right" title="모의 시장 시작 기준가">
+                  기준가(시가)
+                </th>
                 <th className="px-4 py-2 text-right">현재가</th>
-                <th className="px-4 py-2 text-right">기준가 대비</th>
+                <th className="px-4 py-2 text-right">등락률</th>
+                <th className="px-4 py-2 text-right" title="KST 당일 누적 체결 금액을 만 원 단위로 표시">
+                  거래대금 (만 원)
+                </th>
                 <th className="px-4 py-2" />
               </tr>
             </thead>
             <tbody>
-              {symbols.map((s) => {
+              {liveSymbols.map((s) => {
                 const change = ((s.lastPrice - s.initialPrice) / s.initialPrice) * 100;
                 return (
                   <tr key={s.symbol} className="border-t border-neutral-800 hover:bg-neutral-900">
@@ -104,11 +236,22 @@ export default function DashboardPage() {
                       <span className="font-semibold">{s.symbol}</span>{" "}
                       <span className="text-neutral-400">{s.name}</span>
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums">{fmt.format(s.lastPrice)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-neutral-300">
+                      {fmt.format(s.initialPrice)}원
+                    </td>
                     <td
-                      className={`px-4 py-2 text-right tabular-nums ${change >= 0 ? "text-red-400" : "text-blue-400"}`}
+                      className={`px-4 py-2 text-right tabular-nums font-medium ${change > 0 ? "text-red-400" : change < 0 ? "text-blue-400" : ""}`}
                     >
-                      {change >= 0 ? "▲" : "▼"} {Math.abs(change).toFixed(2)}%
+                      {fmt.format(s.lastPrice)}원
+                    </td>
+                    <td
+                      className={`px-4 py-2 text-right tabular-nums ${change > 0 ? "text-red-400" : change < 0 ? "text-blue-400" : "text-neutral-400"}`}
+                    >
+                      {change > 0 ? "+" : ""}
+                      {change.toFixed(2)}%
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-neutral-200">
+                      {formatTurnoverManWon(s.turnover)}
                     </td>
                     <td className="px-4 py-2 text-right">
                       <Link
@@ -147,7 +290,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {holdings.map((h) => (
+                {liveHoldings.map((h) => (
                   <tr key={h.symbol} className="border-t border-neutral-800">
                     <td className="px-4 py-2 font-semibold">
                       <Link href={`/symbol/${h.symbol}`} className="hover:text-amber-400">

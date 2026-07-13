@@ -9,6 +9,8 @@ import {
   LineSeries,
   type IChartApi,
   type ISeriesApi,
+  type MouseEventParams,
+  type PriceFormatCustom,
   type UTCTimestamp,
 } from "lightweight-charts";
 import { api } from "@/lib/api";
@@ -30,6 +32,13 @@ interface Candle {
   low: number;
   close: number;
   volume: number;
+}
+
+interface HoveredCandle {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
 }
 
 // 한국 관례: 상승=빨강, 하락=파랑 (양극 인코딩, dataviz 규칙: 텍스트는 뉴트럴 잉크)
@@ -81,10 +90,40 @@ function volumeColor(c: Candle): string {
   return c.close >= c.open ? "rgba(239, 68, 68, 0.45)" : "rgba(59, 130, 246, 0.45)";
 }
 
+function asHoveredCandle(value: unknown): HoveredCandle | null {
+  if (typeof value !== "object" || value == null) return null;
+  const data = value as Partial<HoveredCandle>;
+  if (![data.open, data.high, data.low, data.close].every(Number.isFinite)) return null;
+  return { open: data.open!, high: data.high!, low: data.low!, close: data.close! };
+}
+
+function sameCandle(a: HoveredCandle | null, b: HoveredCandle | null): boolean {
+  return a === b || (!!a && !!b && a.open === b.open && a.high === b.high && a.low === b.low && a.close === b.close);
+}
+
+function percentFromOpen(price: number, open: number): number {
+  return open > 0 ? ((price - open) / open) * 100 : 0;
+}
+
+function formatPercent(value: number): string {
+  // Avoid a visually noisy "-0.00%" when the difference is smaller than the display precision.
+  const normalized = Math.abs(value) < 0.005 ? 0 : value;
+  return `${normalized > 0 ? "+" : ""}${normalized.toFixed(2)}%`;
+}
+
+const priceFormatter = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
+const chartPriceFormat: PriceFormatCustom = {
+  type: "custom",
+  minMove: 1,
+  formatter: (price) => priceFormatter.format(price),
+};
+
 export default function CandleChart({ symbol }: { symbol: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candlesRef = useRef<Candle[]>([]);
+  const hoveredCandleRef = useRef<HoveredCandle | null>(null);
+  const hoveredTimeRef = useRef<UTCTimestamp | null>(null);
   const seriesRef = useRef<{
     candle: ISeriesApi<"Candlestick">;
     volume: ISeriesApi<"Histogram">;
@@ -95,6 +134,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
   // SSR과 첫 클라이언트 렌더를 기본값으로 일치시키고(hydration mismatch 방지),
   // localStorage 값은 마운트 후에 반영한다
   const [indicators, setIndicators] = useState<IndicatorState>(DEFAULT_STATE);
+  const [hoveredCandle, setHoveredCandle] = useState<HoveredCandle | null>(null);
   const indicatorsRef = useRef(indicators);
   indicatorsRef.current = indicators;
 
@@ -111,6 +151,10 @@ export default function CandleChart({ symbol }: { symbol: string }) {
 
   useEffect(() => {
     if (!containerRef.current) return;
+
+    hoveredCandleRef.current = null;
+    hoveredTimeRef.current = null;
+    setHoveredCandle(null);
 
     const chart = createChart(containerRef.current, {
       autoSize: true,
@@ -134,6 +178,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       borderDownColor: DOWN,
       wickUpColor: UP,
       wickDownColor: DOWN,
+      priceFormat: chartPriceFormat,
     });
     // 거래량: 차트 하단 20%를 쓰는 별도 스케일의 히스토그램
     const volume = chart.addSeries(HistogramSeries, {
@@ -144,7 +189,12 @@ export default function CandleChart({ symbol }: { symbol: string }) {
     });
     chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 
-    const lineOpts = { lineWidth: 1, priceLineVisible: false, lastValueVisible: false } as const;
+    const lineOpts = {
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceFormat: chartPriceFormat,
+    } as const;
     const sma50 = chart.addSeries(LineSeries, { ...lineOpts, color: "#22c55e" });
     const sma200 = chart.addSeries(LineSeries, { ...lineOpts, color: "#ef4444" });
     const vwma100 = chart.addSeries(LineSeries, { ...lineOpts, color: "#f5f5f5" });
@@ -159,6 +209,27 @@ export default function CandleChart({ symbol }: { symbol: string }) {
     vwma100.applyOptions({ visible: vis.vwma100 });
     volume.applyOptions({ visible: vis.volume });
 
+    const setCrosshairCandle = (next: HoveredCandle | null) => {
+      if (sameCandle(hoveredCandleRef.current, next)) return;
+      hoveredCandleRef.current = next;
+      setHoveredCandle(next);
+    };
+
+    // `seriesData` makes the crosshair value agree exactly with the rendered candle,
+    // including a still-forming realtime candle. This deliberately stays independent
+    // from the WebSocket subscription below.
+    const handleCrosshairMove = (param: MouseEventParams) => {
+      const candleData = asHoveredCandle(param.seriesData.get(candle));
+      if (!param.point || !candleData || typeof param.time !== "number") {
+        hoveredTimeRef.current = null;
+        setCrosshairCandle(null);
+        return;
+      }
+      hoveredTimeRef.current = param.time as UTCTimestamp;
+      setCrosshairCandle(candleData);
+    };
+    chart.subscribeCrosshairMove(handleCrosshairMove);
+
     /** 마지막 캔들 기준으로 각 지표의 최신 포인트만 갱신 */
     const updateIndicatorsAtLast = () => {
       const cs = candlesRef.current;
@@ -172,6 +243,10 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       if (s200 != null) sma200.update({ time, value: s200 });
       if (v100 != null) vwma100.update({ time, value: v100 });
       volume.update({ time, value: cs[i].volume, color: volumeColor(cs[i]) });
+
+      // Keep the readout accurate when a user is holding the crosshair over the
+      // live candle and trades continue to update its high/low/close values.
+      if (hoveredTimeRef.current === time) setCrosshairCandle(cs[i]);
     };
 
     api<CandleDto[]>(`/market/candles/${symbol}?interval=1m&limit=500`, { auth: false })
@@ -223,6 +298,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
 
     return () => {
       unsub();
+      chart.unsubscribeCrosshairMove(handleCrosshairMove);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -262,7 +338,39 @@ export default function CandleChart({ symbol }: { symbol: string }) {
           </button>
         ))}
       </div>
-      <div ref={containerRef} className="h-80 w-full" />
+      <div className="relative">
+        <div ref={containerRef} className="h-80 w-full" />
+        {hoveredCandle && <OhlcReadout candle={hoveredCandle} />}
+      </div>
+    </div>
+  );
+}
+
+function OhlcReadout({ candle }: { candle: HoveredCandle }) {
+  const values = [
+    { label: "시", value: candle.open },
+    { label: "고", value: candle.high },
+    { label: "저", value: candle.low },
+    { label: "종", value: candle.close },
+  ];
+
+  return (
+    <div
+      aria-live="polite"
+      className="pointer-events-none absolute left-2 top-2 z-10 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-neutral-700/80 bg-neutral-950/85 px-2 py-1 text-[11px] tabular-nums shadow-sm backdrop-blur-sm sm:gap-x-3 sm:text-xs"
+      data-testid="chart-ohlc-readout"
+    >
+      {values.map(({ label, value }) => {
+        const rate = percentFromOpen(value, candle.open);
+        const tone = rate > 0 ? "text-red-400" : rate < 0 ? "text-blue-400" : "text-neutral-300";
+        return (
+          <span key={label} className="whitespace-nowrap text-neutral-300">
+            <span className="mr-1 text-neutral-500">{label}</span>
+            {priceFormatter.format(value)}
+            <span className={`ml-1 ${tone}`}>({formatPercent(rate)})</span>
+          </span>
+        );
+      })}
     </div>
   );
 }

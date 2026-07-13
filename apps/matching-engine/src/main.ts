@@ -9,6 +9,11 @@ const GROUP = CONSUMER_GROUPS.MATCHING;
 const CONSUMER = `engine-${process.pid}`;
 
 type StreamReply = [key: string, messages: [id: string, fields: string[]][]][] | null;
+type StreamMessages = [id: string, fields: string[]][];
+type AutoClaimReply = [nextId: string, messages: StreamMessages, deletedIds: string[]];
+
+const CLAIM_IDLE_MS = 30_000;
+const CLAIM_INTERVAL_MS = 5_000;
 
 function parseMessages(reply: StreamReply): { id: string; ev: OrderStreamEvent }[] {
   if (!reply) return [];
@@ -24,6 +29,36 @@ function parseMessages(reply: StreamReply): { id: string; ev: OrderStreamEvent }
   return out;
 }
 
+async function processMessages(
+  stream: Redis,
+  engine: MatchingEngine,
+  messages: { id: string; ev: OrderStreamEvent }[],
+) {
+  for (const { id, ev } of messages) {
+    try {
+      await engine.handleEvent(ev);
+      await stream.xack(STREAMS.ORDERS, GROUP, id);
+    } catch (e) {
+      // DB/Redis 실패는 ACK하지 않는다. 다음 XAUTOCLAIM이 동일 eventId를 다시
+      // 전달하고, engine의 durable claim이 중복 체결 없이 안전하게 재시도한다.
+      console.error(`[engine] event failed (retained for retry) ${ev.eventId}`, e);
+    }
+  }
+}
+
+async function reclaimPending(stream: Redis, consumer: string, cursor: string) {
+  const reply = (await stream.xautoclaim(
+    STREAMS.ORDERS,
+    GROUP,
+    consumer,
+    CLAIM_IDLE_MS,
+    cursor,
+    "COUNT",
+    100,
+  )) as unknown as AutoClaimReply;
+  return { nextCursor: reply?.[0] ?? "0-0", messages: reply?.[1] ?? [] };
+}
+
 async function main() {
   const prisma = getPrisma();
   const stream = new Redis(REDIS_URL);
@@ -31,6 +66,9 @@ async function main() {
 
   const engine = new MatchingEngine(prisma, stream, publisher);
   await engine.bootstrap();
+  await engine.flushSettlementOutbox().catch((e) =>
+    console.error("[engine] settlement outbox bootstrap relay", e),
+  );
 
   try {
     await stream.xgroup("CREATE", STREAMS.ORDERS, GROUP, "0", "MKSTREAM");
@@ -38,34 +76,31 @@ async function main() {
     if (!String(e).includes("BUSYGROUP")) throw e;
   }
 
-  // 1) 크래시 전 전달됐지만 ack되지 않은 메시지 재처리 (멱등 가드 적용)
-  while (true) {
-    const reply = (await stream.xreadgroup(
-      "GROUP", GROUP, CONSUMER,
-      "COUNT", 100,
-      "STREAMS", STREAMS.ORDERS, "0",
-    )) as StreamReply;
-    const msgs = parseMessages(reply);
-    if (msgs.length === 0) break;
-    for (const { id, ev } of msgs) {
-      try {
-        await engine.handleEvent(ev, true);
-      } catch (e) {
-        console.error(`[engine] redelivered event failed (ack & skip) ${ev.eventId}`, e);
-      }
-      await stream.xack(STREAMS.ORDERS, GROUP, id);
-    }
-  }
-
-  // 2) 늦게 구독한 클라이언트를 위한 주기적 스냅샷 재발행
+  // 1) 늦게 구독한 클라이언트를 위한 주기적 스냅샷 재발행
   setInterval(() => {
+    engine.flushSettlementOutbox().catch((e) => console.error("[engine] settlement outbox relay", e));
     engine.publishAllSnapshots().catch((e) => console.error("[engine] snapshot publish", e));
   }, 1000);
 
   console.log(`[engine] consuming ${STREAMS.ORDERS} as ${GROUP}/${CONSUMER}`);
 
-  // 3) 라이브 소비 루프 — 심볼별 single-writer (스펙 3.2)
+  // 2) 라이브 소비 루프 — 심볼별 single-writer (스펙 3.2)
+  // XREADGROUP ... 0 은 현재 consumer 자신의 pending만 읽기 때문에, 재시작으로
+  // consumer 이름(PID)이 바뀐 PEL은 XAUTOCLAIM으로 회수해야 한다.
+  let claimCursor = "0-0";
+  let lastClaimAt = 0;
   while (true) {
+    if (Date.now() - lastClaimAt >= CLAIM_INTERVAL_MS) {
+      try {
+        const claimed = await reclaimPending(stream, CONSUMER, claimCursor);
+        claimCursor = claimed.nextCursor;
+        await processMessages(stream, engine, parseMessages([[STREAMS.ORDERS, claimed.messages]]));
+      } catch (e) {
+        console.error("[engine] xautoclaim error, retrying", e);
+      }
+      lastClaimAt = Date.now();
+    }
+
     let reply: StreamReply = null;
     try {
       reply = (await stream.xreadgroup(
@@ -80,15 +115,7 @@ async function main() {
       continue;
     }
 
-    for (const { id, ev } of parseMessages(reply)) {
-      try {
-        await engine.handleEvent(ev, false);
-      } catch (e) {
-        // poison 메시지로 인한 무한 재전달을 막기 위해 로그 후 ack
-        console.error(`[engine] event failed (ack & skip) ${ev.eventId}`, e);
-      }
-      await stream.xack(STREAMS.ORDERS, GROUP, id);
-    }
+    await processMessages(stream, engine, parseMessages(reply));
   }
 }
 
