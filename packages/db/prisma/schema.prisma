@@ -1,0 +1,192 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["auth", "account", "order", "matching", "market"]
+}
+
+// ── auth ──────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  nickname     String
+  isBot        Boolean  @default(false) @map("is_bot")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+  @@schema("auth")
+}
+
+// ── account ───────────────────────────────────────────
+
+model Account {
+  id         String   @id @default(uuid())
+  userId     String   @unique @map("user_id")
+  balance    BigInt   @default(0)
+  holdAmount BigInt   @default(0) @map("hold_amount")
+  version    Int      @default(0)
+  /// 분산 락 fencing token — 뒤처진(락을 잃은) 프로세스의 쓰기를 거부하는 단조 증가 값
+  fencingToken BigInt @default(0) @map("fencing_token")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  holdings Holding[]
+  ledger   LedgerEntry[]
+
+  @@map("accounts")
+  @@schema("account")
+}
+
+model Holding {
+  id        String @id @default(uuid())
+  accountId String @map("account_id")
+  symbol    String
+  qty       Int    @default(0)
+  holdQty   Int    @default(0) @map("hold_qty")
+  /// 총 매입원가(원). 평단가 = costBasis / qty. 매수 시 체결금액만큼 증가, 매도 시 비례 차감
+  costBasis BigInt @default(0) @map("cost_basis")
+  version   Int    @default(0)
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@unique([accountId, symbol])
+  @@map("holdings")
+  @@schema("account")
+}
+
+/// append-only 현금 원장: sum(delta) == accounts.balance 가 항상 성립해야 한다
+model LedgerEntry {
+  id           BigInt   @id @default(autoincrement())
+  accountId    String   @map("account_id")
+  delta        BigInt
+  balanceAfter BigInt   @map("balance_after")
+  reason       String // SIGNUP_BONUS | TRANSFER_IN | TRANSFER_OUT | TRADE_BUY | TRADE_SELL | SEED
+  refId        String?  @map("ref_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@map("ledger_entries")
+  @@schema("account")
+}
+
+/// 이벤트 중복 소비 방지 (정산 멱등성)
+model ProcessedEvent {
+  eventId     String   @id @map("event_id")
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("processed_events")
+  @@schema("account")
+}
+
+// ── order ─────────────────────────────────────────────
+
+model Order {
+  id        String   @id @default(uuid())
+  accountId String   @map("account_id")
+  symbol    String
+  side      String // BUY | SELL
+  type      String // LIMIT | MARKET
+  price     Int?
+  qty       Int
+  filledQty Int      @default(0) @map("filled_qty")
+  status    String   @default("OPEN") // OPEN | PARTIAL | FILLED | CANCELED | REJECTED
+  /// BUY: 홀드한 현금 단가 (LIMIT=지정가, MARKET=추정가). SELL: 0 (수량은 holdings.hold_qty로 홀드)
+  holdPerUnit BigInt @default(0) @map("hold_per_unit")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([accountId, createdAt])
+  @@index([symbol, status])
+  @@map("orders")
+  @@schema("order")
+}
+
+/// Transactional Outbox — orders와 동일 트랜잭션으로 커밋, relayer가 발행
+model Outbox {
+  eventId     String    @id @map("event_id")
+  topic       String
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at")
+  publishedAt DateTime? @map("published_at")
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox")
+  @@schema("order")
+}
+
+// ── matching ──────────────────────────────────────────
+
+model Trade {
+  id              String   @id @default(uuid())
+  symbol          String
+  price           Int
+  qty             Int
+  buyOrderId      String   @map("buy_order_id")
+  sellOrderId     String   @map("sell_order_id")
+  buyerAccountId  String   @map("buyer_account_id")
+  sellerAccountId String   @map("seller_account_id")
+  takerSide       String   @map("taker_side") // BUY | SELL
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([symbol, createdAt])
+  @@map("trades")
+  @@schema("matching")
+}
+
+/// matching-engine의 orders stream 중복 소비 방지. Redis Streams와 order outbox는
+/// at-least-once이므로, 체결 원장과 같은 DB 트랜잭션에서 event_id를 claim한다.
+model MatchingProcessedOrderEvent {
+  eventId     String   @id @map("event_id")
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("processed_order_events")
+  @@schema("matching")
+}
+
+/// 매칭 원장과 같은 트랜잭션으로 기록하는 정산 이벤트 outbox.
+/// Redis XADD 전 프로세스가 종료돼도 publishedAt IS NULL 행을 다시 발행할 수 있다.
+model MatchingOutboxEvent {
+  id          BigInt    @id @default(autoincrement())
+  eventId     String    @unique @map("event_id")
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at")
+  publishedAt DateTime? @map("published_at")
+
+  @@index([publishedAt, id])
+  @@map("outbox_events")
+  @@schema("matching")
+}
+
+// ── market ────────────────────────────────────────────
+
+model MarketSymbol {
+  symbol       String @id
+  name         String
+  initialPrice Int    @map("initial_price")
+  tickSize     Int    @map("tick_size")
+  lastPrice    Int    @map("last_price")
+
+  @@map("symbols")
+  @@schema("market")
+}
+
+model Candle {
+  symbol   String
+  interval String // "1m"
+  ts       DateTime
+  open     Int
+  high     Int
+  low      Int
+  close    Int
+  volume   BigInt @default(0)
+
+  @@id([symbol, interval, ts])
+  @@map("candles")
+  @@schema("market")
+}

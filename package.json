@@ -1,0 +1,23 @@
+{
+  "name": "mock-kabu",
+  "private": true,
+  "version": "0.1.0",
+  "description": "가상 투자·체결 엔진 — 로컬 모의 거래소",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "db:migrate": "pnpm --filter @mock-kabu/db migrate:deploy",
+    "db:seed": "pnpm --filter @mock-kabu/db seed",
+    "check:consistency": "pnpm --filter @mock-kabu/db check:consistency",
+    "recover:settlement": "pnpm --filter @mock-kabu/db recover:settlement"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
+  },
+  "packageManager": "pnpm@11.11.0",
+  "engines": {
+    "node": ">=22"
+  }
+}

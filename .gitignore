@@ -1,0 +1,18 @@
+node_modules/
+.pnpm-store/
+dist/
+.next/
+.turbo/
+*.log
+.env
+.DS_Store
+coverage/
+*.tsbuildinfo
+# 브라우저 에러 붙여넣기용 스크래치
+error.md
+
+# 개인 로컬 설정
+.claude/settings.local.json
+
+# 비파괴 로컬 재시드 전 PostgreSQL 포렌식 백업
+tmp/*.dump
