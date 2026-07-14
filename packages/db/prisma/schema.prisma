@@ -163,6 +163,15 @@ model MatchingOutboxEvent {
   @@schema("matching")
 }
 
+model MatchingClosedOrderMarker {
+  orderId   String   @id @map("order_id")
+  eventId   String   @unique @map("event_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("closed_order_markers")
+  @@schema("matching")
+}
+
 // ── market ────────────────────────────────────────────
 
 model MarketSymbol {

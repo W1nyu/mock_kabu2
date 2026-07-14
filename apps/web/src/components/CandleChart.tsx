@@ -55,7 +55,7 @@ const INDICATORS = [
 type IndicatorKey = (typeof INDICATORS)[number]["key"];
 type IndicatorState = Record<IndicatorKey, boolean>;
 
-const STORAGE_KEY = "chart:indicators";
+const STORAGE_KEY = "mock-kabu2:chart:indicators";
 const DEFAULT_STATE: IndicatorState = { sma50: true, sma200: true, vwma100: true, volume: true };
 
 function loadIndicatorState(): IndicatorState {

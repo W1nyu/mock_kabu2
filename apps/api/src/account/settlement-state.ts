@@ -28,13 +28,19 @@ export function closeMustWaitForTrades(
  */
 export function stateAfterTrade(order: SettlementOrderState, fillQty: number) {
   const active = isActive(order.status);
-  const filledQty = active ? order.filledQty + fillQty : Math.max(order.filledQty, fillQty);
-  if (active && filledQty > order.qty) {
+  // settleTrade wraps every financial mutation in one database transaction.
+  // A late trade after a terminal close must fail so that transaction rolls
+  // back instead of consuming an already-released reservation a second time.
+  if (!active) {
+    throw new Error(`late trade targets terminal order: ${order.status}`);
+  }
+  const filledQty = order.filledQty + fillQty;
+  if (filledQty > order.qty) {
     throw new Error(`overfill detected for order: ${filledQty}/${order.qty}`);
   }
   return {
     filledQty,
-    status: active ? (filledQty >= order.qty ? "FILLED" : "PARTIAL") : order.status,
+    status: filledQty >= order.qty ? "FILLED" : "PARTIAL",
   };
 }
 

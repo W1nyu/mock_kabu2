@@ -1,11 +1,14 @@
 {
-  "name": "mock-kabu",
+  "name": "mock-kabu2",
   "private": true,
   "version": "0.1.0",
   "description": "가상 투자·체결 엔진 — 로컬 모의 거래소",
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
+    "infra:up": "docker compose --project-name mock-kabu2 up -d",
+    "infra:stop": "docker compose --project-name mock-kabu2 stop",
+    "infra:down": "docker compose --project-name mock-kabu2 down",
     "test": "turbo run test",
     "db:migrate": "pnpm --filter @mock-kabu/db migrate:deploy",
     "db:seed": "pnpm --filter @mock-kabu/db seed",

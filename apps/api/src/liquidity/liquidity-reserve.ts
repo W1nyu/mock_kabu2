@@ -55,5 +55,5 @@ export function liquidityReserves(): LiquidityReserve[] {
  * set a narrower LIQUIDITY_BOOTSTRAP_TOKEN explicitly.
  */
 export function liquidityBootstrapToken(): string {
-  return process.env.LIQUIDITY_BOOTSTRAP_TOKEN ?? process.env.JWT_SECRET ?? "local-dev-secret-change-me";
+  return process.env.LIQUIDITY_BOOTSTRAP_TOKEN ?? process.env.JWT_SECRET ?? "mock-kabu2-local-dev-secret";
 }

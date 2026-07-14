@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { REDIS_NAMESPACE } from "@mock-kabu/shared";
 import { createCounters } from "./counters";
 import { FencingError, LockTimeoutError } from "./errors";
 import type {
@@ -30,8 +31,8 @@ end
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const lockKey = (accountId: string) => `lock:account:${accountId}`;
-const fenceKey = (accountId: string) => `fence:account:${accountId}`;
+const lockKey = (accountId: string) => `${REDIS_NAMESPACE}:lock:account:${accountId}`;
+const fenceKey = (accountId: string) => `${REDIS_NAMESPACE}:fence:account:${accountId}`;
 
 /**
  * ③ Redis 분산 락 (스펙 4.2):

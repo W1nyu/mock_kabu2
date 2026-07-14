@@ -24,7 +24,7 @@ describe("DistributedMutator", () => {
 
     await mutator.withAccountLock([A], async (ctx) => {
       // 임계 구역 안에서는 redis에 락 키가 존재
-      expect(redis.data.has(`lock:account:${A}`)).toBe(true);
+      expect(redis.data.has(`mock-kabu2:lock:account:${A}`)).toBe(true);
       const acc = ctx.accounts[A];
       await ctx.updateAccount(A, {
         balance: acc.balance - 500n,
@@ -33,7 +33,7 @@ describe("DistributedMutator", () => {
     });
 
     expect(store.accounts.get(A)!.balance).toBe(500n);
-    expect(redis.data.has(`lock:account:${A}`)).toBe(false);
+    expect(redis.data.has(`mock-kabu2:lock:account:${A}`)).toBe(false);
   });
 
   test("동시 접근은 락으로 직렬화된다 (증분 유실 없음)", async () => {

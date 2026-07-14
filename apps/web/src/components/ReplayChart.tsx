@@ -55,7 +55,7 @@ interface HoveredCandle {
 
 const UP = "#ef4444";
 const DOWN = "#3b82f6";
-const STORAGE_KEY = "replay:chart:indicators";
+const STORAGE_KEY = "mock-kabu2:replay:chart:indicators";
 const INDICATORS = [
   { key: "sma50", label: "50 SMA", color: "#22c55e" },
   { key: "sma200", label: "200 SMA", color: "#ef4444" },

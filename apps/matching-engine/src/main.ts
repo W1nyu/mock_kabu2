@@ -4,7 +4,7 @@ import { CONSUMER_GROUPS, STREAMS, type OrderStreamEvent } from "@mock-kabu/shar
 import Redis from "ioredis";
 import { MatchingEngine } from "./engine";
 
-const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
+const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:56379";
 const GROUP = CONSUMER_GROUPS.MATCHING;
 const CONSUMER = `engine-${process.pid}`;
 

@@ -1,8 +1,8 @@
 import type { OrderSide, OrderType, OrderbookSnapshot } from "@mock-kabu/shared";
 
-const BASE = process.env.BOT_API_URL ?? "http://localhost:4000";
+const BASE = process.env.BOT_API_URL ?? "http://localhost:4100";
 const LIQUIDITY_BOOTSTRAP_TOKEN =
-  process.env.LIQUIDITY_BOOTSTRAP_TOKEN ?? process.env.JWT_SECRET ?? "local-dev-secret-change-me";
+  process.env.LIQUIDITY_BOOTSTRAP_TOKEN ?? process.env.JWT_SECRET ?? "mock-kabu2-local-dev-secret";
 
 export interface LiveOrder {
   id: string;

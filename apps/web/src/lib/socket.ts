@@ -18,7 +18,7 @@ function reauthenticate(token: string | null) {
 }
 
 if (typeof window !== "undefined") {
-  window.addEventListener("mock-kabu:session-change", () => reauthenticate(getToken()));
+  window.addEventListener("mock-kabu2:session-change", () => reauthenticate(getToken()));
 }
 
 export function getSocket(): Socket {

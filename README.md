@@ -7,7 +7,7 @@
 ## 아키텍처
 
 ```
-apps/web (Next.js :3000) ──REST/WebSocket──> apps/api (NestJS :4000)
+apps/web (Next.js :3100) ──REST/WebSocket──> apps/api (NestJS :4100)
                                               ├─ auth/account/order/market/admin 모듈
                                               ├─ outbox relayer ──> Redis Streams(orders)
                                               └─ 정산 컨슈머 <── Redis Streams(trades)
@@ -36,9 +36,10 @@ pnpm install
 
 # 2. 환경변수 파일 생성 (기본값 그대로 사용 가능)
 cp .env.example .env
+cp packages/db/.env.example packages/db/.env
 
 # 3. 인프라 (PostgreSQL + Redis)
-docker compose up -d
+pnpm infra:up
 
 # 4. DB 마이그레이션 + 시드 (종목 5개, 봇 계정 10개) — 최초 1회만
 pnpm db:migrate
@@ -48,7 +49,7 @@ pnpm db:seed
 pnpm dev
 ```
 
-→ http://localhost:3000 접속 → 회원가입(가상 현금 1,000만원 지급) → 종목 선택 → 매수/매도.
+→ http://localhost:3100 접속 → 회원가입(가상 현금 1,000만원 지급) → 종목 선택 → 매수/매도.
 
 ### 실제 과거 시세 리플레이
 
@@ -75,7 +76,7 @@ pnpm dev
 DB 데이터는 Docker 볼륨에 보존되므로 마이그레이션/시드 없이 두 명령이면 됩니다:
 
 ```bash
-docker compose up -d   # PostgreSQL + Redis 기동 (이미 떠 있으면 그대로 통과)
+pnpm infra:up          # mock_kabu2 전용 PostgreSQL + Redis 기동
 pnpm dev               # 전체 앱 기동
 ```
 
@@ -85,7 +86,7 @@ pnpm dev               # 전체 앱 기동
 # 1. 앱 종료: pnpm dev 실행 중인 터미널에서 Ctrl+C
 
 # 2. 인프라 종료 (데이터는 볼륨에 유지됨)
-docker compose stop
+pnpm infra:stop
 ```
 
 ```bash
@@ -96,11 +97,11 @@ wsl --shutdown   # vmmemWSL 종료
 DB/Redis 데이터까지 완전히 초기화하려면:
 
 ```bash
-docker compose down -v   # 컨테이너 + 볼륨 삭제
+docker compose --project-name mock-kabu2 down -v   # mock_kabu2 컨테이너 + 볼륨만 삭제
 ```
 
 
-이후 다시 실행할 때는 최초 실행처럼 `docker compose up -d` → `pnpm db:migrate` → `pnpm db:seed`부터 진행합니다.
+이후 다시 실행할 때는 최초 실행처럼 `pnpm infra:up` → `pnpm db:migrate` → `pnpm db:seed`부터 진행합니다.
 
 ### 손상된 로컬 거래 데이터 복구
 
@@ -121,8 +122,8 @@ pnpm check:consistency
 로컬 개발 환경에서는 다음 초기화·시드 절차로 깨끗한 시장 상태를 다시 만들 수 있습니다.
 
 ```bash
-docker compose down -v
-docker compose up -d
+docker compose --project-name mock-kabu2 down -v
+pnpm infra:up
 pnpm db:migrate
 pnpm db:seed
 pnpm check:consistency
@@ -138,7 +139,7 @@ pnpm check:consistency
 | `pessimistic` (기본) | `SELECT ... FOR UPDATE` 원시 SQL, 계좌 ID 오름차순 잠금, lock_timeout |
 | `distributed` | Redis `SET NX PX` + Lua 해제 + **fencing token**으로 좀비 쓰기 방어 |
 
-현재 전략·충돌/재시도 카운터는 http://localhost:3000/admin (동시성 실험 관전 모드)에서 실시간 확인.
+현재 전략·충돌/재시도 카운터는 http://localhost:3100/admin (동시성 실험 관전 모드)에서 실시간 확인.
 
 ## 검증
 

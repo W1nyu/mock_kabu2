@@ -8,7 +8,7 @@ import {
 } from "./settlement-recovery-plan";
 
 const APPLY_CONFIRMATION = "RECOVER_UNSETTLED_TRADES";
-const RECOVERY_ADVISORY_LOCK = "mock-kabu:settlement-recovery";
+const RECOVERY_ADVISORY_LOCK = "mock-kabu2:settlement-recovery";
 
 type Tx = any;
 

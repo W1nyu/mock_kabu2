@@ -37,7 +37,7 @@ export class SettlementConsumer implements OnModuleInit, OnModuleDestroy {
     @Inject(BALANCE_MUTATOR) private mutator: BalanceMutator,
     private realtime: RealtimeGateway,
   ) {
-    this.stream = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+    this.stream = new Redis(process.env.REDIS_URL ?? "redis://localhost:56379");
   }
 
   async onModuleInit() {

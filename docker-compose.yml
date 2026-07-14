@@ -1,27 +1,29 @@
+name: mock-kabu2
+
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: mock-kabu-postgres
+    container_name: mock-kabu2-postgres
     environment:
-      POSTGRES_USER: kabu
-      POSTGRES_PASSWORD: kabu
-      POSTGRES_DB: mock_kabu
+      POSTGRES_USER: kabu2
+      POSTGRES_PASSWORD: kabu2
+      POSTGRES_DB: mock_kabu2
     ports:
-      - "5432:5432"
+      - "55432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kabu -d mock_kabu"]
+      test: ["CMD-SHELL", "pg_isready -U kabu2 -d mock_kabu2"]
       interval: 5s
       timeout: 3s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: mock-kabu-redis
+    container_name: mock-kabu2-redis
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "56379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -32,4 +34,10 @@ services:
 
 volumes:
   pgdata:
+    name: mock-kabu2-pgdata
   redisdata:
+    name: mock-kabu2-redisdata
+
+networks:
+  default:
+    name: mock-kabu2-network

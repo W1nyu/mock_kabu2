@@ -20,33 +20,51 @@ export const SYMBOLS: SymbolDef[] = [
 ];
 
 /** Redis Streams 키 */
+export const REDIS_NAMESPACE = "mock-kabu2";
+
+const redisKey = (key: string) => `${REDIS_NAMESPACE}:${key}`;
+const PUBLIC_CHANNEL_PREFIXES = ["orderbook:", "trades:", "account:"] as const;
+
 export const STREAMS = {
   /** order-service → matching-engine (주문 접수/취소) */
-  ORDERS: "streams:orders",
+  ORDERS: redisKey("streams:orders"),
   /** matching-engine → account 정산 컨슈머 (체결/주문 종료) */
-  TRADES: "streams:trades",
+  TRADES: redisKey("streams:trades"),
 } as const;
 
 /** Redis Pub/Sub 채널 */
 export const CHANNELS = {
   /** 심볼별 호가 스냅샷: orderbook:{symbol} */
-  orderbook: (symbol: string) => `orderbook:${symbol}`,
+  orderbook: (symbol: string) => redisKey(`orderbook:${symbol}`),
   /** 심볼별 체결: trades:{symbol} */
-  trades: (symbol: string) => `trades:${symbol}`,
+  trades: (symbol: string) => redisKey(`trades:${symbol}`),
   /** 계정별 잔액/주문 변경 알림: account:{accountId} */
-  account: (accountId: string) => `account:${accountId}`,
+  account: (accountId: string) => redisKey(`account:${accountId}`),
 } as const;
+
+export const REDIS_CHANNEL_PATTERNS = {
+  orderbook: redisKey("orderbook:*"),
+  trades: redisKey("trades:*"),
+} as const;
+
+/** Converts a namespaced Redis channel to the public Socket room name. */
+export function toSocketChannel(redisChannel: string): string | null {
+  const prefix = `${REDIS_NAMESPACE}:`;
+  if (!redisChannel.startsWith(prefix)) return null;
+  const channel = redisChannel.slice(prefix.length);
+  return PUBLIC_CHANNEL_PREFIXES.some((candidate) => channel.startsWith(candidate)) ? channel : null;
+}
 
 /** Redis 캐시 키 */
 export const KEYS = {
   /** 최신 호가 스냅샷 JSON — REST 초기 로딩용 */
-  orderbookSnapshot: (symbol: string) => `snapshot:orderbook:${symbol}`,
+  orderbookSnapshot: (symbol: string) => redisKey(`snapshot:orderbook:${symbol}`),
 } as const;
 
 /** 컨슈머 그룹 이름 */
 export const CONSUMER_GROUPS = {
-  MATCHING: "matching-engine",
-  SETTLEMENT: "settlement",
+  MATCHING: redisKey("matching-engine"),
+  SETTLEMENT: redisKey("settlement"),
 } as const;
 
 /** 시장가 매수 주문의 잔액 홀드 안전 계수 (최근가 * qty * 계수) */

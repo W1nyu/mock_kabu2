@@ -47,6 +47,43 @@ describe("matching engine restart recovery", () => {
     expect(book.bids).toEqual([]);
   });
 
+  test("bootstrap skips an OPEN row with a durable close marker before settlement", async () => {
+    const prisma = {
+      marketSymbol: {
+        findMany: async () => [{ symbol: "KABU", lastPrice: 100 }],
+        update: async () => undefined,
+      },
+      order: {
+        findMany: async () => [
+          {
+            id: "closing-sell",
+            accountId: "seller",
+            symbol: "KABU",
+            side: "SELL",
+            type: "LIMIT",
+            price: 100,
+            qty: 10,
+            filledQty: 0,
+            createdAt: new Date(),
+          },
+        ],
+      },
+      matchingClosedOrderMarker: {
+        findMany: async () => [{ orderId: "closing-sell" }],
+      },
+      trade: {
+        findFirst: async () => null,
+        groupBy: async () => [],
+      },
+    };
+    const engine = new MatchingEngine(prisma as any, {} as any, {} as any);
+
+    await engine.bootstrap();
+
+    const book = (engine as any).books.get("KABU");
+    expect(book.asks).toEqual([]);
+  });
+
   test("bootstrap restores the orderbook and last_price cache from the newest trade", async () => {
     const cacheRepairs: unknown[] = [];
     const prisma = {
@@ -446,12 +483,18 @@ describe("matching engine restart recovery", () => {
     const publishedPayloads: string[] = [];
     const claimedEventIds = new Set<string>();
     const outboxRows: { id: bigint; eventId: string; payload: unknown; publishedAt: Date | null }[] = [];
+    const closeMarkers = new Map<string, string>();
     const tx = {
       $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
         const eventId = values[0] as string;
         if (claimedEventIds.has(eventId)) return [];
         claimedEventIds.add(eventId);
         return [{ event_id: eventId }];
+      },
+      matchingClosedOrderMarker: {
+        upsert: async ({ create }: { create: { orderId: string; eventId: string } }) => {
+          if (!closeMarkers.has(create.orderId)) closeMarkers.set(create.orderId, create.eventId);
+        },
       },
       matchingOutboxEvent: {
         create: async ({ data }: any) => {
@@ -513,6 +556,7 @@ describe("matching engine restart recovery", () => {
     await engine.handleEvent(cancel);
     expect((engine as any).books.get("KABU").bids).toEqual([]);
     expect(outboxRows[0].publishedAt).toBeNull();
+    expect(closeMarkers.get("buy-1")).toBe(outboxRows[0].eventId);
 
     await engine.flushSettlementOutbox();
     expect(closePublishAttempts).toBe(2);

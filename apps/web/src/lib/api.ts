@@ -1,4 +1,8 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4100";
+
+const TOKEN_KEY = "mock-kabu2:token";
+const USER_KEY = "mock-kabu2:user";
+const SESSION_CHANGE_EVENT = "mock-kabu2:session-change";
 
 export interface SessionUser {
   userId: string;
@@ -9,28 +13,28 @@ export interface SessionUser {
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("mk_token");
+  return localStorage.getItem(TOKEN_KEY);
 }
 
 export function getUser(): SessionUser | null {
   if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem("mk_user");
+  const raw = localStorage.getItem(USER_KEY);
   return raw ? (JSON.parse(raw) as SessionUser) : null;
 }
 
 function notifySessionChange() {
-  if (typeof window !== "undefined") window.dispatchEvent(new Event("mock-kabu:session-change"));
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
 }
 
 export function saveSession(token: string, user: SessionUser) {
-  localStorage.setItem("mk_token", token);
-  localStorage.setItem("mk_user", JSON.stringify(user));
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
   notifySessionChange();
 }
 
 export function clearSession() {
-  localStorage.removeItem("mk_token");
-  localStorage.removeItem("mk_user");
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
   notifySessionChange();
 }
 

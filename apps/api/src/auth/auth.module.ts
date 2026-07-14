@@ -8,7 +8,7 @@ import { JwtAuthGuard } from "./jwt-auth.guard";
   imports: [
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET ?? "local-dev-secret-change-me",
+      secret: process.env.JWT_SECRET ?? "mock-kabu2-local-dev-secret",
       signOptions: { expiresIn: "7d" },
     }),
   ],

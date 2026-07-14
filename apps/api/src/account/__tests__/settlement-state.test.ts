@@ -35,11 +35,10 @@ describe("settlement order state", () => {
     ).toBe(false);
   });
 
-  test("keeps terminal close-first state from double-counting a later trade event", () => {
-    expect(stateAfterTrade({ status: "FILLED", qty: 10, filledQty: 10 }, 5)).toEqual({
-      status: "FILLED",
-      filledQty: 10,
-    });
+  test("rejects a late trade after a terminal close so settlement rolls back", () => {
+    expect(() => stateAfterTrade({ status: "FILLED", qty: 10, filledQty: 10 }, 5)).toThrow(
+      "late trade targets terminal order",
+    );
   });
 
   test("rejects an overfill while the order is active", () => {

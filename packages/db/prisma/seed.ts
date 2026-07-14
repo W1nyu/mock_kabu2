@@ -6,8 +6,50 @@ const prisma = new PrismaClient();
 
 const BOT_COUNT = 10;
 export const BOT_PASSWORD = "botpassword";
+const ADMIN_EMAIL = "admin@admin";
+const ADMIN_NICKNAME = "admin";
+const ADMIN_PASSWORD = "admin";
+const ADMIN_INITIAL_CASH = 10_000_000_000_000_000n;
 const BOT_INITIAL_CASH = 1_000_000_000n; // 봇당 10억
 const BOT_INITIAL_QTY = 50_000; // 봇당 종목별 5만 주
+
+async function ensureAdminAccount() {
+  const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+  const created = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.upsert({
+      where: { email: ADMIN_EMAIL },
+      update: {
+        passwordHash,
+        nickname: ADMIN_NICKNAME,
+        isBot: false,
+      },
+      create: {
+        email: ADMIN_EMAIL,
+        passwordHash,
+        nickname: ADMIN_NICKNAME,
+        isBot: false,
+      },
+    });
+
+    const existingAccount = await tx.account.findUnique({ where: { userId: user.id } });
+    if (existingAccount) return false;
+
+    const account = await tx.account.create({
+      data: { userId: user.id, balance: ADMIN_INITIAL_CASH },
+    });
+    await tx.ledgerEntry.create({
+      data: {
+        accountId: account.id,
+        delta: ADMIN_INITIAL_CASH,
+        balanceAfter: ADMIN_INITIAL_CASH,
+        reason: "SEED",
+      },
+    });
+    return true;
+  });
+
+  console.log(created ? `admin created: ${ADMIN_EMAIL}` : `admin ensured: ${ADMIN_EMAIL}`);
+}
 
 async function main() {
   // 종목
@@ -25,6 +67,8 @@ async function main() {
     });
   }
   console.log(`symbols: ${SYMBOLS.length} upserted`);
+
+  await ensureAdminAccount();
 
   // 봇 유저/계좌/보유자산
   const passwordHash = await bcrypt.hash(BOT_PASSWORD, 10);

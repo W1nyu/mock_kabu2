@@ -8,8 +8,8 @@
 
 pnpm + turbo 모노레포. 로컬 모의 거래소:
 
-- `apps/web` — Next.js 15 (:3000), Tailwind, lightweight-charts
-- `apps/api` — NestJS (:4000), REST + socket.io 게이트웨이, 정산 컨슈머
+- `apps/web` — Next.js 15 (:3100), Tailwind, lightweight-charts
+- `apps/api` — NestJS (:4100), REST + socket.io 게이트웨이, 정산 컨슈머
 - `apps/matching-engine` — Redis Streams 소비 → 오더북 매칭 (single-writer)
 - `apps/bots` — 봇 10계정 상시 거래 (마켓메이커/노이즈/모멘텀)
 - `packages/shared` — 타입·이벤트 스키마·채널 상수 / `packages/db` — Prisma / `packages/concurrency` — 락 전략 3종
@@ -17,7 +17,7 @@ pnpm + turbo 모노레포. 로컬 모의 거래소:
 ## 명령어
 
 ```bash
-docker compose up -d      # PostgreSQL + Redis (선행 필수)
+pnpm infra:up             # mock_kabu2 전용 PostgreSQL + Redis (선행 필수)
 pnpm dev                  # 전체 기동 (turbo)
 pnpm test                 # 단위 테스트 (vitest)
 pnpm check:consistency    # DB 정합성 검사

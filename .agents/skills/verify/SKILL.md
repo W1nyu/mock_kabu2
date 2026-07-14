@@ -1,22 +1,22 @@
 ---
 name: verify
-description: mock_kabu 변경 검증 — 앱 기동/접속/실시간 흐름 관찰 레시피
+description: mock_kabu2 변경 검증 — 독립 포트 기동/접속/실시간 흐름 관찰 레시피
 ---
 
-# mock_kabu 검증 레시피
+# mock_kabu2 검증 레시피
 
 ## 기동 확인 (이미 떠 있으면 그대로 사용)
 
 ```bash
-curl -s -o /dev/null -w "web:%{http_code}\n" http://localhost:3000 --max-time 3
-curl -s -o /dev/null -w "api:%{http_code}\n" http://localhost:4000/market/symbols --max-time 3
+curl -s -o /dev/null -w "web:%{http_code}\n" http://localhost:3100 --max-time 3
+curl -s -o /dev/null -w "api:%{http_code}\n" http://localhost:4100/market/symbols --max-time 3
 ```
 
-안 떠 있으면: `docker compose up -d` → `pnpm dev` (백그라운드). 웹 :3000, api :4000.
+안 떠 있으면: `pnpm infra:up` → `pnpm dev` (백그라운드). 웹 :3100, api :4100.
 
 ## 접속·인증
 
-- 브라우저(Codex in Chrome)로 http://localhost:3000 접속. localStorage 토큰이 남아 있으면 이미 로그인 상태.
+- 브라우저(Codex in Chrome)로 http://localhost:3100 접속. localStorage 토큰이 남아 있으면 이미 로그인 상태.
 - 로그인 필요 시 봇 계정 사용: `bot1@bots.local` / `botpassword` (회원가입 불필요).
 - 종목: KABU, MOCK, NEKO, SAKU, TANU → 거래 페이지는 `/symbol/{심볼}`.
 

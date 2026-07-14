@@ -11,7 +11,13 @@ import {
 } from "@nestjs/websockets";
 import type Redis from "ioredis";
 import type { Server, Socket } from "socket.io";
+import { REDIS_CHANNEL_PATTERNS, toSocketChannel } from "@mock-kabu/shared";
 import { REDIS_SUB } from "../core/tokens";
+
+const WEB_ORIGINS = (process.env.WEB_ORIGIN ?? "http://localhost:3100,http://127.0.0.1:3100")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 /**
  * 실시간 채널 중계:
@@ -19,7 +25,7 @@ import { REDIS_SUB } from "../core/tokens";
  *  - account:{accountId} : 인증된 본인만 구독 가능, 잔액/주문 변경 알림
  */
 @Injectable()
-@WebSocketGateway({ cors: { origin: true } })
+@WebSocketGateway({ cors: { origin: WEB_ORIGINS, credentials: true } })
 export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
   @WebSocketServer()
   server: Server;
@@ -30,12 +36,14 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
   ) {}
 
   afterInit() {
-    this.sub.psubscribe("orderbook:*", "trades:*").catch((e) => {
+    this.sub.psubscribe(REDIS_CHANNEL_PATTERNS.orderbook, REDIS_CHANNEL_PATTERNS.trades).catch((e) => {
       console.error("[gateway] psubscribe failed", e);
     });
     this.sub.on("pmessage", (_pattern, channel, message) => {
       try {
-        this.server.to(channel).emit("message", { channel, data: JSON.parse(message) });
+        const socketChannel = toSocketChannel(channel);
+        if (!socketChannel) return;
+        this.server.to(socketChannel).emit("message", { channel: socketChannel, data: JSON.parse(message) });
       } catch (e) {
         console.error("[gateway] relay failed", e);
       }

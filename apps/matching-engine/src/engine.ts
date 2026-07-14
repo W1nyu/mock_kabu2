@@ -133,7 +133,33 @@ export class MatchingEngine {
     return symbolByAccountId;
   }
 
-  /** 심볼 로드 + 미체결(OPEN/PARTIAL) 주문 리플레이로 오더북 복원 */
+  /**
+   * `order.closed` is durable in the matching outbox before the asynchronous
+   * account consumer turns the order row terminal. During that gap this marker
+   * is the authoritative signal that the order must never re-enter a book.
+   * The delegate guard keeps older lightweight unit-test fakes compatible;
+   * production Prisma always provides it after the accompanying migration.
+   */
+  private async durableCloseMarkerIds(orderIds: Iterable<string>): Promise<Set<string>> {
+    const ids = [...new Set(orderIds)];
+    if (ids.length === 0 || !this.prisma.matchingClosedOrderMarker) return new Set();
+    const rows = await this.prisma.matchingClosedOrderMarker.findMany({
+      where: { orderId: { in: ids } },
+      select: { orderId: true },
+    });
+    return new Set(rows.map((row) => row.orderId));
+  }
+
+  /** Remove orders a different/stale engine instance has already closed. */
+  private async pruneDurablyClosedOrders(book: Orderbook): Promise<boolean> {
+    const markerIds = await this.durableCloseMarkerIds([...book.bids, ...book.asks].map((order) => order.orderId));
+    let changed = false;
+    for (const orderId of markerIds) {
+      if (cancelOrder(book, orderId)) changed = true;
+    }
+    return changed;
+  }
+
   async bootstrap(): Promise<void> {
     const symbols = await this.prisma.marketSymbol.findMany();
     const restoredSymbols = await Promise.all(
@@ -172,6 +198,8 @@ export class MatchingEngine {
       }),
       this.dedicatedReserveAccountSymbols(),
     ]);
+    const closePendingIds = await this.durableCloseMarkerIds(open.map((order) => order.id));
+    const replayableOpen = open.filter((order) => !closePendingIds.has(order.id));
     // A reserve row is trusted only when the account belongs to the exact
     // bot16..bot20 identity and the order is for that account's one assigned
     // symbol.  Replaying those intact ladders first establishes a non-crossed
@@ -180,9 +208,12 @@ export class MatchingEngine {
     // repair or mutation of historical orders.
     const isDedicatedReserveOrder = (order: { accountId: string; symbol: string }) =>
       reserveAccountSymbols.get(order.accountId) === order.symbol;
-    const reserveOpen = open.filter(isDedicatedReserveOrder);
-    const replayOrder = [...reserveOpen, ...open.filter((order) => !isDedicatedReserveOrder(order))];
-    const orderIds = open.map((order) => order.id);
+    const reserveOpen = replayableOpen.filter(isDedicatedReserveOrder);
+    const replayOrder = [
+      ...reserveOpen,
+      ...replayableOpen.filter((order) => !isDedicatedReserveOrder(order)),
+    ];
+    const orderIds = replayableOpen.map((order) => order.id);
     const [buyFills, sellFills] = orderIds.length
       ? await Promise.all([
           this.prisma.trade.groupBy({
@@ -237,7 +268,7 @@ export class MatchingEngine {
       book.asks.sort((a, b) => a.price - b.price || a.seq - b.seq);
     }
     console.log(
-      `[engine] bootstrap: ${symbols.length} symbols, ${replayed}/${open.length} open orders replayed (${reserveReplayed}/${reserveOpen.length} dedicated reserve rows first; ${skippedCompleted} already matched, ${quarantinedCrossed} crossed rows quarantined in-memory), ${restoredSymbols.filter((symbol) => symbol.hadTrade).length} prices restored from trades (${stalePriceCaches.length} cache repairs)`,
+      `[engine] bootstrap: ${symbols.length} symbols, ${replayed}/${replayableOpen.length} replayable open orders (${closePendingIds.size} close-pending skipped; ${reserveReplayed}/${reserveOpen.length} dedicated reserve rows first; ${skippedCompleted} already matched, ${quarantinedCrossed} crossed rows quarantined in-memory), ${restoredSymbols.filter((symbol) => symbol.hadTrade).length} prices restored from trades (${stalePriceCaches.length} cache repairs)`,
     );
   }
 
@@ -247,6 +278,7 @@ export class MatchingEngine {
    * eventId를 다시 발행할 수 있으므로, 전달 방식과 무관하게 항상 확인한다.
    */
   private async alreadyApplied(ev: OrderStreamEvent): Promise<boolean> {
+    if ((await this.durableCloseMarkerIds([ev.orderId])).has(ev.orderId)) return true;
     if (ev.topic === "order.cancel.requested") {
       const order = await this.prisma.order.findUnique({ where: { id: ev.orderId } });
       return order == null || !["OPEN", "PARTIAL"].includes(order.status);
@@ -395,6 +427,16 @@ export class MatchingEngine {
 
   private async persistSettlementEvents(tx: any, events: TradeStreamEvent[]): Promise<void> {
     for (const event of events) {
+      if (event.topic === "order.closed" && tx.matchingClosedOrderMarker) {
+        // Keep the marker and settlement outbox in this same transaction. A
+        // retry may describe the same order again, but its first terminal
+        // decision remains authoritative while settlement is catching up.
+        await tx.matchingClosedOrderMarker.upsert({
+          where: { orderId: event.orderId },
+          create: { orderId: event.orderId, eventId: event.eventId },
+          update: {},
+        });
+      }
       await tx.matchingOutboxEvent.create({
         data: {
           eventId: event.eventId,
@@ -540,6 +582,13 @@ export class MatchingEngine {
     if (!book) {
       console.warn(`[engine] unknown symbol: ${ev.symbol}`);
       return;
+    }
+
+    // A former engine can retain a book row after another instance has
+    // durably closed it. Remove those rows before any incoming order is
+    // matched, so a stale in-memory book cannot revive a canceled order.
+    if (await this.pruneDurablyClosedOrders(book)) {
+      await this.publishSnapshot(book);
     }
 
     if (this.seenEventIds.has(ev.eventId)) {

@@ -5,7 +5,7 @@ import type { LockStrategy } from "@mock-kabu/shared";
 import Redis from "ioredis";
 import { BALANCE_MUTATOR, PRISMA, REDIS, REDIS_SUB } from "./tokens";
 
-const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
+const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:56379";
 
 @Global()
 @Module({
