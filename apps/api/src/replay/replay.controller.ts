@@ -1,5 +1,5 @@
 import { BadRequestException, Controller, Get, Param, Query } from "@nestjs/common";
-import { REPLAY_RANGES, type ReplayRange, type ReplaySourcePreference } from "./replay.types";
+import { REPLAY_RANGES, type ReplayRange } from "./replay.types";
 import { ReplayService } from "./replay.service";
 
 @Controller("replay")
@@ -20,9 +20,8 @@ export class ReplayController {
   candles(
     @Param("datasetId") datasetId: string,
     @Query("range") range?: string,
-    @Query("source") source?: string,
   ) {
-    return this.replay.candles(datasetId, parseRange(range), parseSource(source));
+    return this.replay.candles(datasetId, parseRange(range));
   }
 }
 
@@ -32,12 +31,4 @@ function parseRange(value: string | undefined): ReplayRange {
     throw new BadRequestException(`range must be one of: ${REPLAY_RANGES.join(", ")}`);
   }
   return range as ReplayRange;
-}
-
-function parseSource(value: string | undefined): ReplaySourcePreference {
-  const source = value ?? "auto";
-  if (source !== "auto" && source !== "fixture") {
-    throw new BadRequestException("source must be auto or fixture");
-  }
-  return source;
 }

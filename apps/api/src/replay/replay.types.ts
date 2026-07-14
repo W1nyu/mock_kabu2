@@ -14,14 +14,12 @@ export interface ReplayCandle {
 }
 
 /**
- * Daily-history windows accepted by the isolated historical-data adapters.
- * `max` means the provider's available listing history, not an assurance that
- * every instrument has data for the same number of years.
+ * Replay windows are expressed as exact daily-candle counts. The lab has a
+ * deliberately fixed maximum of three calendar years (1,095 candles), so a
+ * selected window always has the same length for every replay ticker.
  */
-export const REPLAY_RANGES = ["1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "max"] as const;
+export const REPLAY_RANGES = ["1mo", "3mo", "6mo", "1y", "2y", "3y"] as const;
 export type ReplayRange = (typeof REPLAY_RANGES)[number];
-
-export type ReplaySourcePreference = "auto" | "fixture";
 
 export interface ReplayDataset {
   id: string;
@@ -30,20 +28,16 @@ export interface ReplayDataset {
   exchange: string;
   currency: string;
   priceScale: number;
-  fallbackFixture?: string;
 }
 
 export interface ReplaySourceMeta {
-  /** Provider names are intentionally extensible for user-authorized local data. */
+  /** The replay runtime always serves this bundled, deterministic data source. */
   provider: string;
   label: string;
-  sourceUrl: string;
-  /** Null when the user is responsible for the rights of a local file. */
+  sourceUrl: string | null;
   termsUrl: string | null;
-  fetchedAt: string;
-  cacheHit: boolean;
-  isFallback: boolean;
-  /** Deliberately surfaced so a UI cannot present it as a licensed live feed. */
+  /** Fixed-data release timestamp, not an external request time. */
+  fixedAt: string;
   notice: string;
 }
 
@@ -62,25 +56,6 @@ export interface ReplayCandlesResponse {
 
 export interface ReplayCatalogEntry extends ReplayDataset {
   defaultRange: ReplayRange;
-  availableSources: ReplaySourcePreference[];
-  cacheTtlSeconds: number;
+  maxCandleCount: number;
   notice: string;
-  dataSourceConfiguration: {
-    localCsvConfigured: boolean;
-    alphaVantageConfigured: boolean;
-    /** Local user-authorized data wins before an outbound API request. */
-    priority: readonly ["local-csv", "alpha-vantage-daily", "bundled-fixture"];
-    longHistoryNotice: string;
-  };
-}
-
-/** Normalized, non-secret result returned by an isolated historical adapter. */
-export interface ReplayHistoricalSourceResult {
-  provider: string;
-  label: string;
-  sourceUrl: string;
-  termsUrl: string | null;
-  notice: string;
-  currency: string;
-  candles: ReplayCandle[];
 }

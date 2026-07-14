@@ -12,7 +12,59 @@ interface Tick {
   ts: number;
 }
 
+interface TradeRow {
+  id: string;
+  price: number;
+  qty: number;
+  takerSide: "BUY" | "SELL";
+  createdAt: string;
+}
+
 const tradeGridColumns = "grid-cols-[7rem_3.5rem_minmax(0,1fr)]";
+const MAX_TICKS = 30;
+
+/** REST 스냅샷과 재전송될 수 있는 실시간 체결을 합쳐도 tradeId는 한 번만 유지한다. */
+function mergeTicks(...sources: Tick[][]): Tick[] {
+  const seen = new Set<string>();
+
+  return sources
+    .flat()
+    .filter((tick) => {
+      if (seen.has(tick.tradeId)) return false;
+      seen.add(tick.tradeId);
+      return true;
+    })
+    .sort((left, right) => right.ts - left.ts)
+    .slice(0, MAX_TICKS);
+}
+
+function toSnapshotTick(row: TradeRow): Tick {
+  return {
+    tradeId: row.id,
+    price: row.price,
+    qty: row.qty,
+    takerSide: row.takerSide,
+    ts: new Date(row.createdAt).getTime(),
+  };
+}
+
+function parseLiveTick(data: unknown): Tick | null {
+  if (!data || typeof data !== "object") return null;
+  const tick = data as Partial<Tick>;
+
+  if (
+    typeof tick.tradeId !== "string" ||
+    tick.tradeId.length === 0 ||
+    !Number.isFinite(tick.price) ||
+    !Number.isFinite(tick.qty) ||
+    !Number.isFinite(tick.ts) ||
+    (tick.takerSide !== "BUY" && tick.takerSide !== "SELL")
+  ) {
+    return null;
+  }
+
+  return tick as Tick;
+}
 
 /** 항상 같은 폭의 HH:mm:ss로 만들어 체결 행의 열 정렬을 유지한다. */
 function formatTradeTime(ts: number) {
@@ -28,29 +80,29 @@ export default function TradesFeed({ symbol }: { symbol: string }) {
   const [ticks, setTicks] = useState<Tick[]>([]);
 
   useEffect(() => {
-    api<{ id: string; price: number; qty: number; takerSide: "BUY" | "SELL"; createdAt: string }[]>(
-      `/market/trades/${symbol}?limit=30`,
-      { auth: false },
-    )
-      .then((rows) =>
-        setTicks(
-          rows.map((r) => ({
-            tradeId: r.id,
-            price: r.price,
-            qty: r.qty,
-            takerSide: r.takerSide,
-            ts: new Date(r.createdAt).getTime(),
-          })),
-        ),
-      )
+    let active = true;
+    setTicks([]);
+
+    const unsubscribe = subscribe([`trades:${symbol}`], ({ data }) => {
+      const tick = parseLiveTick(data);
+      if (!tick) return;
+
+      // outbox 재시도나 재연결로 같은 체결이 다시 오더라도 key가 중복되지 않게 한다.
+      setTicks((previous) => mergeTicks([tick], previous));
+    });
+
+    api<TradeRow[]>(`/market/trades/${symbol}?limit=${MAX_TICKS}`, { auth: false })
+      .then((rows) => {
+        if (!active) return;
+        // REST 요청과 소켓 수신이 겹칠 수 있으므로 기존 실시간 체결과 병합한다.
+        setTicks((previous) => mergeTicks(previous, rows.map(toSnapshotTick)));
+      })
       .catch(() => {});
 
-    return subscribe([`trades:${symbol}`], ({ data }) => {
-      // 재연결 직후 등 같은 체결이 중복 수신되면 무시 (key 중복 방지)
-      setTicks((prev) =>
-        prev[0]?.tradeId === data.tradeId ? prev : [data as Tick, ...prev].slice(0, 30),
-      );
-    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [symbol]);
 
   return (

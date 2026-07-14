@@ -16,8 +16,6 @@ import { api } from "@/lib/api";
 const STARTING_CASH = 10_000_000; // USD cents = $100,000.00
 const BAR_DURATION_MS = 1_000;
 
-// 공급자 구현은 API 설정에 따라 달라질 수 있으므로, 화면은 고정된 provider enum에 묶지 않는다.
-type ReplaySource = string;
 type Runner = HistoricalReplayEngine | HybridReplayEngine;
 
 interface Dataset {
@@ -28,22 +26,19 @@ interface Dataset {
   currency: string;
   priceScale: number;
   defaultRange: ReplayRange;
-  availableSources: ReplaySource[];
-  cacheTtlSeconds: number;
+  maxCandleCount: number;
   notice: string;
 }
 
-type ReplayRange = "1mo" | "3mo" | "6mo" | "1y" | "2y" | "5y" | "10y" | "max";
+type ReplayRange = "1mo" | "3mo" | "6mo" | "1y" | "2y" | "3y";
 
 const REPLAY_RANGES: readonly { value: ReplayRange; label: string }[] = [
-  { value: "1mo", label: "1개월" },
-  { value: "3mo", label: "3개월" },
-  { value: "6mo", label: "6개월" },
-  { value: "1y", label: "1년" },
-  { value: "2y", label: "2년" },
-  { value: "5y", label: "5년" },
-  { value: "10y", label: "10년" },
-  { value: "max", label: "전체" },
+  { value: "1mo", label: "1개월 · 30봉" },
+  { value: "3mo", label: "3개월 · 90봉" },
+  { value: "6mo", label: "6개월 · 180봉" },
+  { value: "1y", label: "1년 · 365봉" },
+  { value: "2y", label: "2년 · 730봉" },
+  { value: "3y", label: "3년 · 1,095봉" },
 ];
 
 interface CatalogResponse {
@@ -61,9 +56,7 @@ interface ReplayDataResponse {
     label: string;
     sourceUrl: string | null;
     termsUrl: string | null;
-    fetchedAt: string;
-    cacheHit: boolean;
-    isFallback: boolean;
+    fixedAt: string;
     notice: string;
   };
   hybrid: {
@@ -117,22 +110,10 @@ function virtualBotState(pressure: number): string {
   return "가상 MM 봇 양방향 유동성";
 }
 
-function sourceChoiceLabel(source: ReplaySource): string {
-  if (source === "auto") return "설정된 승인 데이터 공급자 우선";
-  if (source === "fixture") return "오프라인 학습 fixture";
-  if (source === "local-csv") return "로컬 CSV 데이터";
-  return source;
-}
-
-function isExternalHttpUrl(value: string | null): value is string {
-  return value != null && /^https?:\/\//i.test(value);
-}
-
 export default function ReplayPage() {
   const [catalog, setCatalog] = useState<Dataset[]>([]);
   const [datasetId, setDatasetId] = useState("");
   const [range, setRange] = useState<ReplayRange>("6mo");
-  const [sourceChoice, setSourceChoice] = useState<ReplaySource>("auto");
   const [data, setData] = useState<ReplayDataResponse | null>(null);
   const [mode, setMode] = useState<ReplayMode>("historical");
   const [speed, setSpeed] = useState<ReplaySpeed>(1);
@@ -145,12 +126,6 @@ export default function ReplayPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const runnerRef = useRef<Runner | null>(null);
-
-  const activeDataset = catalog.find((dataset) => dataset.id === datasetId) ?? null;
-  const sourceOptions = useMemo(() => {
-    const available = new Set<ReplaySource>(["auto", ...(activeDataset?.availableSources ?? [])]);
-    return [...available];
-  }, [activeDataset]);
 
   useEffect(() => {
     let active = true;
@@ -177,7 +152,7 @@ export default function ReplayPage() {
     setLoading(true);
     setError(null);
     setData(null);
-    const query = new URLSearchParams({ range, source: sourceChoice });
+    const query = new URLSearchParams({ range });
     api<ReplayDataResponse>(`/replay/datasets/${encodeURIComponent(datasetId)}/candles?${query}`, { auth: false })
       .then((response) => {
         if (!active) return;
@@ -189,7 +164,7 @@ export default function ReplayPage() {
     return () => {
       active = false;
     };
-  }, [datasetId, range, sourceChoice]);
+  }, [datasetId, range]);
 
   useEffect(() => {
     if (!data) return;
@@ -326,12 +301,26 @@ export default function ReplayPage() {
     }
   }
 
+  function beginDataChange() {
+    // Effects run after paint. Clear the old runner in the event handler so a
+    // newly selected ticker/period never briefly renders the prior bar count.
+    setLoading(true);
+    setError(null);
+    setData(null);
+    setSnapshot(null);
+  }
+
+  function selectRange(nextRange: ReplayRange) {
+    beginDataChange();
+    setRange(nextRange);
+  }
+
   function selectDataset(nextId: string) {
     const next = catalog.find((dataset) => dataset.id === nextId);
+    beginDataChange();
     setDatasetId(nextId);
     if (next) {
       setRange(next.defaultRange);
-      setSourceChoice("auto");
     }
   }
 
@@ -339,10 +328,10 @@ export default function ReplayPage() {
     <div className="space-y-5">
       <section className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold tracking-wide text-amber-400">HISTORICAL REPLAY LAB</p>
+          <p className="text-xs font-semibold tracking-wide text-amber-400">FIXED REPLAY LAB</p>
           <h1 className="mt-1 text-2xl font-bold text-white">실전 리플레이</h1>
           <p className="mt-2 max-w-3xl text-sm text-neutral-400">
-            실제 과거 일봉을 한 봉씩 공개하며 별도 가상 계좌로 연습합니다. 기존 5개 모의 종목·주문·봇·잔액에는 영향을 주지 않습니다.
+            종목별 고정 일봉을 한 봉씩 공개하며 별도 가상 계좌로 연습합니다. 기존 5개 모의 종목·주문·봇·잔액에는 영향을 주지 않습니다.
           </p>
         </div>
         <div className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-right text-xs text-neutral-400">
@@ -353,7 +342,7 @@ export default function ReplayPage() {
 
       <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Control label="실제 종목">
               <select
                 value={datasetId}
@@ -371,7 +360,7 @@ export default function ReplayPage() {
             <Control label="기간">
               <select
                 value={range}
-                onChange={(event) => setRange(event.target.value as ReplayRange)}
+                onChange={(event) => selectRange(event.target.value as ReplayRange)}
                 className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm"
               >
                 {REPLAY_RANGES.map((option) => (
@@ -379,20 +368,9 @@ export default function ReplayPage() {
                 ))}
               </select>
             </Control>
-            <Control label="데이터">
-              <select
-                value={sourceChoice}
-                onChange={(event) => setSourceChoice(event.target.value as ReplaySource)}
-                className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm"
-              >
-                {sourceOptions.map((source) => (
-                  <option key={source} value={source}>{sourceChoiceLabel(source)}</option>
-                ))}
-              </select>
-            </Control>
             <Control label="재생 방식">
               <div className="grid grid-cols-2 gap-1 rounded bg-neutral-950 p-1 text-xs">
-                <ModeButton active={mode === "historical"} onClick={() => setMode("historical")}>실제 시세</ModeButton>
+                <ModeButton active={mode === "historical"} onClick={() => setMode("historical")}>기준 경로</ModeButton>
                 <ModeButton active={mode === "hybrid"} onClick={() => setMode("hybrid")}>봇 혼합</ModeButton>
               </div>
             </Control>
@@ -451,7 +429,7 @@ export default function ReplayPage() {
                       </p>
                       <p className="mt-0.5 text-[11px] text-neutral-500">{virtualBotState(snapshot.current.syntheticPressure)}</p>
                     </>
-                  ) : <p className="text-xs text-neutral-500">실제 과거 경로 그대로</p>}
+                  ) : <p className="text-xs text-neutral-500">고정 기준 경로 그대로</p>}
                 </div>
               </div>
               <ReplayChart candles={chartCandles} currentCandle={chartCurrent} currentPrice={snapshot.current.price / priceScale} />
@@ -513,13 +491,7 @@ export default function ReplayPage() {
           </section>
 
           <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4 text-xs text-neutral-400">
-            <p>
-              데이터: {isExternalHttpUrl(data.source.sourceUrl) ? (
-                <a href={data.source.sourceUrl} target="_blank" rel="noreferrer" className="text-amber-400 hover:underline">{data.source.label}</a>
-              ) : <span className="text-neutral-300">{data.source.label}</span>}
-              {" · "}{data.source.isFallback ? "오프라인 fixture 사용" : data.source.cacheHit ? "메모리 캐시 사용" : "새로 가져옴"}
-              {" · "}{new Date(data.source.fetchedAt).toLocaleString("ko-KR")}
-            </p>
+            <p>데이터: <span className="text-neutral-300">{data.source.label}</span>{" · "}{data.candles.length.toLocaleString("ko-KR")}개 고정 일봉{" · "}기준 {new Date(data.source.fixedAt).toLocaleDateString("ko-KR")}</p>
             <p className="mt-1">
               {data.source.notice}
               {data.source.termsUrl && <> <a href={data.source.termsUrl} target="_blank" rel="noreferrer" className="text-amber-400 hover:underline">약관</a></>}
