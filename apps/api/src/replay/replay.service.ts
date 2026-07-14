@@ -3,9 +3,11 @@ import { findReplayDataset, REPLAY_DATASETS } from "./replay.catalog";
 import {
   FIXED_REPLAY_CANDLE_COUNT,
   FIXED_REPLAY_DATA_FIXED_AT,
+  FIXED_REPLAY_MAX_REPLAY_CANDLE_COUNT,
+  FIXED_REPLAY_PRE_ROLL_CANDLE_COUNT,
   fixedReplayCandlesFor,
 } from "./fixed-replay-data";
-import { replayRangeCandleCount, selectReplayRange } from "./replay-range";
+import { replayRangeCandleCount, replayWindowCandleCount, selectReplayRange } from "./replay-range";
 import type {
   ReplayCandlesResponse,
   ReplayCatalogEntry,
@@ -22,9 +24,11 @@ export class ReplayService {
     return REPLAY_DATASETS.map((dataset) => ({
       ...dataset,
       defaultRange: "6mo",
+      preRollCandleCount: FIXED_REPLAY_PRE_ROLL_CANDLE_COUNT,
+      maxReplayCandleCount: FIXED_REPLAY_MAX_REPLAY_CANDLE_COUNT,
       maxCandleCount: FIXED_REPLAY_CANDLE_COUNT,
       notice:
-        "고정 1,095일봉 연습 데이터를 사용합니다. API 키·네트워크·로컬 CSV에 따라 재생 결과가 바뀌지 않습니다.",
+        "항상 200개 사전 공개 일봉 뒤에 최대 1,095개를 재생하는 고정 연습 데이터입니다. API 키·네트워크·로컬 CSV에 따라 재생 결과가 바뀌지 않습니다.",
     }));
   }
 
@@ -33,19 +37,24 @@ export class ReplayService {
     if (!dataset) throw new NotFoundException(`Unknown replay dataset: ${datasetId}`);
 
     const candles = selectReplayRange(fixedReplayCandlesFor(dataset), range);
-    const requestedCandleCount = replayRangeCandleCount(range);
-    if (candles.length !== requestedCandleCount) {
+    const replayCandleCount = replayRangeCandleCount(range);
+    const totalCandleCount = replayWindowCandleCount(range);
+    if (candles.length !== totalCandleCount) {
       throw new InternalServerErrorException(
-        `Fixed replay data must contain ${requestedCandleCount} candles for ${range}.`,
+        `Fixed replay data must contain ${totalCandleCount} candles for ${range}.`,
       );
     }
 
     return {
       dataset: { ...dataset },
       interval: "1d",
+      range,
       // Do not hand cache-owned objects to Nest serialization. This keeps a
       // caller-side mutation from changing a later replay response.
       candles: candles.map((candle) => ({ ...candle })),
+      preRollCandleCount: FIXED_REPLAY_PRE_ROLL_CANDLE_COUNT,
+      replayCandleCount,
+      totalCandleCount,
       source: {
         provider: "bundled-fixed-daily",
         label: "내장 고정 일봉 연습 데이터",
@@ -53,7 +62,7 @@ export class ReplayService {
         termsUrl: null,
         fixedAt: FIXED_REPLAY_DATA_FIXED_AT,
         notice:
-          "모든 종목은 재현 가능한 1,095개 고정 일봉으로 구성됩니다. 실시간·외부 과거 시세가 아니며, Alpha Vantage 키 유무에 따라 바뀌지 않습니다.",
+          "모든 종목은 재현 가능한 1,295개 고정 일봉으로 구성됩니다. 선택한 범위에서는 앞의 200개가 먼저 공개되고, 이후 기간만큼만 재생합니다. 실시간·외부 과거 시세가 아니며, Alpha Vantage 키 유무에 따라 바뀌지 않습니다.",
       },
       hybrid: hybridHint(),
     };

@@ -1,7 +1,12 @@
 import type { ReplayCandle, ReplayDataset } from "./replay.types";
 
-/** The replay catalogue intentionally has a fixed three-year daily horizon. */
-export const FIXED_REPLAY_CANDLE_COUNT = 365 * 3;
+/** Always visible before a user starts the future replay path. */
+export const FIXED_REPLAY_PRE_ROLL_CANDLE_COUNT = 200;
+/** The selectable future horizon is deliberately capped at three calendar years. */
+export const FIXED_REPLAY_MAX_REPLAY_CANDLE_COUNT = 365 * 3;
+/** Source horizon: 200 visible history bars plus the longest replay path. */
+export const FIXED_REPLAY_CANDLE_COUNT =
+  FIXED_REPLAY_PRE_ROLL_CANDLE_COUNT + FIXED_REPLAY_MAX_REPLAY_CANDLE_COUNT;
 export const FIXED_REPLAY_DATA_FIXED_AT = "2025-12-31T00:00:00.000Z";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -18,7 +23,7 @@ type FixedReplayProfile = {
 /**
  * These are deterministic exercise profiles, not a live or licensed price
  * feed. Keeping only compact profile parameters in source gives every ticker
- * the same reproducible 1,095-candle timeline without an external request.
+ * the same reproducible 1,295-candle timeline without an external request.
  */
 const PROFILES: Readonly<Record<string, FixedReplayProfile>> = {
   "aapl-us": { basePrice: 18_500, dailyDrift: 0.00018, dailyVolatility: 0.019, averageVolume: 58_000_000, seed: 0x41a7 },
@@ -31,6 +36,12 @@ const PROFILES: Readonly<Record<string, FixedReplayProfile>> = {
   "amd-us": { basePrice: 14_000, dailyDrift: 0.00022, dailyVolatility: 0.035, averageVolume: 61_000_000, seed: 0x3fa1 },
   "nflx-us": { basePrice: 58_000, dailyDrift: 0.0002, dailyVolatility: 0.025, averageVolume: 5_800_000, seed: 0xa649 },
   "jpm-us": { basePrice: 19_000, dailyDrift: 0.00012, dailyVolatility: 0.016, averageVolume: 10_000_000, seed: 0x52cb },
+  "samsung-electronics-kr": { basePrice: 68_000, dailyDrift: 0.00015, dailyVolatility: 0.021, averageVolume: 14_500_000, seed: 0x05930 },
+  "sk-hynix-kr": { basePrice: 114_000, dailyDrift: 0.00023, dailyVolatility: 0.031, averageVolume: 3_700_000, seed: 0x00660 },
+  "hyundai-motor-kr": { basePrice: 185_000, dailyDrift: 0.00013, dailyVolatility: 0.023, averageVolume: 740_000, seed: 0x05380 },
+  "naver-kr": { basePrice: 188_000, dailyDrift: 0.00012, dailyVolatility: 0.027, averageVolume: 920_000, seed: 0x35420 },
+  "posco-holdings-kr": { basePrice: 315_000, dailyDrift: 0.0001, dailyVolatility: 0.028, averageVolume: 430_000, seed: 0x05490 },
+  "btc-usd": { basePrice: 4_200_000, dailyDrift: 0.00028, dailyVolatility: 0.046, averageVolume: 24_000, seed: 0xb7c0 },
 };
 
 const cache = new Map<string, readonly ReplayCandle[]>();

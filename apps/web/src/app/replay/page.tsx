@@ -13,10 +13,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReplayChart, { type ReplayChartCandle } from "@/components/ReplayChart";
 import { api } from "@/lib/api";
 
-const STARTING_CASH = 10_000_000; // USD cents = $100,000.00
+// USD 종목에서는 $100,000.00, KRW 종목에서는 ₩10,000,000에 해당하는 연습 잔고다.
+const STARTING_CASH = 10_000_000;
 const BAR_DURATION_MS = 1_000;
 
 type Runner = HistoricalReplayEngine | HybridReplayEngine;
+type DatasetCategory = "overseas" | "domestic" | "crypto";
 
 interface Dataset {
   id: string;
@@ -25,6 +27,7 @@ interface Dataset {
   exchange: string;
   currency: string;
   priceScale: number;
+  category: DatasetCategory;
   defaultRange: ReplayRange;
   maxCandleCount: number;
   notice: string;
@@ -33,13 +36,20 @@ interface Dataset {
 type ReplayRange = "1mo" | "3mo" | "6mo" | "1y" | "2y" | "3y";
 
 const REPLAY_RANGES: readonly { value: ReplayRange; label: string }[] = [
-  { value: "1mo", label: "1개월 · 30봉" },
-  { value: "3mo", label: "3개월 · 90봉" },
-  { value: "6mo", label: "6개월 · 180봉" },
-  { value: "1y", label: "1년 · 365봉" },
-  { value: "2y", label: "2년 · 730봉" },
-  { value: "3y", label: "3년 · 1,095봉" },
+  { value: "1mo", label: "1개월 · 실전 30봉" },
+  { value: "3mo", label: "3개월 · 실전 90봉" },
+  { value: "6mo", label: "6개월 · 실전 180봉" },
+  { value: "1y", label: "1년 · 실전 365봉" },
+  { value: "2y", label: "2년 · 실전 730봉" },
+  { value: "3y", label: "3년 · 실전 1,095봉" },
 ];
+
+const DATASET_CATEGORIES: readonly DatasetCategory[] = ["domestic", "overseas", "crypto"];
+const DATASET_CATEGORY_LABELS: Readonly<Record<DatasetCategory, string>> = {
+  domestic: "국내 주식",
+  overseas: "해외 주식",
+  crypto: "코인",
+};
 
 interface CatalogResponse {
   datasets: Dataset[];
@@ -48,9 +58,16 @@ interface CatalogResponse {
 }
 
 interface ReplayDataResponse {
-  dataset: Pick<Dataset, "id" | "symbol" | "name" | "exchange" | "currency" | "priceScale">;
+  dataset: Pick<Dataset, "id" | "symbol" | "name" | "exchange" | "currency" | "priceScale" | "category">;
   interval: "1d";
+  /** Already ordered as [pre-revealed history, replay-only future bars]. */
   candles: ReplayCandleInput[];
+  /** The number of fully visible bars at the beginning of every replay. */
+  preRollCandleCount: number;
+  /** The selected period's bars; these alone advance during replay. */
+  replayCandleCount: number;
+  /** Must always equal preRollCandleCount + replayCandleCount. */
+  totalCandleCount: number;
   source: {
     provider: string;
     label: string;
@@ -74,14 +91,19 @@ interface ReplayWallet {
 
 const initialWallet = (): ReplayWallet => ({ cash: STARTING_CASH, qty: 0, costBasis: 0 });
 
-function pickStartIndex(length: number, seed: number): number {
-  if (length <= 1) return 0;
-  const history = Math.min(60, Math.max(8, Math.floor(length * 0.35)));
-  const remaining = Math.min(80, Math.max(8, Math.floor(length * 0.4)));
-  const min = Math.min(history, length - 1);
-  const max = Math.max(min, length - remaining - 1);
-  const fraction = ((seed >>> 0) % 10_000) / 10_000;
-  return min + Math.floor((max - min + 1) * fraction);
+function assertReplayWindow(data: ReplayDataResponse): void {
+  const { preRollCandleCount, replayCandleCount, totalCandleCount, candles } = data;
+  const validCounts = [preRollCandleCount, replayCandleCount, totalCandleCount].every(
+    (count) => Number.isSafeInteger(count) && count > 0,
+  );
+
+  if (
+    !validCounts ||
+    totalCandleCount !== preRollCandleCount + replayCandleCount ||
+    candles.length !== totalCandleCount
+  ) {
+    throw new Error("리플레이 데이터의 사전 공개/재생 봉 수가 올바르지 않습니다.");
+  }
 }
 
 function newScenarioSeed(): number {
@@ -89,11 +111,15 @@ function newScenarioSeed(): number {
 }
 
 function formatMoney(value: number, currency: string, scale: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(value / scale);
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(value / scale);
+  } catch {
+    return `${(value / scale).toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currency}`;
+  }
 }
 
 function formatDate(ts: number): string {
@@ -157,6 +183,7 @@ export default function ReplayPage() {
       .then((response) => {
         if (!active) return;
         if (response.candles.length === 0) throw new Error("재생할 과거 시세가 없습니다.");
+        assertReplayWindow(response);
         setData(response);
       })
       .catch((err) => active && setError(err instanceof Error ? err.message : "과거 시세를 불러오지 못했습니다."))
@@ -169,8 +196,11 @@ export default function ReplayPage() {
   useEffect(() => {
     if (!data) return;
     try {
-      const startIndex = pickStartIndex(data.candles.length, scenarioSeed);
-      const options = { startIndex, speed, barDurationMs: BAR_DURATION_MS };
+      const options = {
+        startIndex: data.preRollCandleCount,
+        speed,
+        barDurationMs: BAR_DURATION_MS,
+      };
       const next: Runner =
         mode === "historical"
           ? new HistoricalReplayEngine(data.candles, options)
@@ -205,11 +235,20 @@ export default function ReplayPage() {
 
   const priceScale = data?.dataset.priceScale ?? 100;
   const currency = data?.dataset.currency ?? "USD";
+  const preRollCandleCount = data?.preRollCandleCount ?? 0;
+  const replayCandleCount = data?.replayCandleCount ?? 0;
+  const totalCandleCount = data?.totalCandleCount ?? 0;
   const currentPrice = snapshot?.current.price ?? 0;
   const chartCandles = useMemo<ReplayChartCandle[]>(() => {
     if (!snapshot) return [];
+    // 엔진은 경계에서 다음 봉의 시가만 가진 0% 형성 봉을 하나 포함한다.
+    // 시작 화면은 정확히 사전 공개 봉만 보여야 하므로 그 봉은 차트에서 숨긴다.
+    const visible =
+      snapshot.progress <= Number.EPSILON && snapshot.completedBars < snapshot.totalBars
+        ? snapshot.visibleCandles.slice(0, -1)
+        : snapshot.visibleCandles;
     // 지표도 공개된 봉만 계산한다. 아직 공개되지 않은 미래 OHLC는 여기로 전달하지 않는다.
-    return snapshot.visibleCandles.map((candle) => ({
+    return visible.map((candle) => ({
       time: candle.ts,
       open: candle.open / priceScale,
       high: candle.high / priceScale,
@@ -234,6 +273,9 @@ export default function ReplayPage() {
   const pnl = total - STARTING_CASH;
   const pnlRate = (pnl / STARTING_CASH) * 100;
   const avgCost = wallet.qty > 0 ? wallet.costBasis / wallet.qty : 0;
+  const replayCompletedBars = snapshot
+    ? Math.min(replayCandleCount, Math.max(0, snapshot.completedBars - preRollCandleCount))
+    : 0;
 
   const resetScenario = useCallback(() => {
     setScenarioSeed(newScenarioSeed());
@@ -243,7 +285,7 @@ export default function ReplayPage() {
     const runner = runnerRef.current;
     if (!runner || !snapshot) return;
     if (snapshot.status === "finished") {
-      runner.reset(0);
+      runner.reset(preRollCandleCount);
       setSnapshot(runner.play());
       return;
     }
@@ -268,7 +310,7 @@ export default function ReplayPage() {
   function placeMarketOrder(side: "BUY" | "SELL") {
     const qty = Number(qtyInput);
     if (!Number.isSafeInteger(qty) || qty <= 0) {
-      setMessage({ ok: false, text: "수량은 1주 이상의 정수로 입력하세요." });
+      setMessage({ ok: false, text: "수량은 1 이상의 정수로 입력하세요." });
       return;
     }
     if (!currentPrice || !snapshot) return;
@@ -304,6 +346,7 @@ export default function ReplayPage() {
   function beginDataChange() {
     // Effects run after paint. Clear the old runner in the event handler so a
     // newly selected ticker/period never briefly renders the prior bar count.
+    runnerRef.current = null;
     setLoading(true);
     setError(null);
     setData(null);
@@ -331,7 +374,7 @@ export default function ReplayPage() {
           <p className="text-xs font-semibold tracking-wide text-amber-400">FIXED REPLAY LAB</p>
           <h1 className="mt-1 text-2xl font-bold text-white">실전 리플레이</h1>
           <p className="mt-2 max-w-3xl text-sm text-neutral-400">
-            종목별 고정 일봉을 한 봉씩 공개하며 별도 가상 계좌로 연습합니다. 기존 5개 모의 종목·주문·봇·잔액에는 영향을 주지 않습니다.
+            선택 기간마다 일봉 200개를 먼저 공개하고, 그 뒤의 기간만 한 봉씩 재생하며 별도 가상 계좌로 연습합니다. 기존 5개 모의 종목·주문·봇·잔액에는 영향을 주지 않습니다.
           </p>
         </div>
         <div className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-right text-xs text-neutral-400">
@@ -343,18 +386,26 @@ export default function ReplayPage() {
       <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Control label="실제 종목">
+            <Control label="리플레이 종목">
               <select
                 value={datasetId}
                 onChange={(event) => selectDataset(event.target.value)}
                 className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm"
                 disabled={catalog.length === 0}
               >
-                {catalog.map((dataset) => (
-                  <option key={dataset.id} value={dataset.id}>
-                    {dataset.symbol} · {dataset.name}
-                  </option>
-                ))}
+                {DATASET_CATEGORIES.map((category) => {
+                  const datasets = catalog.filter((dataset) => dataset.category === category);
+                  if (datasets.length === 0) return null;
+                  return (
+                    <optgroup key={category} label={DATASET_CATEGORY_LABELS[category]}>
+                      {datasets.map((dataset) => (
+                        <option key={dataset.id} value={dataset.id}>
+                          {dataset.symbol} · {dataset.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
               </select>
             </Control>
             <Control label="기간">
@@ -384,6 +435,7 @@ export default function ReplayPage() {
             새 시나리오
           </button>
         </div>
+        <p className="mt-3 text-xs text-neutral-500">모든 기간은 사전 공개 200봉 이후부터 선택한 기간의 봉만 재생합니다.</p>
 
         {mode === "hybrid" && (
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-neutral-800 pt-3 text-sm">
@@ -414,7 +466,7 @@ export default function ReplayPage() {
                 <div>
                   <h2 className="font-semibold text-white">{data.dataset.symbol} · {data.dataset.name}</h2>
                   <p className="mt-1 text-xs text-neutral-500">
-                    {formatDate(snapshot.current.ts)} · 공개 {snapshot.completedBars}/{snapshot.totalBars} 일봉
+                    {formatDate(snapshot.current.ts)} · 사전 공개 {preRollCandleCount.toLocaleString("ko-KR")}봉 · 실전 진행 {replayCompletedBars.toLocaleString("ko-KR")}/{replayCandleCount.toLocaleString("ko-KR")}봉
                   </p>
                 </div>
                 <div className="text-right tabular-nums">
@@ -460,7 +512,7 @@ export default function ReplayPage() {
                 <dl className="mt-3 space-y-2 text-sm tabular-nums">
                   <WalletRow label="총 자산" value={formatMoney(total, currency, priceScale)} strong />
                   <WalletRow label="현금" value={formatMoney(wallet.cash, currency, priceScale)} />
-                  <WalletRow label="보유" value={`${wallet.qty.toLocaleString("ko-KR")}주`} />
+                  <WalletRow label="보유" value={`${wallet.qty.toLocaleString("ko-KR")} 수량`} />
                   <WalletRow label="평단가" value={wallet.qty ? formatMoney(avgCost, currency, priceScale) : "—"} />
                   <WalletRow label="평가손익" value={`${pnl >= 0 ? "+" : ""}${formatMoney(pnl, currency, priceScale)} (${pnl >= 0 ? "+" : ""}${pnlRate.toFixed(2)}%)`} tone={pnl >= 0 ? "up" : "down"} />
                 </dl>
@@ -471,7 +523,7 @@ export default function ReplayPage() {
 
               <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
                 <h2 className="text-sm font-semibold text-neutral-200">현재가 모의 주문</h2>
-                <p className="mt-1 text-xs text-neutral-500">실제 거래소 주문과 완전히 분리된 시장가 체결입니다.</p>
+                <p className="mt-1 text-xs text-neutral-500">실제 거래소와 완전히 분리된 시장가 체결이며, 현재는 정수 수량만 지원합니다.</p>
                 <label className="mt-3 block text-xs text-neutral-400">
                   수량
                   <input
@@ -491,7 +543,7 @@ export default function ReplayPage() {
           </section>
 
           <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4 text-xs text-neutral-400">
-            <p>데이터: <span className="text-neutral-300">{data.source.label}</span>{" · "}{data.candles.length.toLocaleString("ko-KR")}개 고정 일봉{" · "}기준 {new Date(data.source.fixedAt).toLocaleDateString("ko-KR")}</p>
+            <p>데이터: <span className="text-neutral-300">{data.source.label}</span>{" · "}{DATASET_CATEGORY_LABELS[data.dataset.category]}{" · "}사전 공개 {preRollCandleCount.toLocaleString("ko-KR")}봉 + 실전 {replayCandleCount.toLocaleString("ko-KR")}봉 = 총 {totalCandleCount.toLocaleString("ko-KR")}개 고정 일봉{" · "}기준 {new Date(data.source.fixedAt).toLocaleDateString("ko-KR")}</p>
             <p className="mt-1">
               {data.source.notice}
               {data.source.termsUrl && <> <a href={data.source.termsUrl} target="_blank" rel="noreferrer" className="text-amber-400 hover:underline">약관</a></>}

@@ -10,7 +10,7 @@ export class ReplayController {
   datasets() {
     return {
       datasets: this.replay.datasets(),
-      priceEncoding: "integer minor units (USD cents for the current catalog)",
+      priceEncoding: "integer units at each dataset priceScale (for example USD cents or whole KRW)",
       tradingIsolation:
         "Replay data is read-only. It does not add symbols, orders, trades, balances, or bot activity to the existing local exchange.",
     };
