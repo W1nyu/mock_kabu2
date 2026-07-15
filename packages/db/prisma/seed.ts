@@ -13,6 +13,22 @@ const ADMIN_INITIAL_CASH = 10_000_000_000_000_000n;
 const BOT_INITIAL_CASH = 1_000_000_000n; // 봇당 10억
 const BOT_INITIAL_QTY = 50_000; // 봇당 종목별 5만 주
 
+/** Add only missing inventory when a new listing is introduced after initial seeding. */
+async function ensureMissingBotHoldings(accountId: string) {
+  for (const s of SYMBOLS) {
+    await prisma.holding.upsert({
+      where: { accountId_symbol: { accountId, symbol: s.symbol } },
+      update: {},
+      create: {
+        accountId,
+        symbol: s.symbol,
+        qty: BOT_INITIAL_QTY,
+        costBasis: BigInt(BOT_INITIAL_QTY) * BigInt(s.initialPrice),
+      },
+    });
+  }
+}
+
 async function ensureAdminAccount() {
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
   const created = await prisma.$transaction(async (tx) => {
@@ -75,7 +91,11 @@ async function main() {
   for (let i = 1; i <= BOT_COUNT; i++) {
     const email = `bot${i}@bots.local`;
     const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) continue;
+    if (existing) {
+      const account = await prisma.account.findUnique({ where: { userId: existing.id } });
+      if (account) await ensureMissingBotHoldings(account.id);
+      continue;
+    }
 
     await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({

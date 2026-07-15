@@ -374,7 +374,7 @@ export default function ReplayPage() {
           <p className="text-xs font-semibold tracking-wide text-amber-400">FIXED REPLAY LAB</p>
           <h1 className="mt-1 text-2xl font-bold text-white">실전 리플레이</h1>
           <p className="mt-2 max-w-3xl text-sm text-neutral-400">
-            선택 기간마다 일봉 200개를 먼저 공개하고, 그 뒤의 기간만 한 봉씩 재생하며 별도 가상 계좌로 연습합니다. 기존 5개 모의 종목·주문·봇·잔액에는 영향을 주지 않습니다.
+            선택 기간마다 일봉 200개를 먼저 공개하고, 그 뒤의 기간만 한 봉씩 재생하며 별도 가상 계좌로 연습합니다. 기존 7개 모의 종목·주문·봇·잔액에는 영향을 주지 않습니다.
           </p>
         </div>
         <div className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-right text-xs text-neutral-400">

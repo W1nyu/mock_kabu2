@@ -46,7 +46,7 @@ export class LiquidityService {
       qtyAdded: number;
     }[];
 
-    // Sequentially provisioning the five fixed accounts keeps first startup
+    // Sequentially provisioning symbol-scoped reserve accounts keeps first startup
     // easy to reason about. Account-level locking still makes concurrent API
     // and bots processes safe.
     for (const reserve of liquidityReserves()) {

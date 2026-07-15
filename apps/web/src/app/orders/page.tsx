@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { api, fmt, getToken } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { api, fmt, getToken, getUser } from "@/lib/api";
+import { subscribe } from "@/lib/socket";
 
 interface OrderRow {
   id: string;
@@ -27,17 +28,25 @@ const STATUS_LABEL: Record<string, string> = {
 export default function OrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const load = useCallback(() => {
+    api<OrderRow[]>("/orders?limit=100").then(setOrders).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!getToken()) {
       router.push("/login");
       return;
     }
-    const load = () => api<OrderRow[]>("/orders?limit=100").then(setOrders).catch(() => {});
     load();
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
-  }, [router]);
+    const user = getUser();
+    const unsub = user ? subscribe([`account:${user.accountId}`], () => load()) : () => {};
+    // Realtime account notifications normally update this immediately.
+    const t = setInterval(load, 15_000);
+    return () => {
+      unsub();
+      clearInterval(t);
+    };
+  }, [load, router]);
 
   return (
     <div>

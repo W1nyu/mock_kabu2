@@ -24,6 +24,10 @@ export const LIQUIDITY_DISTANCE_TICKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] 
 export const LIQUIDITY_LEVEL_WEIGHTS = [160, 140, 120, 100, 85, 70, 60, 50, 45, 40, 35, 30] as const;
 /** Small ordinary market orders should not exhaust the best quote by default. */
 export const LIQUIDITY_MIN_BEST_QTY = 80;
+/** SAKU keeps more of its existing side budget at the executable price. */
+export const SAKU_MIN_BEST_QTY = 100;
+/** Normalise legacy 80-share SAKU best walls promptly without replacing after every small fill. */
+export const SAKU_BEST_REFILL_LOW_WATER_RATIO = 0.82;
 const LIQUIDITY_WEIGHT_TOTAL = LIQUIDITY_LEVEL_WEIGHTS.reduce((sum, weight) => sum + weight, 0);
 /** The REST/UI order book exposes the nearest ten price levels per side. */
 export const VISIBLE_LIQUIDITY_LEVELS = 10;
@@ -35,6 +39,8 @@ export interface LiquidityQuote {
   level: number;
   price: number;
   qty: number;
+  /** Higher only for SAKU's near-price best wall; consumed by the maker refill check. */
+  refillLowWaterRatio?: number;
 }
 
 /** A durable PARTIAL row which remains in the book while fresh depth is added. */
@@ -70,8 +76,11 @@ export function liquidityTotalQty(centerPrice: number): number {
  * share to rounding.  The small best-wall floor protects the ordinary 1..48
  * share flow even for high-priced symbols whose total ladder is compact.
  */
-export function liquidityQtyByLevel(centerPrice: number): number[] {
-  const total = liquidityTotalQty(centerPrice);
+function liquidityQtyByLevelForProfile(
+  total: number,
+  minimumBestQty: number,
+  preserveNearDepth = false,
+): number[] {
   const raw = LIQUIDITY_LEVEL_WEIGHTS.map((weight) => (weight / LIQUIDITY_WEIGHT_TOTAL) * total);
   const quantities = raw.map((value) => Math.floor(value));
   let remainder = total - quantities.reduce((sum, qty) => sum + qty, 0);
@@ -85,15 +94,28 @@ export function liquidityQtyByLevel(centerPrice: number): number[] {
     remainder--;
   }
 
-  const bestFloor = Math.min(LIQUIDITY_MIN_BEST_QTY, total - (LIQUIDITY_DISTANCE_TICKS.length - 1));
+  const bestFloor = Math.min(minimumBestQty, total - (LIQUIDITY_DISTANCE_TICKS.length - 1));
   let shortfall = Math.max(0, bestFloor - quantities[0]);
   while (shortfall > 0) {
-    let donor = 1;
-    for (let index = 2; index < quantities.length; index++) {
-      if (quantities[index] > quantities[donor]) donor = index;
+    let donor = -1;
+    if (preserveNearDepth) {
+      // SAKU has a compact 160-share side. Taking from the far edge first
+      // makes the first three executable prices visibly thicker instead of
+      // flattening all eleven remaining levels to nearly the same size.
+      for (let index = quantities.length - 1; index >= 1; index--) {
+        if (quantities[index] > 1) {
+          donor = index;
+          break;
+        }
+      }
+    } else {
+      donor = 1;
+      for (let index = 2; index < quantities.length; index++) {
+        if (quantities[index] > quantities[donor]) donor = index;
+      }
     }
     // `bestFloor` leaves at least one share for every remaining level.
-    if (quantities[donor] <= 1) break;
+    if (donor < 0 || quantities[donor] <= 1) break;
     quantities[donor]--;
     quantities[0]++;
     shortfall--;
@@ -102,9 +124,29 @@ export function liquidityQtyByLevel(centerPrice: number): number[] {
   return quantities;
 }
 
+/** Standard price-normalised ladder quantities, retained for non-SAKU callers. */
+export function liquidityQtyByLevel(centerPrice: number): number[] {
+  return liquidityQtyByLevelForProfile(liquidityTotalQty(centerPrice), LIQUIDITY_MIN_BEST_QTY);
+}
+
+/** SAKU concentrates its unchanged side budget at the executable near-price rungs. */
+export function liquidityQtyByLevelForSymbol(def: SymbolDef, centerPrice: number): number[] {
+  const isSaku = def.symbol === "SAKU";
+  return liquidityQtyByLevelForProfile(
+    liquidityTotalQty(centerPrice),
+    isSaku ? SAKU_MIN_BEST_QTY : LIQUIDITY_MIN_BEST_QTY,
+    isSaku,
+  );
+}
+
+/** The required best-wall size is profile-aware so taker sizing and quotes agree. */
+export function liquidityMinimumBestQty(def: SymbolDef): number {
+  return def.symbol === "SAKU" ? SAKU_MIN_BEST_QTY : LIQUIDITY_MIN_BEST_QTY;
+}
+
 /** The executable best-wall quantity for price-scaled taker flow. */
 export function liquidityBestWallQty(def: SymbolDef, centerPrice: number): number {
-  return liquidityQtyByLevel(alignToTick(centerPrice, def.tickSize))[0];
+  return liquidityQtyByLevelForSymbol(def, alignToTick(centerPrice, def.tickSize))[0];
 }
 
 /** Aligns a reference value to the exchange tick grid. */
@@ -134,10 +176,28 @@ export function moveQuoteCenter(
   return current + Math.sign(delta) * maxStep;
 }
 
+function liquidityQuote(
+  def: SymbolDef,
+  side: OrderSide,
+  level: number,
+  price: number,
+  qty: number,
+): LiquidityQuote {
+  return {
+    side,
+    level,
+    price,
+    qty,
+    ...(def.symbol === "SAKU" && level === 0
+      ? { refillLowWaterRatio: SAKU_BEST_REFILL_LOW_WATER_RATIO }
+      : {}),
+  };
+}
+
 /** The original symmetric ladder; keep this exact path when no PARTIAL exists. */
 function buildBaseLiquidityLadder(def: SymbolDef, centerPrice: number): LiquidityQuote[] {
   const center = alignToTick(centerPrice, def.tickSize);
-  const quantities = liquidityQtyByLevel(center);
+  const quantities = liquidityQtyByLevelForSymbol(def, center);
   const quotes: LiquidityQuote[] = [];
 
   for (let level = 0; level < LIQUIDITY_DISTANCE_TICKS.length; level++) {
@@ -149,9 +209,9 @@ function buildBaseLiquidityLadder(def: SymbolDef, centerPrice: number): Liquidit
     // The seeded symbols are far above one tick.  Retaining this guard keeps
     // the helper correct if a future low-priced symbol is added.
     if (bid >= def.tickSize) {
-      quotes.push({ side: "BUY", level, price: bid, qty });
+      quotes.push(liquidityQuote(def, "BUY", level, bid, qty));
     }
-    quotes.push({ side: "SELL", level, price: ask, qty });
+    quotes.push(liquidityQuote(def, "SELL", level, ask, qty));
   }
 
   return quotes;
@@ -319,12 +379,13 @@ export function buildGuardAwareLiquidityLadder(
     BUY: Math.max(0, targetVisibleNotional - preservedVisible.BUY),
     SELL: Math.max(0, targetVisibleNotional - preservedVisible.SELL),
   };
+  const requiredBestQty = liquidityMinimumBestQty(def);
   const minimumBestQty = (side: OrderSide): number => {
     const bestPrice = sidePrice(def, center, side, 0);
     const preservedAtBest = guardList
       .filter((quote) => quote.side === side && quote.price === bestPrice)
       .reduce((sum, quote) => sum + quote.qty, 0);
-    return preservedAtBest >= LIQUIDITY_MIN_BEST_QTY ? 1 : LIQUIDITY_MIN_BEST_QTY;
+    return preservedAtBest >= requiredBestQty ? 1 : requiredBestQty;
   };
   const quantitiesBySide: Record<OrderSide, number[]> = {
     BUY: guardAwareSideQuantities(def, center, "BUY", freshVisibleBudget.BUY, minimumBestQty("BUY")),
@@ -334,14 +395,17 @@ export function buildGuardAwareLiquidityLadder(
   for (let level = 0; level < LIQUIDITY_DISTANCE_TICKS.length; level++) {
     const bid = sidePrice(def, center, "BUY", level);
     if (bid >= def.tickSize) {
-      quotes.push({ side: "BUY", level, price: bid, qty: quantitiesBySide.BUY[level] });
+      quotes.push(liquidityQuote(def, "BUY", level, bid, quantitiesBySide.BUY[level]));
     }
-    quotes.push({
-      side: "SELL",
-      level,
-      price: sidePrice(def, center, "SELL", level),
-      qty: quantitiesBySide.SELL[level],
-    });
+    quotes.push(
+      liquidityQuote(
+        def,
+        "SELL",
+        level,
+        sidePrice(def, center, "SELL", level),
+        quantitiesBySide.SELL[level],
+      ),
+    );
   }
 
   return {

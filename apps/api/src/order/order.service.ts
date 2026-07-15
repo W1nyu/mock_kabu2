@@ -11,6 +11,7 @@ import type { BalanceMutator } from "@mock-kabu/concurrency";
 import type { PrismaClient } from "@mock-kabu/db";
 import {
   MARKET_BUY_HOLD_FACTOR,
+  SYMBOLS,
   type OrderCancelRequestedEvent,
   type OrderPlacedEvent,
   type OrderSide,
@@ -18,6 +19,7 @@ import {
 } from "@mock-kabu/shared";
 import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
+import { OutboxRelayer } from "./outbox.relayer";
 
 export interface PlaceOrderDto {
   symbol: string;
@@ -42,6 +44,7 @@ export class OrderService {
     @Inject(PRISMA) private prisma: PrismaClient,
     @Inject(BALANCE_MUTATOR) private mutator: BalanceMutator,
     private realtime: RealtimeGateway,
+    private outboxRelayer?: OutboxRelayer,
   ) {}
 
   /** 주문 접수 — 잔액/보유 홀드(락 적용) + orders/outbox 동일 트랜잭션 (스펙 3.2의 1~2단계) */
@@ -55,6 +58,9 @@ export class OrderService {
     if (!Number.isInteger(qty) || qty <= 0) throw new BadRequestException("수량은 양의 정수");
     if (type === "LIMIT" && (!Number.isInteger(price) || price! <= 0)) {
       throw new BadRequestException("지정가는 양의 정수");
+    }
+    if (!SYMBOLS.some((definition) => definition.symbol === symbol)) {
+      throw new NotFoundException(`없는 종목: ${symbol}`);
     }
 
     const marketSymbol = await this.prisma.marketSymbol.findUnique({ where: { symbol } });
@@ -117,6 +123,7 @@ export class OrderService {
       return order;
     });
 
+    this.outboxRelayer?.flushSoon();
     this.realtime.notifyAccount(accountId, { type: "account_update" });
     return order;
   }
@@ -140,6 +147,7 @@ export class OrderService {
     await this.prisma.outbox.create({
       data: { eventId: event.eventId, topic: event.topic, payload: event as object },
     });
+    this.outboxRelayer?.flushSoon();
     return { ok: true };
   }
 

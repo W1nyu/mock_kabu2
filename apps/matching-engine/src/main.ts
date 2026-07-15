@@ -33,10 +33,11 @@ async function processMessages(
   stream: Redis,
   engine: MatchingEngine,
   messages: { id: string; ev: OrderStreamEvent }[],
+  recovering = false,
 ) {
   for (const { id, ev } of messages) {
     try {
-      await engine.handleEvent(ev);
+      await engine.handleEvent(ev, { recovery: recovering });
       await stream.xack(STREAMS.ORDERS, GROUP, id);
     } catch (e) {
       // DB/Redis 실패는 ACK하지 않는다. 다음 XAUTOCLAIM이 동일 eventId를 다시
@@ -94,7 +95,7 @@ async function main() {
       try {
         const claimed = await reclaimPending(stream, CONSUMER, claimCursor);
         claimCursor = claimed.nextCursor;
-        await processMessages(stream, engine, parseMessages([[STREAMS.ORDERS, claimed.messages]]));
+        await processMessages(stream, engine, parseMessages([[STREAMS.ORDERS, claimed.messages]]), true);
       } catch (e) {
         console.error("[engine] xautoclaim error, retrying", e);
       }

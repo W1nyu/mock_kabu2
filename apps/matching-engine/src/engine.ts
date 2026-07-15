@@ -26,7 +26,7 @@ import {
 
 const DEPTH = 10;
 // bot11..bot15 can contain an interrupted trial generation.  The API creates
-// bot16..bot20 as the clean, symbol-scoped liquidity reserve generation.
+// bot16+ as the clean, symbol-scoped liquidity reserve generation.
 // Keep this matching-side identity check deliberately exact so ordinary bot
 // or user accounts can never gain bootstrap priority.
 const LIQUIDITY_RESERVE_START_INDEX = 16;
@@ -49,6 +49,11 @@ interface SettlementOutboxRecord {
 }
 
 const SETTLEMENT_OUTBOX_BATCH = 500;
+
+interface HandleEventOptions {
+  /** Pending entries claimed from a previous consumer need the legacy DB fallback. */
+  recovery?: boolean;
+}
 
 /**
  * applyOrder/cancelOrder는 입력 book을 직접 변경한다. DB 트랜잭션이 실패했을 때
@@ -96,7 +101,7 @@ export class MatchingEngine {
   ) {}
 
   /**
-   * Return only the fixed bot16..bot20 account IDs, paired with their one
+   * Return only the symbol-scoped bot16+ account IDs, paired with their one
    * allowed symbol.  We intentionally resolve this through both auth.users
    * and account.accounts instead of trusting an order's accountId or any
    * nickname.  Existing databases created before the reserve feature simply
@@ -160,8 +165,17 @@ export class MatchingEngine {
     return changed;
   }
 
+  private bookContainsOrder(book: Orderbook, orderId: string): boolean {
+    return [...book.bids, ...book.asks].some((order) => order.orderId === orderId);
+  }
+
   async bootstrap(): Promise<void> {
-    const symbols = await this.prisma.marketSymbol.findMany();
+    // The DB can retain delisted rows as historical data while runtime books
+    // only exist for the currently configured exchange symbols.
+    const activeSymbolList = SYMBOLS.map((symbol) => symbol.symbol);
+    const activeSymbols = new Set(activeSymbolList);
+    const persistedSymbols = await this.prisma.marketSymbol.findMany();
+    const symbols = persistedSymbols.filter((symbol) => activeSymbols.has(symbol.symbol));
     const restoredSymbols = await Promise.all(
       symbols.map(async (symbol) => {
         // 정산 소비자가 잠시 멈췄어도 matching.trades는 체결과 함께 남는다.
@@ -193,15 +207,19 @@ export class MatchingEngine {
 
     const [open, reserveAccountSymbols] = await Promise.all([
       this.prisma.order.findMany({
-      where: { status: { in: ["OPEN", "PARTIAL"] }, type: "LIMIT" },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        where: {
+          symbol: { in: activeSymbolList },
+          status: { in: ["OPEN", "PARTIAL"] },
+          type: "LIMIT",
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       }),
       this.dedicatedReserveAccountSymbols(),
     ]);
     const closePendingIds = await this.durableCloseMarkerIds(open.map((order) => order.id));
     const replayableOpen = open.filter((order) => !closePendingIds.has(order.id));
     // A reserve row is trusted only when the account belongs to the exact
-    // bot16..bot20 identity and the order is for that account's one assigned
+    // bot16+ identity and the order is for that account's one assigned
     // symbol.  Replaying those intact ladders first establishes a non-crossed
     // executable base; legacy/user rows are then admitted only if they do not
     // cross it.  This is strictly an in-memory restart policy, never a DB
@@ -293,6 +311,11 @@ export class MatchingEngine {
     return traded != null;
   }
 
+  /** A normal cancel only needs to reject a close that was already decided. */
+  private async hasDurableCloseMarker(orderId: string): Promise<boolean> {
+    return (await this.durableCloseMarkerIds([orderId])).has(orderId);
+  }
+
   private rememberEvent(eventId: string): void {
     this.seenEventIds.add(eventId);
     if (this.seenEventIds.size > MatchingEngine.SEEN_CAP) {
@@ -379,6 +402,17 @@ export class MatchingEngine {
   }
 
   /**
+   * Bootstrap can restore a still-open limit order before its first stream
+   * delivery is consumed. Record that delivery without rematching the already
+   * resting row, so a later outbox retry cannot revive it after cancellation.
+   */
+  private async claimAlreadyRestingPlacedEvent(eventId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await this.claimEvent(tx, eventId);
+    });
+  }
+
+  /**
    * 체결 원장, last_price, 이벤트 claim을 하나의 DB 트랜잭션으로 확정한다.
    * 따라서 같은 order.placed eventId가 다른 Redis 엔트리로 재전달되어도
    * 한 번만 matching.trades에 기록된다.
@@ -450,7 +484,7 @@ export class MatchingEngine {
     ev: PlacedOrderEvent,
     book: Orderbook,
     result: MatchResult,
-  ): Promise<{ applied: boolean }> {
+  ): Promise<{ applied: boolean; hasSettlementEvents: boolean }> {
     const trades: PersistedTrade[] = result.fills.map((fill) => ({
       id: randomUUID(),
       createdAt: new Date(),
@@ -493,7 +527,7 @@ export class MatchingEngine {
       return true;
     });
 
-    return { applied };
+    return { applied, hasSettlementEvents: settlementEvents.length > 0 };
   }
 
   /** A cancellation owns one durable close event, including across retries. */
@@ -577,10 +611,21 @@ export class MatchingEngine {
     }
   }
 
-  async handleEvent(ev: OrderStreamEvent): Promise<void> {
+  async handleEvent(ev: OrderStreamEvent, options: HandleEventOptions = {}): Promise<void> {
     const book = this.books.get(ev.symbol);
     if (!book) {
-      console.warn(`[engine] unknown symbol: ${ev.symbol}`);
+      // A de-listed symbol can be ACKed only after its order is terminal. If
+      // it is still open, leaving the message pending prevents a live order
+      // and its reservation from being silently lost before the retirement
+      // migration has released it.
+      const order = await this.prisma.order.findUnique({
+        where: { id: ev.orderId },
+        select: { symbol: true, status: true },
+      });
+      if (order?.symbol === ev.symbol && ["OPEN", "PARTIAL"].includes(order.status)) {
+        throw new Error(`[engine] active order for unconfigured symbol: ${ev.symbol}/${ev.orderId}`);
+      }
+      console.warn(`[engine] skip terminal or unknown symbol event: ${ev.symbol}/${ev.orderId}`);
       return;
     }
 
@@ -596,7 +641,26 @@ export class MatchingEngine {
       console.log(`[engine] skip duplicate event ${ev.eventId}`);
       return;
     }
-    if (await this.alreadyApplied(ev)) {
+    // A placed event is authoritatively deduplicated by the event-id claim in
+    // persistPlacedEvent's transaction.  Fresh events used to pay several
+    // redundant DB reads before reaching that claim.  Keep the older data
+    // fallback only for pending messages reclaimed from a prior consumer.
+    let alreadyApplied = false;
+    if (ev.topic === "order.placed") {
+      if (this.bookContainsOrder(book, ev.orderId)) {
+        await this.claimAlreadyRestingPlacedEvent(ev.eventId);
+        alreadyApplied = true;
+      } else if (await this.hasDurableCloseMarker(ev.orderId)) {
+        alreadyApplied = true;
+      } else if (options.recovery) {
+        alreadyApplied = await this.alreadyApplied(ev);
+      }
+    } else if (!options.recovery) {
+      alreadyApplied = await this.hasDurableCloseMarker(ev.orderId);
+    } else {
+      alreadyApplied = await this.alreadyApplied(ev);
+    }
+    if (alreadyApplied) {
       this.rememberEvent(ev.eventId);
       await this.flushSettlementOutboxSafely("already-applied");
       console.log(`[engine] skip previously-applied event ${ev.eventId}`);
@@ -623,7 +687,9 @@ export class MatchingEngine {
       }
       this.books.set(ev.symbol, stagedBook);
       this.rememberEvent(ev.eventId);
-      await this.flushSettlementOutboxSafely("placed");
+      if (persisted.hasSettlementEvents) {
+        await this.flushSettlementOutboxSafely("placed");
+      }
       await this.publishSnapshot(stagedBook);
     } else if (ev.topic === "order.cancel.requested") {
       const stagedBook = cloneBook(book);
@@ -654,7 +720,7 @@ export class MatchingEngine {
       }
       this.books.set(ev.symbol, stagedBook);
       this.rememberEvent(ev.eventId);
-      await this.flushSettlementOutboxSafely("cancel");
+      if (closed) await this.flushSettlementOutboxSafely("cancel");
       // 북에 없으면 이미 체결/취소된 것 — 무시 (멱등)
       await this.publishSnapshot(stagedBook);
       // close 이벤트와 스냅샷 발행이 모두 성공한 뒤에만 메모리 북을 교체한다.
@@ -679,8 +745,19 @@ export class MatchingEngine {
       ts: Date.now(),
     };
     const json = JSON.stringify(snapshot);
-    await this.publisher.publish(CHANNELS.orderbook(book.symbol), json);
-    await this.publisher.set(KEYS.orderbookSnapshot(book.symbol), json);
+    // Pipelining preserves the command order while avoiding a second Redis
+    // round trip for every matched or resting order.
+    const pipeline = this.publisher.pipeline?.();
+    if (pipeline) {
+      pipeline.publish(CHANNELS.orderbook(book.symbol), json);
+      pipeline.set(KEYS.orderbookSnapshot(book.symbol), json);
+      await pipeline.exec();
+    } else {
+      // Keep lightweight unit-test fakes compatible with the production
+      // pipeline path.
+      await this.publisher.publish(CHANNELS.orderbook(book.symbol), json);
+      await this.publisher.set(KEYS.orderbookSnapshot(book.symbol), json);
+    }
   }
 
   /** 접속 직후 스냅샷 제공용 (api가 요청 시 재발행) */

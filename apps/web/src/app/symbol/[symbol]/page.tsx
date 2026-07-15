@@ -25,6 +25,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
   const [info, setInfo] = useState<SymbolInfo | null>(null);
   const [priceHint, setPriceHint] = useState<{ symbol: string; price: number } | null>(null);
   const [livePrice, setLivePrice] = useState<{ symbol: string; price: number } | null>(null);
+  const [orderRefreshKey, setOrderRefreshKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -81,8 +82,9 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
           symbol={symbol}
           priceHint={currentPriceHint}
           lastPrice={currentLivePrice ?? currentInfo?.lastPrice ?? null}
+          onPlaced={() => setOrderRefreshKey((value) => value + 1)}
         />
-        <MyOpenOrders symbol={symbol} />
+        <MyOpenOrders symbol={symbol} refreshKey={orderRefreshKey} />
         <TradesFeed symbol={symbol} />
       </div>
     </div>

@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import type { BalanceMutator } from "@mock-kabu/concurrency";
 import type { PrismaClient } from "@mock-kabu/db";
+import { SYMBOLS } from "@mock-kabu/shared";
 import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
 
@@ -31,7 +32,7 @@ export class AccountService {
 
   async getHoldings(accountId: string) {
     const holdings = await this.prisma.holding.findMany({
-      where: { accountId, qty: { gt: 0 } },
+      where: { accountId, qty: { gt: 0 }, symbol: { in: SYMBOLS.map((symbol) => symbol.symbol) } },
       orderBy: { symbol: "asc" },
     });
     const symbols = await this.prisma.marketSymbol.findMany();

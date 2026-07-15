@@ -15,7 +15,14 @@ interface OrderRow {
   status: string;
 }
 
-export default function MyOpenOrders({ symbol }: { symbol?: string }) {
+export default function MyOpenOrders({
+  symbol,
+  refreshKey,
+}: {
+  symbol?: string;
+  /** Bumps immediately after this page successfully accepts an order. */
+  refreshKey?: number;
+}) {
   const [orders, setOrders] = useState<OrderRow[]>([]);
 
   const refresh = useCallback(() => {
@@ -33,9 +40,14 @@ export default function MyOpenOrders({ symbol }: { symbol?: string }) {
 
   useEffect(() => {
     refresh();
+  }, [refresh, refreshKey]);
+
+  useEffect(() => {
     const user = getUser();
     const unsub = user ? subscribe([`account:${user.accountId}`], () => refresh()) : () => {};
-    const t = setInterval(refresh, 5000);
+    // Account pushes and the order form's direct refresh are the normal path.
+    // Keep a light fallback for a reconnect that missed both.
+    const t = setInterval(refresh, 15_000);
     return () => {
       unsub();
       clearInterval(t);

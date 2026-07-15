@@ -1,4 +1,4 @@
-import type { OrderbookSnapshot, SymbolDef } from "@mock-kabu/shared";
+import type { OrderSide, OrderbookSnapshot, SymbolDef } from "@mock-kabu/shared";
 import { ApiClient, isRejection, type LiveOrder } from "./client";
 import {
   alignToTick,
@@ -20,9 +20,22 @@ export type RetirableQuote = Pick<LiquidityQuote, "side" | "price" | "qty"> & { 
 /** A non-terminal historical PARTIAL kept as both a price boundary and depth. */
 export type PreservedOrderGuard = Pick<LiquidityQuote, "side" | "price" | "qty"> & { id: string };
 
+/** A far price move is safely installed one side at a time. */
+export interface StagedQuoteMigration {
+  targetCenter: number;
+  /** Upward moves install asks first; downward moves install bids first. */
+  firstSide: OrderSide;
+}
+
+export type StagedQuoteMigrationProgress =
+  | "STAGING_FIRST_SIDE"
+  | "WAITING_FOR_FIRST_SIDE_RETIREMENT"
+  | "STAGING_SECOND_SIDE"
+  | "COMPLETE";
+
 export interface MarketMakerOptions {
   /**
-   * Dedicated bot16..bot20 only: if a prior reserve order cannot become
+   * Dedicated bot16+ reserve only: if a prior reserve order cannot become
    * terminal, preserve it as a guard and build a fresh non-crossing ladder.
    * Generic/legacy makers deliberately retain the fail-closed behavior.
    */
@@ -35,13 +48,19 @@ export class MarketMakerStartupBlockedError extends Error {}
 // The reserve owns twelve levels per side, while the REST snapshot exposes
 // ten.  Reconcile substantially faster than the visible cushion can be
 // consumed so a single ordinary market order never leaves a side below eight.
-const QUOTE_RECONCILE_MS = 140;
+const QUOTE_RECONCILE_MS = 250;
 /** Snapshot depth is a budget hint, not a trading dependency. */
 const PRESERVED_DEPTH_REFRESH_MS = 500;
 const STARTUP_CANCEL_TIMEOUT_MS = 5_000;
 const MIN_ADOPTABLE_LEVELS_PER_SIDE = 8;
 /** A partial rung is topped up only after material depletion, not every fill. */
 const REFILL_LOW_WATER_RATIO = 0.45;
+/** Refresh last matched price independently of the lower-frequency PARTIAL snapshot budget. */
+const MARKET_PRICE_REFRESH_MS = 250;
+/** A six-tick sweep is large enough to require a fresh wall, not a slow one-tick slide. */
+const FAST_REPRICE_MIN_TICKS = 6;
+/** Ordinary one-tick quote drift is deliberately paced to avoid cancel/requote churn. */
+const ORDINARY_RECENTER_MIN_INTERVAL_MS = 750;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -191,7 +210,11 @@ function trackedQuotes(
 export function isQuoteSufficient(current: ManagedQuote | undefined, desired: LiquidityQuote): boolean {
   if (!current || current.price !== desired.price) return false;
   if (current.needsNormalization) return false;
-  return current.qty >= Math.max(1, Math.ceil(desired.qty * REFILL_LOW_WATER_RATIO));
+  const refillRatio =
+    typeof desired.refillLowWaterRatio === "number"
+      ? Math.min(1, Math.max(0, desired.refillLowWaterRatio))
+      : REFILL_LOW_WATER_RATIO;
+  return current.qty >= Math.max(1, Math.ceil(desired.qty * refillRatio));
 }
 
 /**
@@ -407,6 +430,48 @@ export function moveGuardedQuoteCenter(
 }
 
 /**
+ * A live last price only overrides the synthetic reference when it is clearly
+ * outside the currently quoted wall. While an internal event is active, its
+ * reference remains authoritative until its own market flow has printed.
+ */
+export function quoteCenterFromMarketPrice(
+  def: SymbolDef,
+  modelPrice: number,
+  marketLastPrice: number | null | undefined,
+  eventActive: boolean,
+): number {
+  const modelCenter = alignToTick(modelPrice, def.tickSize);
+  if (
+    eventActive ||
+    typeof marketLastPrice !== "number" ||
+    !Number.isSafeInteger(marketLastPrice) ||
+    marketLastPrice <= 0
+  ) {
+    return modelCenter;
+  }
+  const marketCenter = alignToTick(marketLastPrice, def.tickSize);
+  return Math.abs(marketCenter - modelCenter) >= FAST_REPRICE_MIN_TICKS * def.tickSize
+    ? marketCenter
+    : modelCenter;
+}
+
+/** Begin the fast one-sided path only when ordinary one-tick reuse is too slow. */
+export function beginStagedQuoteMigration(
+  def: SymbolDef,
+  currentCenter: number,
+  targetCenter: number,
+): StagedQuoteMigration | null {
+  const current = alignToTick(currentCenter, def.tickSize);
+  const target = alignToTick(targetCenter, def.tickSize);
+  const delta = target - current;
+  if (Math.abs(delta) < FAST_REPRICE_MIN_TICKS * def.tickSize) return null;
+  return {
+    targetCenter: target,
+    firstSide: delta > 0 ? "SELL" : "BUY",
+  };
+}
+
+/**
  * A clean dedicated reserve normally already owns the complete ladder after
  * a bots restart.  Accept a compatible, intact older 8-level subset too, so
  * expanding the reserve never starts with a cancel-all gap: the normal fast
@@ -608,6 +673,21 @@ function matchesPlan(active: Map<string, ManagedQuote>, plan: LiquidityQuote[]):
   );
 }
 
+/** True once every rung on one side has a sufficiently funded fresh replacement. */
+export function sideMatchesPlan(
+  active: Map<string, ManagedQuote>,
+  plan: LiquidityQuote[],
+  side: OrderSide,
+): boolean {
+  return plan
+    .filter((quote) => quote.side === side)
+    .every((quote) => isQuoteSufficient(active.get(quoteKey(quote)), quote));
+}
+
+function hasLiveSide(quotes: Iterable<Pick<LiquidityQuote, "side">>, side: OrderSide): boolean {
+  return [...quotes].some((quote) => quote.side === side);
+}
+
 /**
  * Safely replace one quote.  The replacement is posted first so there is no
  * empty-book gap, but only after strict comparison with both active and
@@ -723,6 +803,75 @@ async function refreshWholeLadder(
 }
 
 /**
+ * Move one side of a far-away ladder without ever attempting to coexist with
+ * the old opposite side. Each rung remains post-before-cancel, so the reserve
+ * keeps a continuous executable wall even while its price range is replaced.
+ */
+async function refreshPlanSide(
+  client: ApiClient,
+  symbol: string,
+  plan: LiquidityQuote[],
+  side: OrderSide,
+  active: Map<string, ManagedQuote>,
+  retiring: Map<string, ManagedQuote>,
+  preserved: Map<string, PreservedOrderGuard>,
+  retirable: Map<string, RetirableQuote>,
+): Promise<void> {
+  // A staged side has no same-side self-cross risk. Starting its independent
+  // post-before-cancel replacements together establishes the new wall much
+  // sooner after a sweep; replaceQuote still guards every quote against the
+  // opposite side and preserved PARTIAL orders.
+  await Promise.all(
+    plan
+      .filter((candidate) => candidate.side === side)
+      .sort((a, b) => a.level - b.level)
+      .map(async (quote) => {
+        try {
+          await replaceQuote(client, symbol, quote, active, retiring, preserved, retirable);
+        } catch (error) {
+          console.warn(
+            `[mm:${symbol}] staged ${side} level ${quote.level} deferred`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }),
+  );
+}
+
+/**
+ * Advance a large price relocation. For an upward jump, fresh asks can safely
+ * be posted above all old bids; only after old asks become terminal can fresh
+ * bids move above that former resistance. Downward moves are symmetric.
+ */
+export async function advanceStagedQuoteMigration(
+  client: ApiClient,
+  symbol: string,
+  plan: LiquidityQuote[],
+  migration: StagedQuoteMigration,
+  active: Map<string, ManagedQuote>,
+  retiring: Map<string, ManagedQuote>,
+  preserved: Map<string, PreservedOrderGuard>,
+  retirable: Map<string, RetirableQuote>,
+): Promise<StagedQuoteMigrationProgress> {
+  const firstSide = migration.firstSide;
+  const secondSide: OrderSide = firstSide === "BUY" ? "SELL" : "BUY";
+
+  if (!sideMatchesPlan(active, plan, firstSide)) {
+    await refreshPlanSide(client, symbol, plan, firstSide, active, retiring, preserved, retirable);
+    return "STAGING_FIRST_SIDE";
+  }
+  // `retiring` remains authoritative until the account endpoint observes the
+  // old rows as terminal. Posting the second side before that point could
+  // self-match a cancellation-pending opposite quote in the matching stream.
+  if (hasLiveSide(retiring.values(), firstSide)) return "WAITING_FOR_FIRST_SIDE_RETIREMENT";
+  if (!sideMatchesPlan(active, plan, secondSide)) {
+    await refreshPlanSide(client, symbol, plan, secondSide, active, retiring, preserved, retirable);
+    return "STAGING_SECOND_SIDE";
+  }
+  return "COMPLETE";
+}
+
+/**
  * Retire the old edge only after a complete replacement plan is executable.
  * This is the inverse of the old cancel-all startup behaviour: every visible
  * side remains full while the matching engine processes the two edge swaps.
@@ -830,6 +979,10 @@ export async function runMarketMaker(
   let quoteCenter = alignToTick(ref.get(def.symbol), def.tickSize);
   let lastReconcileAt = 0;
   let lastPreservedDepthRefreshAt = 0;
+  let lastMarketPriceRefreshAt = 0;
+  let lastOrdinaryCenterMoveAt = 0;
+  let observedMarketLastPrice: number | null = null;
+  let stagedMigration: StagedQuoteMigration | null = null;
 
   while (true) {
     try {
@@ -998,6 +1151,61 @@ export async function runMarketMaker(
         lastPreservedDepthRefreshAt = now;
       }
 
+      if (now - lastMarketPriceRefreshAt >= MARKET_PRICE_REFRESH_MS) {
+        try {
+          const snapshot = await client.orderbook(def.symbol);
+          const lastPrice = snapshot.lastPrice;
+          if (typeof lastPrice === "number" && Number.isSafeInteger(lastPrice) && lastPrice > 0) {
+            observedMarketLastPrice = lastPrice;
+          }
+        } catch {
+          // Keep the most recently verified print through a transient read
+          // failure; the model reference remains the eventual fallback.
+        }
+        lastMarketPriceRefreshAt = now;
+      }
+
+      const requestedCenter = quoteCenterFromMarketPrice(
+        def,
+        ref.get(def.symbol),
+        observedMarketLastPrice,
+        ref.hasActiveEvent(def.symbol),
+      );
+      // Preserve an unretirable reserve order as an always-on opposite-side
+      // guard. Clamp drift before a new quote is attempted, rather than
+      // relying on an individual level to be rejected after the center moves.
+      const targetCenter = guardedQuoteCenter(def, requestedCenter, preserved.values()) ?? quoteCenter;
+      if (!stagedMigration && retiring.size === 0 && retirable.size === 0) {
+        stagedMigration = beginStagedQuoteMigration(def, quoteCenter, targetCenter);
+        if (stagedMigration) {
+          console.log(
+            `[mm:${def.symbol}] staged ${stagedMigration.firstSide}-first relocation ${quoteCenter} -> ${stagedMigration.targetCenter}`,
+          );
+        }
+      }
+      if (stagedMigration) {
+        const stagedPlan = buildMarketMakerPlan(def, stagedMigration.targetCenter, budgetedPreserved);
+        const progress = await advanceStagedQuoteMigration(
+          client,
+          def.symbol,
+          stagedPlan,
+          stagedMigration,
+          active,
+          retiring,
+          preserved,
+          retirable,
+        );
+        if (progress === "COMPLETE") {
+          quoteCenter = stagedMigration.targetCenter;
+          console.log(`[mm:${def.symbol}] staged relocation complete at ${quoteCenter}`);
+          stagedMigration = null;
+        }
+        // Avoid the ordinary plan remap while active contains one fresh side
+        // and one old side. The staged helper owns that mixed state.
+        await sleep(80 + Math.random() * 50);
+        continue;
+      }
+
       const currentPlan = buildMarketMakerPlan(def, quoteCenter, budgetedPreserved);
       // A durable partial can be filled between passes. Re-map even when the
       // center is unchanged so an old fresh wall that is now too large is
@@ -1005,11 +1213,6 @@ export async function runMarketMaker(
       for (const quote of remapActiveQuotesForPlan(active, currentPlan)) {
         retirable.set(quote.id, quote);
       }
-      const requestedCenter = alignToTick(ref.get(def.symbol), def.tickSize);
-      // Preserve an unretirable reserve order as an always-on opposite-side
-      // guard.  Clamp drift before a new quote is attempted, rather than
-      // relying on an individual level to be rejected after the center moves.
-      const targetCenter = guardedQuoteCenter(def, requestedCenter, preserved.values()) ?? quoteCenter;
       const previousCenter = quoteCenter;
       // A conventional level-keyed refresh would cancel and recreate all 24
       // quotes for a one-tick move, flooding the single-writer stream and
@@ -1020,10 +1223,12 @@ export async function runMarketMaker(
         const candidateCenter = moveGuardedQuoteCenter(def, quoteCenter, targetCenter, preserved.values());
         const candidatePlan = buildMarketMakerPlan(def, candidateCenter, budgetedPreserved);
         if (
-          candidateCenter === quoteCenter ||
-          canPlanCoexist(candidatePlan, active, retiring, preserved.values(), retirable.values())
+          (candidateCenter === quoteCenter || now - lastOrdinaryCenterMoveAt >= ORDINARY_RECENTER_MIN_INTERVAL_MS) &&
+          (candidateCenter === quoteCenter ||
+            canPlanCoexist(candidatePlan, active, retiring, preserved.values(), retirable.values()))
         ) {
           quoteCenter = candidateCenter;
+          if (candidateCenter !== previousCenter) lastOrdinaryCenterMoveAt = now;
         }
       }
 

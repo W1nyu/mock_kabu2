@@ -68,7 +68,7 @@ export class ApiClient {
   }
 
   /**
-   * Creates/rebalances only the clean fixed bot16..bot20 reserve accounts. It is
+   * Creates/rebalances only the clean symbol-scoped bot16+ reserve accounts. It is
    * intentionally independent of a user JWT so it can run before those bot
    * accounts have logged in.
    */
@@ -91,7 +91,14 @@ export class ApiClient {
 
   recentTrades(symbol: string, limit = 20) {
     return this.request("GET", `/market/trades/${symbol}?limit=${limit}`) as Promise<
-      { price: number; createdAt: string }[]
+      { id: string; price: number; createdAt: string }[]
+    >;
+  }
+
+  /** Durable one-minute closes, returned in chronological order by the API. */
+  marketCandles(symbol: string, limit = 120) {
+    return this.request("GET", `/market/candles/${symbol}?interval=1m&limit=${limit}`) as Promise<
+      { close: number; ts: string }[]
     >;
   }
 

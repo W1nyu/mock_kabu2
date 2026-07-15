@@ -8,22 +8,28 @@ import {
   canAddWithoutSelfTrade,
   canLaddersCoexist,
   GUARD_AWARE_VISIBLE_TARGET_CAP_MULTIPLIER,
-  LIQUIDITY_MIN_BEST_QTY,
+  SAKU_MIN_BEST_QTY,
   liquidityBestWallQty,
+  liquidityMinimumBestQty,
   liquidityQtyByLevel,
+  liquidityQtyByLevelForSymbol,
   liquidityTotalQty,
   moveQuoteCenter,
   VISIBLE_LIQUIDITY_LEVELS,
   visibleLadderNotional,
 } from "../liquidity";
 import {
+  advanceStagedQuoteMigration,
   adoptExistingLadder,
+  beginStagedQuoteMigration,
   budgetPreservedGuardsFromSnapshot,
   guardedQuoteCenter,
   initializeWithPreservedReserveGuards,
   isQuoteSufficient,
   moveGuardedQuoteCenter,
+  quoteCenterFromMarketPrice,
   remapActiveQuotesForPlan,
+  sideMatchesPlan,
   type ManagedQuote,
   retireRetirableQuotesWhenPlanIsSufficient,
   type PreservedOrderGuard,
@@ -131,6 +137,30 @@ test("price-normalised ladders keep comparable visible notional from ₩100 thro
   assert.equal(liquidityQtyByLevel(100).reduce((sum, qty) => sum + qty, 0), 480_000);
 });
 
+test("SAKU keeps its existing side budget concentrated at the near-price wall", () => {
+  const standard = liquidityQtyByLevel(300_000);
+  const saku = liquidityQtyByLevelForSymbol(SAKU, 300_000);
+  const ladder = buildLiquidityLadder(SAKU, 300_000);
+  const bestBid = ladder.find((quote) => quote.side === "BUY" && quote.level === 0)!;
+  const nextBid = ladder.find((quote) => quote.side === "BUY" && quote.level === 1)!;
+  const thirdBid = ladder.find((quote) => quote.side === "BUY" && quote.level === 2)!;
+
+  // The per-side budget stays at 160 shares, but the three nearest executable
+  // rungs are materially thicker than the generic high-price distribution.
+  assert.equal(saku.reduce((sum, qty) => sum + qty, 0), liquidityTotalQty(300_000));
+  assert.equal(saku[0], SAKU_MIN_BEST_QTY);
+  assert.equal(liquidityMinimumBestQty(SAKU), SAKU_MIN_BEST_QTY);
+  assert.ok(saku[1] > standard[1]);
+  assert.ok(saku[2] > standard[2]);
+  assert.ok(bestBid.qty > nextBid.qty && nextBid.qty > thirdBid.qty);
+  assert.equal(liquidityBestWallQty(SAKU, 300_000), SAKU_MIN_BEST_QTY);
+
+  // Existing legacy 80-share best walls are post-before-cancel normalised to
+  // the new 100-share target on the next maker reconciliation pass.
+  assert.equal(isQuoteSufficient({ ...bestBid, id: "legacy-saku-best", qty: 81 }, bestBid), false);
+  assert.equal(isQuoteSufficient({ ...bestBid, id: "fresh-saku-best", qty: 82 }, bestBid), true);
+});
+
 test("a visible SAKU PARTIAL offsets only its fresh side while the opposite wall keeps the shared target", () => {
   const center = 304_000;
   const baseline = buildLiquidityLadder(SAKU, center);
@@ -142,10 +172,10 @@ test("a visible SAKU PARTIAL offsets only its fresh side while the opposite wall
     side: "SELL" as const,
     price: center + SAKU.tickSize,
     // About one normal visible side, deliberately at the fresh best so its
-    // own >=80 shares can supply the taker-wall guarantee.
+    // own >=100 shares can supply the SAKU taker-wall guarantee.
     qty: Math.floor(defaultTarget / (center + SAKU.tickSize)),
   };
-  assert.ok(partial.qty >= LIQUIDITY_MIN_BEST_QTY);
+  assert.ok(partial.qty >= liquidityMinimumBestQty(SAKU));
 
   const guarded = buildGuardAwareLiquidityLadder(SAKU, center, [partial]);
   const freshSellBest = guarded.quotes.find((quote) => quote.side === "SELL" && quote.level === 0)!;
@@ -157,10 +187,10 @@ test("a visible SAKU PARTIAL offsets only its fresh side while the opposite wall
   assert.equal(guarded.preservedVisibleNotional.BUY, 0);
   assert.equal(guarded.freshVisibleBudget.SELL, defaultTarget - partial.price * partial.qty);
   assert.equal(guarded.freshVisibleBudget.BUY, defaultTarget);
-  // The preserved best has the 80-share taker wall, so the fresh duplicate is
+  // The preserved best has the 100-share taker wall, so the fresh duplicate is
   // allowed to be the one-share visible filler instead of doubling depth.
-  assert.ok(freshSellBest.qty >= 1 && freshSellBest.qty < LIQUIDITY_MIN_BEST_QTY);
-  assert.ok(freshBuyBest.qty >= LIQUIDITY_MIN_BEST_QTY);
+  assert.ok(freshSellBest.qty >= 1 && freshSellBest.qty < liquidityMinimumBestQty(SAKU));
+  assert.ok(freshBuyBest.qty >= liquidityMinimumBestQty(SAKU));
   assert.ok(guarded.freshVisibleNotional.SELL < defaultTarget * 0.15);
   assert.ok(guarded.freshVisibleNotional.BUY >= defaultTarget * 0.97);
   assert.ok(guarded.freshVisibleNotional.BUY <= defaultTarget * 1.05);
@@ -191,7 +221,7 @@ test("an enormous visible PARTIAL caps opposite fresh expansion without weakenin
   );
   const hugePartial = {
     side: "SELL" as const,
-    // Keep the actual fresh best unguarded: it must retain its 80-share wall.
+    // Keep the actual fresh best unguarded: it must retain its 100-share wall.
     price: center + SAKU.tickSize * 2,
     qty: Math.ceil((defaultTarget * 3) / (center + SAKU.tickSize * 2)),
   };
@@ -204,7 +234,7 @@ test("an enormous visible PARTIAL caps opposite fresh expansion without weakenin
   assert.equal(guarded.freshVisibleBudget.BUY, expectedCap);
   assert.ok(
     guarded.quotes.find((quote) => quote.side === "SELL" && quote.level === 0)!.qty >=
-      LIQUIDITY_MIN_BEST_QTY,
+      liquidityMinimumBestQty(SAKU),
   );
   assert.ok(guarded.quotes.every((quote) => quote.qty >= 1));
 });
@@ -253,6 +283,17 @@ test("quote center recentering is capped at one tick", () => {
   assert.equal(moveQuoteCenter(120_000, 120_100, 100), 120_100);
 });
 
+test("a large matched price can immediately override an old synthetic reference", () => {
+  assert.equal(quoteCenterFromMarketPrice(KABU, 120_000, 132_000, false), 132_000);
+  assert.equal(quoteCenterFromMarketPrice(KABU, 120_000, 120_500, false), 120_000);
+  assert.equal(quoteCenterFromMarketPrice(KABU, 120_000, 120_600, false), 120_600);
+  assert.equal(beginStagedQuoteMigration(KABU, 120_000, 120_500), null);
+  assert.equal(beginStagedQuoteMigration(KABU, 120_000, 120_600)?.firstSide, "SELL");
+  // An active hidden event moves its reference first; its own executions then
+  // feed the durable re-anchor once the event has settled.
+  assert.equal(quoteCenterFromMarketPrice(KABU, 132_000, 120_000, true), 132_000);
+});
+
 test("a one-tick recenter normalizes a reused best wall when it becomes a smaller outer rung", () => {
   const currentPlan = buildLiquidityLadder(SAKU, 304_000);
   const active = new Map<string, ManagedQuote>(
@@ -290,6 +331,179 @@ test("only a one-tick ladder recenter may overlap existing maker quotes", () => 
   const oldBestAsk = current.find((quote) => quote.side === "SELL" && quote.level === 0)!;
   assert.equal(canAddWithoutSelfTrade({ side: "BUY", price: 120_000 }, [oldBestAsk]), true);
   assert.equal(canAddWithoutSelfTrade({ side: "BUY", price: 120_100 }, [oldBestAsk]), false);
+});
+
+test("a far repricing builds the safe leading side before moving the blocked side", async () => {
+  const run = async (
+    targetCenter: number,
+    expectedFirstSide: "BUY" | "SELL",
+    partial: PreservedOrderGuard,
+  ) => {
+    const oldCenter = 120_000;
+    const oldPlan = buildLiquidityLadder(KABU, oldCenter);
+    const targetPlan = buildLiquidityLadder(KABU, targetCenter);
+    const active = new Map<string, ManagedQuote>();
+    const live = new Map<string, { side: "BUY" | "SELL"; price: number; qty: number }>();
+    for (const quote of oldPlan) {
+      const id = `old-${quote.side}-${quote.level}`;
+      active.set(`${quote.side}:${quote.level}`, { ...quote, id });
+      live.set(id, { side: quote.side, price: quote.price, qty: quote.qty });
+    }
+    // This is a historical PARTIAL in the same direction as the new support
+    // or resistance. It must remain a boundary, never a cancellation target.
+    const preserved = new Map<string, PreservedOrderGuard>([[partial.id, partial]]);
+    live.set(partial.id, partial);
+    const retiring = new Map<string, ManagedQuote>();
+    const retirable = new Map();
+    const placed: Array<{ id: string; side: "BUY" | "SELL"; price: number; qty: number }> = [];
+    const canceled: string[] = [];
+    const client = {
+      placeOrder: async (order: { side: "BUY" | "SELL"; price?: number; qty: number }) => {
+        if (order.price == null) throw new Error("staged LIMIT order omitted its price");
+        const price = order.price;
+        assert.ok(
+          canAddWithoutSelfTrade({ side: order.side, price }, live.values()),
+          `staged ${order.side} at ${price} self-crossed the live book`,
+        );
+        const id = `new-${placed.length}`;
+        const row = { id, side: order.side, price, qty: order.qty };
+        placed.push(row);
+        live.set(id, row);
+        return { id };
+      },
+      cancelOrder: async (id: string) => {
+        assert.ok(live.has(id), `cancelled non-live row ${id}`);
+        canceled.push(id);
+        live.delete(id);
+        return {};
+      },
+    };
+
+    const migration = beginStagedQuoteMigration(KABU, oldCenter, targetCenter);
+    assert.ok(migration);
+    assert.equal(migration!.firstSide, expectedFirstSide);
+
+    const first = await advanceStagedQuoteMigration(
+      client as any,
+      KABU.symbol,
+      targetPlan,
+      migration!,
+      active,
+      retiring,
+      preserved,
+      retirable,
+    );
+    assert.equal(first, "STAGING_FIRST_SIDE");
+    assert.equal(retiring.size, 12);
+    assert.equal(canceled.length, 12);
+    assert.ok(canceled.every((id) => id.startsWith(`old-${expectedFirstSide}-`)));
+    assert.ok(sideMatchesPlan(active, targetPlan, expectedFirstSide));
+
+    // The API reconciliation confirms those cancellations before the opposite
+    // side moves. In production this is reconcileQuotes(), not a blind DELETE.
+    retiring.clear();
+    const second = await advanceStagedQuoteMigration(
+      client as any,
+      KABU.symbol,
+      targetPlan,
+      migration!,
+      active,
+      retiring,
+      preserved,
+      retirable,
+    );
+    assert.equal(second, "STAGING_SECOND_SIDE");
+    assert.ok(sideMatchesPlan(active, targetPlan, "BUY"));
+    assert.ok(sideMatchesPlan(active, targetPlan, "SELL"));
+    assert.equal(canceled.includes(partial.id), false);
+    assert.ok(canceled.slice(12).every((id) => !id.startsWith(`old-${expectedFirstSide}-`)));
+    assert.equal(
+      await advanceStagedQuoteMigration(
+        client as any,
+        KABU.symbol,
+        targetPlan,
+        migration!,
+        active,
+        retiring,
+        preserved,
+        retirable,
+      ),
+      "COMPLETE",
+    );
+
+    const liveRows = [...live.values()];
+    assert.ok(liveRows.every((quote) => canAddWithoutSelfTrade(quote, liveRows)));
+    assert.equal(
+      liveRows.filter((quote) => quote.side === "BUY" && quote.price >= targetCenter - 1_200).length,
+      12,
+    );
+    assert.equal(
+      liveRows.filter((quote) => quote.side === "SELL" && quote.price <= targetCenter + 1_200).length,
+      12,
+    );
+  };
+
+  await run(132_000, "SELL", { id: "partial-support", side: "BUY", price: 118_000, qty: 30 });
+  await run(108_000, "BUY", { id: "partial-resistance", side: "SELL", price: 122_000, qty: 30 });
+});
+
+test("a staged side starts every safe replacement before the first request resolves", async () => {
+  const oldCenter = 120_000;
+  const targetCenter = 121_200;
+  const oldPlan = buildLiquidityLadder(KABU, oldCenter);
+  const targetPlan = buildLiquidityLadder(KABU, targetCenter);
+  const active = new Map<string, ManagedQuote>(
+    oldPlan.map((quote) => [
+      `${quote.side}:${quote.level}`,
+      { ...quote, id: `old-${quote.side}-${quote.level}` },
+    ]),
+  );
+  const retiring = new Map<string, ManagedQuote>();
+  const preserved = new Map<string, PreservedOrderGuard>();
+  const retirable = new Map();
+  const migration = beginStagedQuoteMigration(KABU, oldCenter, targetCenter);
+  assert.ok(migration);
+  assert.equal(migration!.firstSide, "SELL");
+
+  let started = 0;
+  let releaseGate: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  let allStarted: () => void = () => {};
+  const allRequestsStarted = new Promise<void>((resolve) => {
+    allStarted = resolve;
+  });
+  const client = {
+    placeOrder: async () => {
+      const id = `new-${++started}`;
+      if (started === 12) allStarted();
+      await gate;
+      return { id };
+    },
+    cancelOrder: async () => ({}),
+  };
+
+  const progress = advanceStagedQuoteMigration(
+    client as any,
+    KABU.symbol,
+    targetPlan,
+    migration!,
+    active,
+    retiring,
+    preserved,
+    retirable,
+  );
+  const concurrent = await Promise.race([
+    allRequestsStarted.then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 100)),
+  ]);
+  releaseGate();
+
+  assert.equal(concurrent, true);
+  assert.equal(await progress, "STAGING_FIRST_SIDE");
+  assert.equal(started, 12);
+  assert.equal(retiring.size, 12);
 });
 
 test("an unretirable reserve PARTIAL is deduplicated and guarded without self-crossing", () => {

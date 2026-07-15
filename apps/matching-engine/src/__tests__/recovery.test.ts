@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { MatchingEngine } from "../engine";
 import { remainingRestingQty } from "../orderbook";
 
@@ -297,6 +297,8 @@ describe("matching engine restart recovery", () => {
     const claimedEventIds = new Set<string>();
     const createdTrades: unknown[] = [];
     const outboxRows: { id: bigint; eventId: string; payload: unknown; publishedAt: Date | null }[] = [];
+    const findUnique = vi.fn(async () => ({ status: "OPEN" }));
+    const findFirst = vi.fn(async () => null);
     const tx = {
       $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
         const eventId = values[0] as string;
@@ -325,9 +327,9 @@ describe("matching engine restart recovery", () => {
       order: {
         // Keep the order row OPEN and hide trade history to prove that the
         // durable event-id claim — not the legacy fallback — rejects the retry.
-        findUnique: async () => ({ status: "OPEN" }),
+        findUnique,
       },
-      trade: { findFirst: async () => null },
+      trade: { findFirst },
       matchingOutboxEvent: {
         findMany: async () => outboxRows.filter((row) => row.publishedAt == null),
         updateMany: async ({ where, data }: any) => {
@@ -386,6 +388,8 @@ describe("matching engine restart recovery", () => {
     expect((restartedEngine as any).books.get("KABU").asks[0].qty).toBe(5);
     expect(outboxRows).toHaveLength(3);
     expect(outboxRows.every((row) => row.publishedAt != null)).toBe(true);
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(findFirst).not.toHaveBeenCalled();
   });
 
   test("retries a committed trade outbox row with the same event id after XADD fails", async () => {

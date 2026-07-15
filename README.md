@@ -41,7 +41,7 @@ cp packages/db/.env.example packages/db/.env
 # 3. 인프라 (PostgreSQL + Redis)
 pnpm infra:up
 
-# 4. DB 마이그레이션 + 시드 (종목 5개, 봇 계정 10개) — 최초 1회만
+# 4. DB 마이그레이션 + 시드 (종목 7개, 기본 봇 계정 10개) — 최초 1회만
 pnpm db:migrate
 pnpm db:seed
 

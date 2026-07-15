@@ -73,6 +73,16 @@ function makeService() {
 }
 
 describe("LiquidityService.ensureReserves", () => {
+  it("assigns configured listings to deterministic reserves", () => {
+    expect(liquidityReserves().map((reserve) => [reserve.symbol.symbol, reserve.email])).toEqual([
+      ["MOCK", "bot16@bots.local"],
+      ["KABU", "bot17@bots.local"],
+      ["TANU", "bot18@bots.local"],
+      ["SAKU", "bot19@bots.local"],
+      ["NEKO", "bot20@bots.local"],
+    ]);
+  });
+
   it("scales the reserve inventory floor for a future low-priced listing and keeps overlap headroom", () => {
     // ₩100 needs 480,000 shares for one ₩48m side; three copies cover the
     // current ladder plus safe post-before-cancel replacement overlap.

@@ -1,8 +1,10 @@
 import { Controller, Get, Inject, NotFoundException, Param, Query } from "@nestjs/common";
 import type { PrismaClient } from "@mock-kabu/db";
-import { KEYS } from "@mock-kabu/shared";
+import { KEYS, SYMBOLS } from "@mock-kabu/shared";
 import type Redis from "ioredis";
 import { PRISMA, REDIS } from "../core/tokens";
+
+const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
 
 @Controller("market")
 export class MarketController {
@@ -13,12 +15,16 @@ export class MarketController {
 
   @Get("symbols")
   symbols() {
-    return this.prisma.marketSymbol.findMany({ orderBy: { symbol: "asc" } });
+    return this.prisma.marketSymbol.findMany({
+      where: { symbol: { in: [...ACTIVE_SYMBOLS] } },
+      orderBy: { symbol: "asc" },
+    });
   }
 
   /** KST 당일 체결 기준 시세 요약. 캔들 개수 제한과 무관하게 하루 전체를 집계한다. */
   @Get("summary/:symbol")
   async summary(@Param("symbol") symbol: string) {
+    this.assertActiveSymbol(symbol);
     const sessionStart = koreaDayStart();
     const [marketSymbol, [stats]] = await Promise.all([
       this.prisma.marketSymbol.findUnique({ where: { symbol } }),
@@ -64,6 +70,7 @@ export class MarketController {
 
   @Get("orderbook/:symbol")
   async orderbook(@Param("symbol") symbol: string) {
+    this.assertActiveSymbol(symbol);
     const json = await this.redis.get(KEYS.orderbookSnapshot(symbol));
     if (!json) {
       const s = await this.prisma.marketSymbol.findUnique({ where: { symbol } });
@@ -79,6 +86,7 @@ export class MarketController {
     @Query("interval") interval = "1m",
     @Query("limit") limit = "180",
   ) {
+    this.assertActiveSymbol(symbol);
     return this.prisma.candle
       .findMany({
         where: { symbol, interval },
@@ -90,11 +98,16 @@ export class MarketController {
 
   @Get("trades/:symbol")
   trades(@Param("symbol") symbol: string, @Query("limit") limit = "50") {
+    this.assertActiveSymbol(symbol);
     return this.prisma.trade.findMany({
       where: { symbol },
       orderBy: { createdAt: "desc" },
       take: Math.min(Number(limit) || 50, 200),
     });
+  }
+
+  private assertActiveSymbol(symbol: string): void {
+    if (!ACTIVE_SYMBOLS.has(symbol)) throw new NotFoundException(`없는 종목: ${symbol}`);
   }
 }
 

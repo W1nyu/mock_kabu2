@@ -29,6 +29,11 @@ export class OutboxRelayer implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
+  /** Wake the durable relay after a committed order instead of waiting for its next poll. */
+  flushSoon(): void {
+    void this.flush();
+  }
+
   private async flush() {
     if (this.busy) return;
     this.busy = true;
