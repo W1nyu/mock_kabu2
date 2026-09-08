@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 import CandleChart from "@/components/CandleChart";
@@ -8,6 +9,7 @@ import MyPosition from "@/components/MyPosition";
 import OrderForm from "@/components/OrderForm";
 import Orderbook from "@/components/Orderbook";
 import QuoteHeader from "@/components/QuoteHeader";
+import SymbolNews from "@/components/SymbolNews";
 import TradesFeed from "@/components/TradesFeed";
 import { api, getToken } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
@@ -60,6 +62,13 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
 
   return (
     <div className="space-y-4">
+      <Link
+        href="/"
+        className="inline-flex items-center gap-1.5 text-[13px] text-ink-muted transition-colors hover:text-sky"
+      >
+        <span aria-hidden>←</span> 대시보드
+      </Link>
+
       <QuoteHeader
         symbol={symbol}
         name={currentInfo?.name}
@@ -68,7 +77,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 rounded-lg border border-neutral-800 bg-neutral-900 p-2">
+        <div className="lg:col-span-2">
           <CandleChart symbol={symbol} />
         </div>
         <Orderbook symbol={symbol} onPriceClick={(price) => setPriceHint({ symbol, price })} />
@@ -76,7 +85,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
 
       <MyPosition symbol={symbol} />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
         <OrderForm
           key={symbol}
           symbol={symbol}
@@ -87,6 +96,8 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
         <MyOpenOrders symbol={symbol} refreshKey={orderRefreshKey} />
         <TradesFeed symbol={symbol} />
       </div>
+
+      <SymbolNews symbol={symbol} />
     </div>
   );
 }

@@ -28,10 +28,10 @@ const MAX_INTENSITY = 2.6;
  * while an expensive symbol prints fewer.
  */
 export const FLOW_REFERENCE_PRICE = 120_000;
-/** A single aggressive bot may walk at most the nearest three levels. */
-export const MAX_TAKER_LEVELS = 3;
-/** Keeps a one-off sweep material without turning it into a book wipe. */
-export const MAX_TAKER_NOTIONAL = 24_000_000;
+/** A simulated taker may at most test the adjacent level, never clear a wall. */
+export const MAX_TAKER_LEVELS = 2;
+/** Leaves the enlarged first wall available for real user market orders. */
+export const MAX_TAKER_NOTIONAL = 12_000_000;
 
 export interface TakerQuantityOptions {
   /** Current executable price (best ask for BUY, best bid for SELL). */
@@ -78,8 +78,8 @@ export function chooseBookLevelIndex(levelCount: number, random: () => number = 
 
 /**
  * Produces two genuinely different execution shapes. Most orders are smaller
- * than the current best wall; a stochastic minority is larger and walks one
- * to three levels. Both shapes scale in shares inversely with price.
+ * than the current best wall; a rare, bounded minority may reach the adjacent
+ * level. Both shapes scale in shares inversely with price.
  */
 export function chooseMarketTakerQuantity(options: TakerQuantityOptions): TakerQuantityDecision {
   const random = options.random ?? Math.random;

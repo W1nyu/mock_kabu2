@@ -36,6 +36,12 @@ interface TradeTick {
 
 type DepthChange = "increase" | "decrease";
 
+// A market maker safely replaces a ladder rung-by-rung. Those intermediate
+// snapshots are real, but rendering every one makes the depth panel cascade
+// mechanically. Keep matching and trade ticks immediate; render only the
+// newest snapshot collected during each short visual batch.
+const ORDERBOOK_RENDER_BATCH_MS = 100;
+
 function finiteNumber(value: unknown): number | null {
   if (value == null || value === "") return null;
   const number = typeof value === "number" ? value : Number(value);
@@ -77,18 +83,32 @@ export default function Orderbook({
   const [depthChanges, setDepthChanges] = useState<Record<string, DepthChange>>({});
   const previousRef = useRef<Snapshot | null>(null);
   const flashTimerRef = useRef<number | null>(null);
+  const orderbookFlushTimerRef = useRef<number | null>(null);
+  const queuedOrderbookRef = useRef<Snapshot | null>(null);
+  const orderbookBatchStartedAtRef = useRef<number | null>(null);
+  const lastOrderbookSeqRef = useRef(0);
   const pendingTicksRef = useRef(new Map<string, TradeTick>());
   const summaryWatermarkRef = useRef<number | null>(null);
 
   useEffect(() => {
     let disposed = false;
     previousRef.current = null;
+    queuedOrderbookRef.current = null;
+    orderbookBatchStartedAtRef.current = null;
+    lastOrderbookSeqRef.current = 0;
     pendingTicksRef.current.clear();
     summaryWatermarkRef.current = null;
     setExecutionStats(null);
     setDepthChanges({});
     api<Snapshot>(`/market/orderbook/${symbol}`, { auth: false })
       .then((initial) => {
+        // A socket snapshot can win the initial REST race. Never replace a
+        // newer received sequence with the older bootstrap response.
+        if (initial.seq < lastOrderbookSeqRef.current) return;
+        lastOrderbookSeqRef.current = initial.seq;
+        if (queuedOrderbookRef.current && queuedOrderbookRef.current.seq <= initial.seq) {
+          queuedOrderbookRef.current = null;
+        }
         previousRef.current = initial;
         setSnap(initial);
       })
@@ -116,7 +136,37 @@ export default function Orderbook({
 
     loadSummary();
     const refreshTimer = window.setInterval(loadSummary, 30_000);
-    let lastSeq = 0;
+    const flushOrderbook = () => {
+      orderbookFlushTimerRef.current = null;
+      orderbookBatchStartedAtRef.current = null;
+      const next = queuedOrderbookRef.current;
+      queuedOrderbookRef.current = null;
+      if (!next || disposed) return;
+
+      const previous = previousRef.current;
+      const changes = findDepthChanges(previous, next);
+      previousRef.current = next;
+      setSnap(next);
+      if (Object.keys(changes).length > 0) {
+        setDepthChanges(changes);
+        if (flashTimerRef.current != null) window.clearTimeout(flashTimerRef.current);
+        flashTimerRef.current = window.setTimeout(() => setDepthChanges({}), 900);
+      }
+    };
+    const queueOrderbook = (next: Snapshot) => {
+      if (!Number.isSafeInteger(next.seq) || next.seq <= lastOrderbookSeqRef.current) return;
+      lastOrderbookSeqRef.current = next.seq;
+      queuedOrderbookRef.current = next;
+
+      const now = Date.now();
+      const batchStartedAt = orderbookBatchStartedAtRef.current ?? now;
+      orderbookBatchStartedAtRef.current = batchStartedAt;
+      const elapsed = now - batchStartedAt;
+      const delay = Math.max(0, ORDERBOOK_RENDER_BATCH_MS - elapsed);
+      if (orderbookFlushTimerRef.current == null) {
+        orderbookFlushTimerRef.current = window.setTimeout(flushOrderbook, delay);
+      }
+    };
     const unsubscribe = subscribe([`orderbook:${symbol}`, `trades:${symbol}`], ({ channel, data }) => {
       if (channel === `trades:${symbol}`) {
         const tick = parseTick(data);
@@ -129,24 +179,14 @@ export default function Orderbook({
         }
         return;
       }
-      if (channel === `orderbook:${symbol}` && data.seq > lastSeq) {
-        const previous = previousRef.current;
-        const changes = findDepthChanges(previous, data);
-        lastSeq = data.seq;
-        previousRef.current = data;
-        setSnap(data);
-        if (Object.keys(changes).length > 0) {
-          setDepthChanges(changes);
-          if (flashTimerRef.current != null) window.clearTimeout(flashTimerRef.current);
-          flashTimerRef.current = window.setTimeout(() => setDepthChanges({}), 900);
-        }
-      }
+      if (channel === `orderbook:${symbol}`) queueOrderbook(data as Snapshot);
     });
     return () => {
       disposed = true;
       window.clearInterval(refreshTimer);
       unsubscribe();
       if (flashTimerRef.current != null) window.clearTimeout(flashTimerRef.current);
+      if (orderbookFlushTimerRef.current != null) window.clearTimeout(orderbookFlushTimerRef.current);
     };
   }, [symbol]);
 
@@ -154,10 +194,10 @@ export default function Orderbook({
     executionStats && executionStats.sellVolume > 0 ? (executionStats.buyVolume / executionStats.sellVolume) * 100 : null;
   const executionStrengthTone =
     executionStrength == null || executionStrength === 100
-      ? "text-neutral-400"
+      ? "text-ink-muted"
       : executionStrength > 100
-        ? "text-red-400"
-        : "text-blue-400";
+        ? "text-up"
+        : "text-down";
 
   const maxQty = Math.max(
     1,
@@ -172,19 +212,18 @@ export default function Orderbook({
   ];
 
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-900">
-      <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold text-neutral-400">
-        <div className="flex items-center justify-between gap-2">
-          <span>호가창</span>
-          <span
-            className={executionStrengthTone}
-            title="체결강도 = (KST 당일 매수 체결량 ÷ 매도 체결량) × 100입니다. 100% 초과는 매수 우위, 미만은 매도 우위입니다."
-          >
-            체결강도 {executionStrength != null ? `${executionStrength.toFixed(1)}%` : "—"}
-          </span>
-        </div>
+    <div className="glass flex flex-col overflow-hidden">
+      <div className="panel-head">
+        <span className="panel-title">호가창</span>
+        <span
+          className={`num text-[11px] font-semibold ${executionStrengthTone}`}
+          title="체결강도 = (KST 당일 매수 체결량 ÷ 매도 체결량) × 100입니다. 100% 초과는 매수 우위, 미만은 매도 우위입니다."
+        >
+          체결강도 {executionStrength != null ? `${executionStrength.toFixed(1)}%` : "—"}
+        </span>
       </div>
-      <div className="text-xs tabular-nums">
+
+      <div className="num flex flex-1 flex-col justify-center py-1 text-xs">
         {/* 매도(asks): 낮은 가격이 아래로 */}
         <div className="flex flex-col-reverse">
           {pad(snap?.asks ?? []).map((l, i) =>
@@ -202,9 +241,14 @@ export default function Orderbook({
             ),
           )}
         </div>
-        <div className="border-y border-neutral-800 px-3 py-1.5 text-center text-sm font-bold text-neutral-100">
-          {snap?.lastPrice != null ? fmt.format(snap.lastPrice) : "—"}
+
+        <div className="my-1 flex items-baseline justify-center gap-2 border-y border-hairline-soft bg-white/3 px-4 py-2">
+          <span className="text-[10px] tracking-wide text-ink-faint uppercase">체결가</span>
+          <span className="text-base font-semibold">
+            {snap?.lastPrice != null ? fmt.format(snap.lastPrice) : "—"}
+          </span>
         </div>
+
         <div>
           {pad(snap?.bids ?? []).map((l, i) =>
             l ? (
@@ -222,16 +266,16 @@ export default function Orderbook({
           )}
         </div>
       </div>
+
+      <p className="border-t border-hairline-soft px-4 py-2 text-[11px] text-ink-faint">
+        가격을 클릭하면 주문 폼에 입력됩니다
+      </p>
     </div>
   );
 }
 
 function EmptyRow() {
-  return (
-    <div className="flex w-full justify-between px-3 py-0.5 text-neutral-700">
-      <span>&nbsp;</span>
-    </div>
-  );
+  return <div className="px-4 py-1 text-transparent">&nbsp;</div>;
 }
 
 function Row({
@@ -250,20 +294,20 @@ function Row({
   const width = Math.max(2, (level.qty / maxQty) * 100);
   return (
     <button
-      className={`relative flex w-full justify-between px-3 py-0.5 transition-colors hover:bg-neutral-800 ${
-        change === "decrease" ? "bg-amber-400/15" : change === "increase" ? "bg-emerald-400/10" : ""
+      className={`group relative flex w-full items-center justify-between px-4 py-1 transition-colors hover:bg-white/6 ${
+        change === "decrease" ? "bg-warn/12" : change === "increase" ? "bg-ok/10" : ""
       }`}
       onClick={() => onClick?.(level.price)}
       title="클릭하면 주문 가격에 입력됩니다"
     >
       <span
-        className={`absolute inset-y-0 right-0 ${side === "ask" ? "bg-blue-500/15" : "bg-red-500/15"}`}
+        className={`absolute inset-y-px right-0 rounded-l-[3px] ${side === "ask" ? "bg-down/14" : "bg-up/14"}`}
         style={{ width: `${width}%` }}
       />
-      <span className={`relative ${side === "ask" ? "text-blue-400" : "text-red-400"}`}>
+      <span className={`relative font-medium ${side === "ask" ? "text-down" : "text-up"}`}>
         {fmt.format(level.price)}
       </span>
-      <span className="relative text-neutral-300">{fmt.format(level.qty)}</span>
+      <span className="relative text-ink-muted">{fmt.format(level.qty)}</span>
     </button>
   );
 }

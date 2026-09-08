@@ -55,8 +55,6 @@ const STARTUP_CANCEL_TIMEOUT_MS = 5_000;
 const MIN_ADOPTABLE_LEVELS_PER_SIDE = 8;
 /** A partial rung is topped up only after material depletion, not every fill. */
 const REFILL_LOW_WATER_RATIO = 0.45;
-/** Refresh last matched price independently of the lower-frequency PARTIAL snapshot budget. */
-const MARKET_PRICE_REFRESH_MS = 250;
 /** A six-tick sweep is large enough to require a fresh wall, not a slow one-tick slide. */
 const FAST_REPRICE_MIN_TICKS = 6;
 /** Ordinary one-tick quote drift is deliberately paced to avoid cancel/requote churn. */
@@ -169,33 +167,25 @@ function ownBookQuotes(
   return [...active.values(), ...retiring.values(), ...retirable.values()];
 }
 
-async function refreshBudgetedPreservedGuards(
-  client: ApiClient,
-  symbol: string,
+function refreshBudgetedPreservedGuards(
+  snapshot: Pick<OrderbookSnapshot, "bids" | "asks"> | null | undefined,
   active: Map<string, ManagedQuote>,
   retiring: Map<string, ManagedQuote>,
   preserved: Map<string, PreservedOrderGuard>,
   retirable: Map<string, RetirableQuote>,
   budgeted: Map<string, PreservedOrderGuard>,
-): Promise<void> {
+): void {
   if (preserved.size === 0) {
     budgeted.clear();
     return;
   }
-  try {
-    const snapshot = await client.orderbook(symbol);
-    const next = budgetPreservedGuardsFromSnapshot(
-      preserved.values(),
-      snapshot,
-      ownBookQuotes(active, retiring, retirable),
-    );
-    budgeted.clear();
-    for (const [id, guard] of next) budgeted.set(id, guard);
-  } catch {
-    // Do not reuse unverified historical depth after a snapshot failure.
-    // A temporary full fresh wall is safe; the raw PARTIAL remains a boundary.
-    budgeted.clear();
-  }
+  const next = budgetPreservedGuardsFromSnapshot(
+    preserved.values(),
+    snapshot,
+    ownBookQuotes(active, retiring, retirable),
+  );
+  budgeted.clear();
+  for (const [id, guard] of next) budgeted.set(id, guard);
 }
 
 function trackedQuotes(
@@ -591,16 +581,14 @@ export function adoptExistingLadder(
  * observed them as terminal.  Dropping them when DELETE returns would leave a
  * window in which a new opposite quote can self-match in the matching stream.
  */
-async function reconcileQuotes(
-  client: ApiClient,
-  symbol: string,
+function reconcileQuotes(
+  orders: LiveOrder[],
   active: Map<string, ManagedQuote>,
   retiring: Map<string, ManagedQuote>,
   preserved: Map<string, PreservedOrderGuard>,
   retirable: Map<string, RetirableQuote>,
   budgetedPreserved: Map<string, PreservedOrderGuard>,
-): Promise<void> {
-  const orders = await client.myLiveOrders(symbol);
+): void {
   const liveById = new Map(orders.map((order) => [order.id, order]));
   // A per-symbol live list normally contains this maker's 24 quotes.  If it
   // reaches the API cap, retain unknown IDs rather than allowing an old
@@ -979,7 +967,6 @@ export async function runMarketMaker(
   let quoteCenter = alignToTick(ref.get(def.symbol), def.tickSize);
   let lastReconcileAt = 0;
   let lastPreservedDepthRefreshAt = 0;
-  let lastMarketPriceRefreshAt = 0;
   let lastOrdinaryCenterMoveAt = 0;
   let observedMarketLastPrice: number | null = null;
   let stagedMigration: StagedQuoteMigration | null = null;
@@ -1134,35 +1121,34 @@ export async function runMarketMaker(
 
       const now = Date.now();
       if (now - lastReconcileAt >= QUOTE_RECONCILE_MS) {
-        await reconcileQuotes(client, def.symbol, active, retiring, preserved, retirable, budgetedPreserved);
-        lastReconcileAt = now;
-      }
-
-      if (now - lastPreservedDepthRefreshAt >= PRESERVED_DEPTH_REFRESH_MS) {
-        await refreshBudgetedPreservedGuards(
-          client,
-          def.symbol,
-          active,
-          retiring,
-          preserved,
-          retirable,
-          budgetedPreserved,
-        );
-        lastPreservedDepthRefreshAt = now;
-      }
-
-      if (now - lastMarketPriceRefreshAt >= MARKET_PRICE_REFRESH_MS) {
         try {
-          const snapshot = await client.orderbook(def.symbol);
-          const lastPrice = snapshot.lastPrice;
+          // A single account-scoped snapshot replaces the previous separate
+          // `/orders?status=live` and `/market/orderbook` polling calls.
+          const state = await client.quoteState(def.symbol);
+          reconcileQuotes(state.orders, active, retiring, preserved, retirable, budgetedPreserved);
+          const lastPrice = state.orderbook.lastPrice;
           if (typeof lastPrice === "number" && Number.isSafeInteger(lastPrice) && lastPrice > 0) {
             observedMarketLastPrice = lastPrice;
           }
-        } catch {
-          // Keep the most recently verified print through a transient read
-          // failure; the model reference remains the eventual fallback.
+          if (now - lastPreservedDepthRefreshAt >= PRESERVED_DEPTH_REFRESH_MS) {
+            refreshBudgetedPreservedGuards(
+              state.orderbook,
+              active,
+              retiring,
+              preserved,
+              retirable,
+              budgetedPreserved,
+            );
+            lastPreservedDepthRefreshAt = now;
+          }
+          lastReconcileAt = now;
+        } catch (error) {
+          // Do not reuse unverified historical PARTIAL depth after a combined
+          // snapshot failure. Raw guards still prevent a self-cross, while a
+          // fresh full wall is safer than under-allocating visible liquidity.
+          budgetedPreserved.clear();
+          throw error;
         }
-        lastMarketPriceRefreshAt = now;
       }
 
       const requestedCenter = quoteCenterFromMarketPrice(

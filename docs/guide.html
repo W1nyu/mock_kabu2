@@ -1,0 +1,539 @@
+<title>mock kabu 운영 가이드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap">
+<style>
+  :root{
+    --primary:#0066cc;
+    --primary-focus:#0071e3;
+    --ink:#1d1d1f;
+    --ink-80:#333333;
+    --ink-48:#7a7a7a;
+    --hairline:#e0e0e0;
+    --divider-soft:#f0f0f0;
+    --canvas:#ffffff;
+    --parchment:#f5f5f7;
+    --pearl:#fafafc;
+    --tile:#272729;
+    --tile-2:#2a2a2c;
+    --tile-3:#252527;
+    --on-dark:#ffffff;
+    --on-dark-muted:#cccccc;
+    --link-on-dark:#2997ff;
+    --code-bg:#f5f5f7;
+    --code-ink:#1d1d1f;
+    --good:#1d7a45;
+    --warn:#9a5b00;
+    --crit:#b3261e;
+    --font-display:"SF Pro Display",system-ui,-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    --font-text:"SF Pro Text",system-ui,-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+    --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --primary:#2997ff;
+      --primary-focus:#2997ff;
+      --ink:#f5f5f7;
+      --ink-80:#d2d2d7;
+      --ink-48:#8e8e93;
+      --hairline:#3a3a3c;
+      --divider-soft:#2a2a2c;
+      --canvas:#161617;
+      --parchment:#0b0b0c;
+      --pearl:#1c1c1e;
+      --code-bg:#1c1c1e;
+      --code-ink:#f5f5f7;
+      --good:#4cc38a;
+      --warn:#e0a33e;
+      --crit:#ff6961;
+    }
+  }
+  :root[data-theme="dark"]{
+    --primary:#2997ff;
+    --primary-focus:#2997ff;
+    --ink:#f5f5f7;
+    --ink-80:#d2d2d7;
+    --ink-48:#8e8e93;
+    --hairline:#3a3a3c;
+    --divider-soft:#2a2a2c;
+    --canvas:#161617;
+    --parchment:#0b0b0c;
+    --pearl:#1c1c1e;
+    --code-bg:#1c1c1e;
+    --code-ink:#f5f5f7;
+    --good:#4cc38a;
+    --warn:#e0a33e;
+    --crit:#ff6961;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--canvas);
+    color:var(--ink);
+    font-family:var(--font-text);
+    font-size:17px;
+    font-weight:400;
+    line-height:1.47;
+    letter-spacing:-0.374px;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--primary);text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--primary-focus);outline-offset:3px;border-radius:5px;}
+
+  .tile{padding:80px 24px;}
+  .tile--light{background:var(--canvas);color:var(--ink);}
+  .tile--parchment{background:var(--parchment);color:var(--ink);}
+  .tile--dark{background:var(--tile);color:var(--on-dark);}
+  .tile--dark-2{background:var(--tile-2);color:var(--on-dark);}
+  .tile--dark .lead,.tile--dark-2 .lead{color:var(--on-dark-muted);}
+  .tile--dark a,.tile--dark-2 a{color:var(--link-on-dark);}
+  .wrap{max-width:980px;margin:0 auto;}
+  .wrap--wide{max-width:1120px;margin:0 auto;}
+
+  h1,h2,h3{font-family:var(--font-display);font-weight:600;text-wrap:balance;margin:0;}
+  h1{font-size:56px;line-height:1.07;letter-spacing:-0.6px;}
+  h2{font-size:40px;line-height:1.1;letter-spacing:-0.4px;}
+  h3{font-size:21px;line-height:1.19;letter-spacing:-0.2px;}
+  .lead{font-family:var(--font-display);font-size:28px;font-weight:400;line-height:1.2;letter-spacing:-0.2px;color:var(--ink-80);}
+  .lead-airy{font-size:24px;font-weight:300;line-height:1.5;color:var(--ink-80);}
+  .eyebrow{font-size:14px;font-weight:600;line-height:1.29;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-48);}
+  .tile--dark .eyebrow,.tile--dark-2 .eyebrow{color:var(--on-dark-muted);}
+  .caption{font-size:14px;line-height:1.43;letter-spacing:-0.224px;color:var(--ink-48);}
+  .tile--dark .caption,.tile--dark-2 .caption{color:var(--on-dark-muted);}
+  p{margin:0;}
+
+  .stack{display:flex;flex-direction:column;gap:24px;}
+  .stack--tight{gap:12px;}
+  .stack--loose{gap:48px;}
+  .head{display:flex;flex-direction:column;gap:17px;margin-bottom:48px;}
+
+  .globalnav{position:sticky;top:0;z-index:20;background:#000;color:#fff;min-height:44px;display:flex;align-items:center;justify-content:center;padding:8px 24px;}
+  .globalnav ul{display:flex;gap:32px;list-style:none;margin:0;padding:0;flex-wrap:wrap;justify-content:center;}
+  .globalnav a{font-size:12px;line-height:1.6;letter-spacing:-0.12px;color:#f5f5f7;}
+  .globalnav a:hover{color:#fff;text-decoration:none;opacity:.7;}
+
+  .btn{display:inline-flex;align-items:center;justify-content:center;font-size:17px;line-height:1.24;letter-spacing:-0.374px;border-radius:9999px;padding:11px 22px;border:0;cursor:pointer;transition:transform .15s ease;}
+  .btn:hover{text-decoration:none;}
+  .btn:active{transform:scale(.95);}
+  .btn--primary{background:var(--primary);color:#fff;}
+  .btn--ghost{background:transparent;color:var(--primary);border:1px solid var(--primary);}
+  .cta-row{display:flex;gap:12px;flex-wrap:wrap;}
+
+  pre{margin:0;background:var(--code-bg);color:var(--code-ink);border:1px solid var(--hairline);border-radius:8px;padding:17px 20px;overflow-x:auto;font-family:var(--font-mono);font-size:14px;line-height:1.7;letter-spacing:0;}
+  .tile--dark pre,.tile--dark-2 pre{background:#000;color:#f5f5f7;border-color:#3a3a3c;}
+  code{font-family:var(--font-mono);font-size:.88em;letter-spacing:0;}
+  p code,li code,td code{background:var(--pearl);border:1px solid var(--divider-soft);border-radius:5px;padding:1px 6px;}
+  .tile--dark p code,.tile--dark li code,.tile--dark-2 p code{background:#1c1c1e;border-color:#3a3a3c;color:#f5f5f7;}
+  pre .c{color:var(--ink-48);}
+  .tile--dark pre .c,.tile--dark-2 pre .c{color:#8e8e93;}
+
+  ol.steps{list-style:none;counter-reset:s;margin:0;padding:0;display:flex;flex-direction:column;gap:32px;}
+  ol.steps>li{counter-increment:s;display:grid;grid-template-columns:36px 1fr;gap:20px;align-items:start;}
+  ol.steps>li::before{content:counter(s);font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--primary);border:1px solid var(--primary);border-radius:9999px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;letter-spacing:0;}
+  .step-body{display:flex;flex-direction:column;gap:12px;min-width:0;}
+
+  .grid{display:grid;gap:24px;}
+  .grid--3{grid-template-columns:repeat(3,1fr);}
+  .grid--2{grid-template-columns:repeat(2,1fr);}
+  .card{background:var(--canvas);border:1px solid var(--hairline);border-radius:18px;padding:24px;display:flex;flex-direction:column;gap:8px;}
+  .card h3{font-size:17px;font-weight:600;line-height:1.24;}
+  .card p{font-size:14px;line-height:1.5;color:var(--ink-80);}
+  .card .meta{font-family:var(--font-mono);font-size:12px;letter-spacing:0;color:var(--ink-48);}
+
+  .table-scroll{overflow-x:auto;border:1px solid var(--hairline);border-radius:18px;background:var(--canvas);}
+  table{width:100%;border-collapse:collapse;font-size:15px;}
+  th,td{text-align:left;padding:14px 20px;border-bottom:1px solid var(--divider-soft);vertical-align:top;}
+  th{font-size:14px;font-weight:600;color:var(--ink-48);letter-spacing:-0.224px;white-space:nowrap;}
+  tbody tr:last-child td{border-bottom:0;}
+  td.num{font-variant-numeric:tabular-nums;font-family:var(--font-mono);font-size:13px;letter-spacing:0;white-space:nowrap;}
+
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;letter-spacing:-0.12px;border-radius:9999px;padding:4px 10px;white-space:nowrap;}
+  .pill--keep{background:rgba(29,122,69,.12);color:var(--good);}
+  .pill--wipe{background:rgba(179,38,30,.12);color:var(--crit);}
+  .pill--warn{background:rgba(154,91,0,.14);color:var(--warn);}
+
+  .callout{border-left:3px solid var(--crit);padding:4px 0 4px 20px;display:flex;flex-direction:column;gap:8px;}
+  .callout .eyebrow{color:var(--crit);}
+
+  .flow{display:flex;flex-direction:column;gap:0;}
+  .flow-node{border:1px solid #3a3a3c;border-radius:11px;padding:14px 20px;background:var(--tile-3);display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;}
+  .flow-node b{font-family:var(--font-display);font-size:17px;font-weight:600;letter-spacing:-0.374px;color:#fff;}
+  .flow-node span{font-size:14px;color:var(--on-dark-muted);}
+  .flow-arrow{align-self:center;color:var(--on-dark-muted);font-size:14px;padding:8px 0;letter-spacing:0;}
+
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:8px 20px;font-size:15px;margin:0;}
+  .kv dt{color:var(--ink-48);font-size:14px;}
+  .kv dd{margin:0;}
+
+  footer{background:var(--parchment);color:var(--ink-80);padding:64px 24px;}
+  footer .fine{font-size:12px;line-height:1.6;letter-spacing:-0.12px;color:var(--ink-48);}
+  footer ul{list-style:none;margin:0;padding:0;}
+  footer li{line-height:2.41;font-size:17px;}
+
+  @media (max-width:1068px){
+    h1{font-size:40px;}
+    h2{font-size:34px;}
+  }
+  @media (max-width:833px){
+    .grid--3,.grid--2{grid-template-columns:1fr;}
+  }
+  @media (max-width:640px){
+    .tile{padding:48px 20px;}
+    h1{font-size:34px;}
+    h2{font-size:28px;}
+    .lead{font-size:21px;}
+    .lead-airy{font-size:19px;}
+    .kv{grid-template-columns:1fr;gap:2px 0;}
+    .kv dd{margin-bottom:12px;}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none !important;animation:none !important;}
+  }
+</style>
+
+<nav class="globalnav" aria-label="문서 내 이동">
+  <ul>
+    <li><a href="#start">시작하기</a></li>
+    <li><a href="#docker">Docker</a></li>
+    <li><a href="#data">데이터 보존</a></li>
+    <li><a href="#features">기능</a></li>
+    <li><a href="#pages">화면</a></li>
+    <li><a href="#flow">체결 흐름</a></li>
+    <li><a href="#ops">운영·복구</a></li>
+  </ul>
+</nav>
+
+<section class="tile tile--light">
+  <div class="wrap stack">
+    <p class="eyebrow">mock kabu 2 · 로컬 모의 거래소</p>
+    <h1>주문부터 정산까지,<br>전 구간이 내 노트북 안에서.</h1>
+    <p class="lead">지정가·시장가 주문을 인메모리 오더북이 가격–시간 우선으로 매칭하고, 봇 10개와 가상 뉴스가 호가창을 계속 움직입니다. PostgreSQL과 Redis만 Docker로 띄우면 나머지는 전부 로컬 프로세스입니다.</p>
+    <div class="cta-row">
+      <a class="btn btn--primary" href="#start">처음 실행하기</a>
+      <a class="btn btn--ghost" href="#docker">Docker 켜고 끄기</a>
+    </div>
+    <dl class="kv" style="margin-top:24px">
+      <dt>웹</dt><dd><a href="http://localhost:3100">http://localhost:3100</a> <span class="caption">Next.js</span></dd>
+      <dt>API</dt><dd><a href="http://localhost:4100">http://localhost:4100</a> <span class="caption">NestJS · REST + WebSocket</span></dd>
+      <dt>필요한 것</dt><dd>Node.js 22+ · pnpm · Docker Desktop</dd>
+    </dl>
+  </div>
+</section>
+
+<section class="tile tile--parchment" id="start">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">최초 1회</p>
+      <h2>설치부터 첫 주문까지</h2>
+      <p class="lead-airy">아래 다섯 단계는 처음 한 번만 필요합니다. 두 번째부터는 두 줄이면 됩니다.</p>
+    </div>
+    <ol class="steps">
+      <li>
+        <div class="step-body">
+          <h3>의존성 설치</h3>
+          <pre><code>pnpm install</code></pre>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <h3>환경변수 파일 생성</h3>
+          <p class="caption">기본값 그대로 써도 됩니다.</p>
+          <pre><code>cp .env.example .env
+cp packages/db/.env.example packages/db/.env</code></pre>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <h3>인프라 기동</h3>
+          <p class="caption">PostgreSQL 16 + Redis 7 컨테이너가 올라옵니다.</p>
+          <pre><code>pnpm infra:up</code></pre>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <h3>마이그레이션 + 시드</h3>
+          <p class="caption">종목 7개와 봇 계정 10개가 만들어집니다. 이 단계만 최초 1회입니다.</p>
+          <pre><code>pnpm db:migrate
+pnpm db:seed</code></pre>
+        </div>
+      </li>
+      <li>
+        <div class="step-body">
+          <h3>전체 기동</h3>
+          <p class="caption">api · settlement · matching-engine · bots · web이 한 번에 뜹니다.</p>
+          <pre><code>pnpm dev</code></pre>
+          <p><a href="http://localhost:3100">localhost:3100</a> 접속 → 회원가입(가상 현금 1,000만원 지급) → 종목 선택 → 매수·매도.</p>
+        </div>
+      </li>
+    </ol>
+    <div class="card" style="margin-top:48px">
+      <h3>두 번째 실행부터</h3>
+      <p>DB 데이터는 Docker 볼륨에 남으므로 마이그레이션·시드는 다시 하지 않습니다.</p>
+      <pre style="margin-top:8px"><code>pnpm infra:up
+pnpm dev</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="tile tile--dark" id="docker">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">Docker</p>
+      <h2>켜는 명령 하나, 끄는 명령 하나.</h2>
+      <p class="lead">Compose 프로젝트 이름이 <code>mock-kabu2</code>로 고정되어 있어, 같은 머신의 다른 프로젝트 컨테이너와 섞이지 않습니다.</p>
+    </div>
+    <div class="grid grid--2">
+      <div class="stack stack--tight">
+        <h3>시작</h3>
+        <pre><code>pnpm infra:up
+<span class="c"># = docker compose --project-name mock-kabu2 up -d</span></code></pre>
+        <p class="caption">postgres · redis 두 컨테이너가 백그라운드로 뜨고, healthcheck가 통과하면 준비 완료입니다.</p>
+      </div>
+      <div class="stack stack--tight">
+        <h3>종료</h3>
+        <pre><code><span class="c"># 1) 앱 종료: pnpm dev 터미널에서 Ctrl+C</span>
+pnpm infra:stop
+<span class="c"># = docker compose --project-name mock-kabu2 stop</span></code></pre>
+        <p class="caption">컨테이너만 멈추고 데이터는 그대로 남습니다. WSL 메모리까지 반환하려면 <code>wsl --shutdown</code>.</p>
+      </div>
+    </div>
+    <div class="stack stack--tight" style="margin-top:32px">
+      <h3>상태 확인</h3>
+      <pre><code>docker compose --project-name mock-kabu2 ps
+docker compose --project-name mock-kabu2 logs -f postgres</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="tile tile--light" id="data">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">데이터 보존</p>
+      <h2>Docker를 꺼도 거래 데이터는 남습니다.</h2>
+      <p class="lead-airy">계좌·주문·체결·원장·캔들은 전부 named volume에 저장됩니다. 컨테이너를 지워도 볼륨은 따로 살아 있어서, 다시 올리면 껐던 시점 그대로 이어집니다. 초기화되는 경우는 볼륨을 명시적으로 지울 때뿐입니다.</p>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>명령</th><th>컨테이너</th><th>데이터</th><th>다시 켤 때</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">pnpm infra:stop</td>
+            <td>정지</td>
+            <td><span class="pill pill--keep">유지</span></td>
+            <td><code>pnpm infra:up</code>만</td>
+          </tr>
+          <tr>
+            <td class="num">pnpm infra:down</td>
+            <td>삭제</td>
+            <td><span class="pill pill--keep">유지</span></td>
+            <td><code>pnpm infra:up</code>만</td>
+          </tr>
+          <tr>
+            <td class="num">PC 재부팅 · Docker 재시작</td>
+            <td>정지</td>
+            <td><span class="pill pill--keep">유지</span></td>
+            <td><code>pnpm infra:up</code>만</td>
+          </tr>
+          <tr>
+            <td class="num">down -v</td>
+            <td>삭제</td>
+            <td><span class="pill pill--wipe">전부 삭제</span></td>
+            <td>migrate + seed부터 다시</td>
+          </tr>
+          <tr>
+            <td class="num">pnpm db:seed</td>
+            <td>영향 없음</td>
+            <td><span class="pill pill--warn">시드 데이터 덮어씀</span></td>
+            <td>—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="grid grid--2" style="margin-top:32px">
+      <div class="card">
+        <h3>데이터가 실제로 사는 곳</h3>
+        <p class="meta">mock-kabu2-pgdata → /var/lib/postgresql/data</p>
+        <p class="meta">mock-kabu2-redisdata → /data (appendonly)</p>
+        <p>이름이 고정된 볼륨이라 컨테이너를 몇 번 지웠다 만들어도 같은 볼륨에 다시 연결됩니다.</p>
+      </div>
+      <div class="card">
+        <h3>포트</h3>
+        <p class="meta">PostgreSQL · localhost:55432 → 5432</p>
+        <p class="meta">Redis · localhost:56379 → 6379</p>
+        <p>기본 포트를 피해 매핑해 두었으므로, 로컬에 다른 PostgreSQL·Redis가 떠 있어도 충돌하지 않습니다.</p>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:32px">
+      <p class="eyebrow">되돌릴 수 없음</p>
+      <p>완전 초기화는 이 한 줄입니다. 실행하면 계좌·주문·체결·원장·캔들이 모두 사라지고, 다음 기동 때 <code>db:migrate</code>와 <code>db:seed</code>를 다시 해야 합니다.</p>
+      <pre><code>docker compose --project-name mock-kabu2 down -v</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="tile tile--parchment" id="features">
+  <div class="wrap wrap--wide">
+    <div class="head">
+      <p class="eyebrow">기능</p>
+      <h2>거래소 한 벌이 통째로 들어 있습니다.</h2>
+    </div>
+    <div class="grid grid--3">
+      <div class="card">
+        <h3>주문 · 체결 · 정산</h3>
+        <p>지정가·시장가 주문을 접수하면 잔액·보유를 홀드하고, 매칭 엔진이 가격–시간 우선으로 체결한 뒤 정산 워커가 잔고·보유·원장·캔들을 갱신합니다.</p>
+      </div>
+      <div class="card">
+        <h3>실시간 호가창</h3>
+        <p>호가·체결·계정 이벤트가 Redis Pub/Sub → API 게이트웨이 → WebSocket으로 브라우저까지 밀려옵니다.</p>
+      </div>
+      <div class="card">
+        <h3>캔들 차트 6종</h3>
+        <p>1분·5분·15분·1시간·4시간·1일. 저장은 1분 봉만 하고 나머지는 조회 시 집계합니다. KST가 UTC+9라 일봉은 09:00에 열립니다.</p>
+      </div>
+      <div class="card">
+        <h3>시장 참여자 봇 10개</h3>
+        <p>마켓메이커 3 · 소액개미 3 · 고래 1 · 노이즈 2 · 모멘텀 1. 추세·변동성 군집 기준가를 공유하며 호가창을 계속 살아 있게 합니다.</p>
+        <p class="meta">bot1@bots.local ~ bot10@bots.local / botpassword</p>
+      </div>
+      <div class="card">
+        <h3>전용 유동성 공급자</h3>
+        <p>종목별 reserve 계정 5개가 양방향 각각 약 ₩120M의 호가벽을 유지합니다. 기존 호가를 먼저 채운 뒤에만 교체해 호가 공백과 불필요한 슬리피지를 막습니다.</p>
+      </div>
+      <div class="card">
+        <h3>가상 뉴스</h3>
+        <p>템플릿 105종에서 종목 호재·악재와 매크로 뉴스를 2~4분마다 생성합니다. 강도에 비례해 봇의 매수·매도 확률이 기울 뿐, 반드시 오르지는 않습니다. 후속 보도로 결과가 뒤집히기도 합니다.</p>
+      </div>
+      <div class="card">
+        <h3>실전 리플레이</h3>
+        <p>해외 주식 10종 · KOSPI 5종 · Bitcoin의 고정 일봉을 한 봉씩 공개합니다. 먼저 200봉을 보여준 뒤 1개월(30봉)~3년(1,095봉)을 재생하고, x0.25~x2 속도와 한 봉 진행을 지원합니다.</p>
+      </div>
+      <div class="card">
+        <h3>락 전략 3종</h3>
+        <p><code>LOCK_STRATEGY</code>로 낙관적 / 비관적(기본) / Redis 분산 락을 전환합니다. 분산 락은 fencing token으로 좀비 쓰기를 막습니다.</p>
+      </div>
+      <div class="card">
+        <h3>멱등성과 안전망</h3>
+        <p>모든 이벤트에 <code>event_id</code>가 붙고 <code>processed_events</code> 테이블로 중복 소비를 무시합니다. DB에는 <code>CHECK(balance &gt;= 0)</code> 제약과 append-only 원장이 있습니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="tile tile--light" id="pages">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">화면</p>
+      <h2>어디에 무엇이 있나</h2>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>경로</th><th>화면</th><th>하는 일</th></tr></thead>
+        <tbody>
+          <tr><td class="num">/</td><td>대시보드</td><td>종목 시세와 보유 현황을 한눈에</td></tr>
+          <tr><td class="num">/symbol/[symbol]</td><td>종목</td><td>호가창 · 캔들차트 · 주문 · 미체결 · 내 포지션</td></tr>
+          <tr><td class="num">/orders</td><td>주문 내역</td><td>접수·체결·취소된 주문 이력</td></tr>
+          <tr><td class="num">/transfer</td><td>이체</td><td>계좌 간 가상 현금 이동</td></tr>
+          <tr><td class="num">/news</td><td>뉴스</td><td>종목 뉴스와 매크로 뉴스 (호재·악재 여부와 강도는 표시하지 않음)</td></tr>
+          <tr><td class="num">/replay</td><td>실전 리플레이</td><td>과거 시세 재생 연습, 로컬 거래소와 계좌 분리</td></tr>
+          <tr><td class="num">/admin</td><td>관전 모드</td><td>현재 락 전략, 충돌·재시도 카운터 실시간</td></tr>
+          <tr><td class="num">/signup · /login</td><td>계정</td><td>가입 시 가상 현금 1,000만원 지급</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="tile tile--dark-2" id="flow">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">체결 흐름</p>
+      <h2>주문 한 건이 지나가는 길</h2>
+      <p class="lead">각 단계는 별도 프로세스이고 사이는 Redis Streams로 이어집니다. 전달 보장은 at-least-once, 중복은 멱등성으로 흡수합니다.</p>
+    </div>
+    <div class="flow">
+      <div class="flow-node"><b>api</b><span>잔액·보유 홀드(락) + orders/outbox를 같은 트랜잭션으로 기록</span></div>
+      <div class="flow-arrow">↓ outbox relayer</div>
+      <div class="flow-node"><b>Redis Streams · orders</b><span>심볼별로 순서 보존</span></div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-node"><b>matching-engine</b><span>single-writer 오더북, 가격–시간 우선 매칭 → trade 이벤트</span></div>
+      <div class="flow-arrow">↓ Redis Streams · trades</div>
+      <div class="flow-node"><b>settlement</b><span>잔액·보유 갱신(락) + 홀드 해제 + 원장·캔들 기록</span></div>
+      <div class="flow-arrow">↓ Redis Pub/Sub</div>
+      <div class="flow-node"><b>web</b><span>API 게이트웨이가 WebSocket으로 호가·체결·계정 변화를 push</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="tile tile--light" id="ops">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">운영 · 복구</p>
+      <h2>검증하고, 어긋났으면 되돌리기</h2>
+    </div>
+    <div class="stack stack--loose">
+      <div class="stack stack--tight">
+        <h3>일상 검증</h3>
+        <pre><code>pnpm test               <span class="c"># 오더북 매칭 + 락 전략 단위 테스트</span>
+pnpm check:consistency  <span class="c"># 원장 합계=잔액, 음수 잔액·보유 0건, 홀드 불변식</span></code></pre>
+      </div>
+      <div class="stack stack--tight">
+        <h3>정산이 비정상 종료된 뒤</h3>
+        <p>먼저 비파괴 dry-run으로 미정산 체결과 주문·예약 상태를 함께 검증합니다. 모순이 있으면 아무 데이터도 바꾸지 않습니다.</p>
+        <pre><code><span class="c"># api / settlement / matching-engine / bots를 먼저 중지</span>
+pnpm recover:settlement
+
+<span class="c"># 출력이 SAFE일 때만 적용</span>
+pnpm run recover:settlement -- --apply --confirm=RECOVER_UNSETTLED_TRADES
+pnpm check:consistency</code></pre>
+        <p class="caption">체결 이력이 주문 수량과 모순되면 자동 복구는 차단됩니다. 그때는 아래 초기화로 깨끗한 시장을 다시 만듭니다.</p>
+      </div>
+      <div class="stack stack--tight">
+        <h3>깨끗한 상태로 다시 시작</h3>
+        <pre><code>docker compose --project-name mock-kabu2 down -v
+pnpm infra:up
+pnpm db:migrate
+pnpm db:seed
+pnpm check:consistency</code></pre>
+      </div>
+      <div class="stack stack--tight">
+        <h3>락 전략 바꾸기</h3>
+        <p><code>.env</code>의 <code>LOCK_STRATEGY</code>를 바꾸고 api를 재기동한 뒤 <a href="http://localhost:3100/admin">/admin</a>에서 충돌·재시도 카운터를 관찰합니다.</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>값</th><th>구현</th></tr></thead>
+            <tbody>
+              <tr><td class="num">optimistic</td><td><code>UPDATE ... WHERE version = ?</code> + 지수 백오프 재시도, 충돌 시 409</td></tr>
+              <tr><td class="num">pessimistic</td><td>기본값. <code>SELECT ... FOR UPDATE</code> 원시 SQL, 계좌 ID 오름차순 잠금, lock_timeout</td></tr>
+              <tr><td class="num">distributed</td><td>Redis <code>SET NX PX</code> + Lua 해제 + fencing token</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="grid grid--2">
+      <div>
+        <p class="eyebrow" style="margin-bottom:8px">더 읽을 문서</p>
+        <ul>
+          <li><a href="../README.md">README</a></li>
+          <li><a href="replay-data-guide.md">실전 리플레이 데이터 가이드</a></li>
+          <li><a href="production-vps-deployment.md">저비용 VPS 운영 배포 가이드</a></li>
+          <li><a href="mock-kabu2-isolation.md">mock_kabu2 격리 환경 노트</a></li>
+        </ul>
+      </div>
+      <div>
+        <p class="eyebrow" style="margin-bottom:8px">한 줄 요약</p>
+        <p><code>pnpm infra:up</code> → <code>pnpm dev</code>로 켜고, Ctrl+C → <code>pnpm infra:stop</code>으로 끕니다. 데이터는 남습니다.</p>
+      </div>
+    </div>
+    <p class="fine" style="margin-top:48px">mock kabu 2 — 가상 투자·체결 엔진. 실제 자금이 오가지 않는 학습·실험용 로컬 환경입니다.</p>
+  </div>
+</footer>

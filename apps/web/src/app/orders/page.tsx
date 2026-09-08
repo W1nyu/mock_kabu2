@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmt, getToken, getUser } from "@/lib/api";
+import { formatKstTime, MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 
 interface OrderRow {
@@ -23,6 +24,13 @@ const STATUS_LABEL: Record<string, string> = {
   FILLED: "체결완료",
   CANCELED: "취소",
   REJECTED: "거부",
+};
+
+/** Only terminal-negative and in-flight states earn a colour; the rest stay quiet. */
+const STATUS_TONE: Record<string, string> = {
+  FILLED: "chip-live",
+  REJECTED: "chip-up",
+  PARTIAL: "chip-down",
 };
 
 export default function OrdersPage() {
@@ -49,51 +57,66 @@ export default function OrdersPage() {
   }, [load, router]);
 
   return (
-    <div>
-      <h1 className="mb-4 text-xl font-bold">주문 내역</h1>
-      <div className="overflow-hidden rounded-lg border border-neutral-800">
-        <table className="w-full text-sm">
-          <thead className="bg-neutral-900 text-left text-neutral-400">
-            <tr>
-              <th className="px-4 py-2">시각</th>
-              <th className="px-4 py-2">종목</th>
-              <th className="px-4 py-2">구분</th>
-              <th className="px-4 py-2 text-right">가격</th>
-              <th className="px-4 py-2 text-right">체결/수량</th>
-              <th className="px-4 py-2">상태</th>
-            </tr>
-          </thead>
-          <tbody>
-            {orders.map((o) => (
-              <tr key={o.id} className="border-t border-neutral-800">
-                <td className="px-4 py-2 text-neutral-400">
-                  {new Date(o.createdAt).toLocaleTimeString("ko-KR", { hour12: false })}
-                </td>
-                <td className="px-4 py-2 font-semibold">{o.symbol}</td>
-                <td className={`px-4 py-2 ${o.side === "BUY" ? "text-red-400" : "text-blue-400"}`}>
-                  {o.side === "BUY" ? "매수" : "매도"}
-                  <span className="ml-1 text-xs text-neutral-500">
-                    {o.type === "LIMIT" ? "지정가" : "시장가"}
-                  </span>
-                </td>
-                <td className="px-4 py-2 text-right tabular-nums">
-                  {o.price != null ? fmt.format(o.price) : "—"}
-                </td>
-                <td className="px-4 py-2 text-right tabular-nums">
-                  {fmt.format(o.filledQty)}/{fmt.format(o.qty)}
-                </td>
-                <td className="px-4 py-2">{STATUS_LABEL[o.status] ?? o.status}</td>
-              </tr>
-            ))}
-            {orders.length === 0 && (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">주문 내역</h1>
+        <p className="mt-1 text-sm text-ink-muted">최근 100건의 주문을 실시간으로 반영합니다.</p>
+      </div>
+
+      <div className="glass overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="tbl tbl-hover">
+            <thead>
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-neutral-500">
-                  주문 내역이 없습니다
-                </td>
+                <th>시각 ({MARKET_TIME_ZONE_LABEL})</th>
+                <th>종목</th>
+                <th>구분</th>
+                <th className="text-right">가격</th>
+                <th className="text-right">체결/수량</th>
+                <th className="text-right">상태</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {orders.map((o) => (
+                <tr key={o.id}>
+                  <td className="num whitespace-nowrap text-ink-muted">
+                    {formatKstTime(new Date(o.createdAt).getTime())}
+                  </td>
+                  <td className="font-semibold">{o.symbol}</td>
+                  <td>
+                    <span
+                      className={`font-medium ${o.side === "BUY" ? "text-up" : "text-down"}`}
+                    >
+                      {o.side === "BUY" ? "매수" : "매도"}
+                    </span>
+                    <span className="ml-1.5 text-xs text-ink-faint">
+                      {o.type === "LIMIT" ? "지정가" : "시장가"}
+                    </span>
+                  </td>
+                  <td className="num text-right">
+                    {o.price != null ? fmt.format(o.price) : "—"}
+                  </td>
+                  <td className="num text-right">
+                    {fmt.format(o.filledQty)}
+                    <span className="text-ink-faint">/{fmt.format(o.qty)}</span>
+                  </td>
+                  <td className="text-right">
+                    <span className={`chip ${STATUS_TONE[o.status] ?? ""}`}>
+                      {STATUS_LABEL[o.status] ?? o.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {orders.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-14 text-center text-sm text-ink-faint">
+                    주문 내역이 없습니다
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

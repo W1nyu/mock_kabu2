@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, getToken, won } from "@/lib/api";
+import { formatKstTime, MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 
 interface LedgerRow {
   id: number;
@@ -63,76 +64,109 @@ export default function TransferPage() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-      <div>
-        <h1 className="mb-4 text-xl font-bold">이체</h1>
-        <form onSubmit={submit} className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-          <p className="mb-3 text-sm text-neutral-400">이체 가능: {won(available)}</p>
-          <label className="mb-2 block text-sm">
-            <span className="text-neutral-400">받는 사람 이메일</span>
-            <input
-              className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
-              type="email"
-              value={toEmail}
-              onChange={(e) => setToEmail(e.target.value)}
-              placeholder="bot1@bots.local"
-            />
-          </label>
-          <label className="mb-3 block text-sm">
-            <span className="text-neutral-400">금액</span>
-            <input
-              className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 tabular-nums"
-              inputMode="numeric"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))}
-            />
-          </label>
-          {message && (
-            <p className={`mb-2 text-sm ${message.ok ? "text-emerald-400" : "text-red-400"}`}>
-              {message.text}
-            </p>
-          )}
-          <button
-            disabled={busy || !toEmail || !amount}
-            className="w-full rounded bg-amber-500 py-2 font-semibold text-neutral-950 hover:bg-amber-400 disabled:opacity-40"
-          >
-            이체하기
-          </button>
-        </form>
-      </div>
-
-      <div>
-        <h2 className="mb-4 text-xl font-bold">현금 원장</h2>
-        <div className="overflow-hidden rounded-lg border border-neutral-800">
-          <table className="w-full text-sm">
-            <thead className="bg-neutral-900 text-left text-neutral-400">
-              <tr>
-                <th className="px-3 py-2">시각</th>
-                <th className="px-3 py-2">사유</th>
-                <th className="px-3 py-2 text-right">증감</th>
-                <th className="px-3 py-2 text-right">잔액</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ledger.map((l) => (
-                <tr key={l.id} className="border-t border-neutral-800">
-                  <td className="px-3 py-1.5 text-neutral-400">
-                    {new Date(l.createdAt).toLocaleTimeString("ko-KR", { hour12: false })}
-                  </td>
-                  <td className="px-3 py-1.5">{REASON_LABEL[l.reason] ?? l.reason}</td>
-                  <td
-                    className={`px-3 py-1.5 text-right tabular-nums ${l.delta >= 0 ? "text-red-400" : "text-blue-400"}`}
-                  >
-                    {l.delta >= 0 ? "+" : ""}
-                    {won(l.delta)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{won(l.balanceAfter)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[22rem_1fr]">
+      <section className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">이체</h1>
+          <p className="mt-1 text-sm text-ink-muted">다른 계정으로 가상 현금을 보냅니다.</p>
         </div>
-      </div>
+
+        <form onSubmit={submit} className="glass overflow-hidden">
+          <div className="panel-head">
+            <span className="panel-title">이체 가능</span>
+            <span className="num text-sm font-semibold text-sky">{won(available)}</span>
+          </div>
+
+          <div className="space-y-4 p-4">
+            <div>
+              <label className="label" htmlFor="transfer-to">
+                받는 사람 이메일
+              </label>
+              <input
+                id="transfer-to"
+                className="field"
+                type="email"
+                value={toEmail}
+                onChange={(e) => setToEmail(e.target.value)}
+                placeholder="bot1@bots.local"
+              />
+            </div>
+            <div>
+              <label className="label" htmlFor="transfer-amount">
+                금액
+              </label>
+              <input
+                id="transfer-amount"
+                className="field num"
+                inputMode="numeric"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))}
+                placeholder="0"
+              />
+            </div>
+
+            {message && (
+              <p
+                className={`rounded-control border px-3 py-2 text-sm ${
+                  message.ok ? "border-ok/30 bg-ok/8 text-ok" : "border-up/30 bg-up/8 text-up"
+                }`}
+              >
+                {message.text}
+              </p>
+            )}
+
+            <button disabled={busy || !toEmail || !amount} className="btn btn-primary btn-block">
+              {busy ? "이체 중…" : "이체하기"}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight">현금 원장</h2>
+          <p className="mt-1 text-sm text-ink-muted">최근 30건의 잔액 증감 내역입니다.</p>
+        </div>
+
+        <div className="glass overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="tbl tbl-hover">
+              <thead>
+                <tr>
+                  <th>시각 ({MARKET_TIME_ZONE_LABEL})</th>
+                  <th>사유</th>
+                  <th className="text-right">증감</th>
+                  <th className="text-right">잔액</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ledger.map((l) => (
+                  <tr key={l.id}>
+                    <td className="num whitespace-nowrap text-ink-muted">
+                      {formatKstTime(new Date(l.createdAt).getTime())}
+                    </td>
+                    <td>{REASON_LABEL[l.reason] ?? l.reason}</td>
+                    <td
+                      className={`num text-right font-medium ${l.delta >= 0 ? "text-up" : "text-down"}`}
+                    >
+                      {l.delta >= 0 ? "+" : ""}
+                      {won(l.delta)}
+                    </td>
+                    <td className="num text-right text-ink-muted">{won(l.balanceAfter)}</td>
+                  </tr>
+                ))}
+                {ledger.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="py-14 text-center text-sm text-ink-faint">
+                      원장 내역이 없습니다
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

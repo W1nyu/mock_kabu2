@@ -5,10 +5,19 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 const BOT_COUNT = 10;
-export const BOT_PASSWORD = "botpassword";
-const ADMIN_EMAIL = "admin@admin";
+function requiredSeedSecret(name: string, developmentDefault: string): string {
+  const value = process.env[name]?.trim();
+  if (value && (process.env.NODE_ENV !== "production" || value !== developmentDefault)) return value;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(`${name} must be set to a non-default value when NODE_ENV=production`);
+  }
+  return developmentDefault;
+}
+
+export const BOT_PASSWORD = requiredSeedSecret("BOT_PASSWORD", "botpassword");
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL?.trim() || "admin@admin";
 const ADMIN_NICKNAME = "admin";
-const ADMIN_PASSWORD = "admin";
+const ADMIN_PASSWORD = requiredSeedSecret("ADMIN_PASSWORD", "admin");
 const ADMIN_INITIAL_CASH = 10_000_000_000_000_000n;
 const BOT_INITIAL_CASH = 1_000_000_000n; // 봇당 10억
 const BOT_INITIAL_QTY = 50_000; // 봇당 종목별 5만 주
@@ -92,6 +101,12 @@ async function main() {
     const email = `bot${i}@bots.local`;
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
+      // Re-running seed after a credential rotation must leave the worker
+      // accounts usable; this only affects the reserved bot identities.
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: { passwordHash, isBot: true },
+      });
       const account = await prisma.account.findUnique({ where: { userId: existing.id } });
       if (account) await ensureMissingBotHoldings(account.id);
       continue;

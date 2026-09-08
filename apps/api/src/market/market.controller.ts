@@ -1,10 +1,17 @@
 import { Controller, Get, Inject, NotFoundException, Param, Query } from "@nestjs/common";
 import type { PrismaClient } from "@mock-kabu/db";
-import { KEYS, SYMBOLS } from "@mock-kabu/shared";
+import {
+  BASE_CANDLE_INTERVAL,
+  candleIntervalSeconds,
+  DEFAULT_CANDLE_INTERVAL,
+  KEYS,
+  SYMBOLS,
+} from "@mock-kabu/shared";
 import type Redis from "ioredis";
 import { PRISMA, REDIS } from "../core/tokens";
 
 const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
+const BASE_CANDLE_SECONDS = candleIntervalSeconds(BASE_CANDLE_INTERVAL) ?? 60;
 
 @Controller("market")
 export class MarketController {
@@ -80,20 +87,67 @@ export class MarketController {
     return JSON.parse(json);
   }
 
+  /**
+   * Candles for any supported timeframe.
+   *
+   * Only 1m rows are stored, so anything coarser is rolled up here. The bucket
+   * is a floor of the epoch by the interval, which puts the 1d boundary at
+   * 00:00 UTC — exactly 09:00 KST, the trading day's open.
+   */
   @Get("candles/:symbol")
-  candles(
+  async candles(
     @Param("symbol") symbol: string,
-    @Query("interval") interval = "1m",
+    @Query("interval") interval = DEFAULT_CANDLE_INTERVAL,
     @Query("limit") limit = "180",
   ) {
     this.assertActiveSymbol(symbol);
-    return this.prisma.candle
-      .findMany({
-        where: { symbol, interval },
+
+    const seconds = candleIntervalSeconds(interval);
+    if (seconds === null) throw new NotFoundException(`지원하지 않는 봉 간격: ${interval}`);
+
+    const take = Math.min(Math.max(1, Number(limit) || 180), 1000);
+    if (seconds === BASE_CANDLE_SECONDS) {
+      const rows = await this.prisma.candle.findMany({
+        where: { symbol, interval: BASE_CANDLE_INTERVAL },
         orderBy: { ts: "desc" },
-        take: Math.min(Number(limit) || 180, 1000),
-      })
-      .then((rows) => rows.reverse());
+        take,
+      });
+      return rows.reverse();
+    }
+
+    // Bounded by a window back from the newest stored candle rather than from
+    // now(), so a quiet market still returns a full chart instead of nothing.
+    // The slack absorbs gaps where no trade printed inside a bucket.
+    const windowSeconds = seconds * take * 3;
+    const rows = await this.prisma.$queryRaw<
+      { ts: Date; open: number; high: number; low: number; close: number; volume: bigint }[]
+    >`
+      WITH latest AS (
+        SELECT max("ts") AS ts
+        FROM "market"."candles"
+        WHERE "symbol" = ${symbol} AND "interval" = ${BASE_CANDLE_INTERVAL}
+      ),
+      src AS (
+        SELECT c."ts", c."open", c."high", c."low", c."close", c."volume"
+        FROM "market"."candles" c, latest
+        WHERE c."symbol" = ${symbol}
+          AND c."interval" = ${BASE_CANDLE_INTERVAL}
+          AND c."ts" > latest.ts - make_interval(secs => ${windowSeconds}::double precision)
+      )
+      SELECT
+        to_timestamp(floor(extract(epoch FROM "ts") / ${seconds}) * ${seconds})
+          AT TIME ZONE 'UTC' AS "ts",
+        (array_agg("open" ORDER BY "ts" ASC))[1]   AS "open",
+        max("high")                                AS "high",
+        min("low")                                 AS "low",
+        (array_agg("close" ORDER BY "ts" DESC))[1] AS "close",
+        sum("volume")::bigint                      AS "volume"
+      FROM src
+      GROUP BY 1
+      ORDER BY 1 DESC
+      LIMIT ${take}
+    `;
+    return rows.reverse();
   }
 
   @Get("trades/:symbol")

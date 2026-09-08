@@ -8,6 +8,7 @@ import {
   canAddWithoutSelfTrade,
   canLaddersCoexist,
   GUARD_AWARE_VISIBLE_TARGET_CAP_MULTIPLIER,
+  LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO,
   SAKU_MIN_BEST_QTY,
   liquidityBestWallQty,
   liquidityMinimumBestQty,
@@ -93,8 +94,10 @@ test("liquidity ladder has dense, substantial depth on both sides", () => {
   assert.equal(asks.length, 12);
   assert.equal(bids[0].price, 119_900);
   assert.equal(asks[0].price, 120_100);
-  assert.ok(bids[0].qty >= 80);
-  assert.ok(asks[0].qty >= 80);
+  assert.ok(bids[0].qty >= 160);
+  assert.ok(asks[0].qty >= 160);
+  assert.equal(bids[0].refillLowWaterRatio, LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO);
+  assert.equal(asks[0].refillLowWaterRatio, LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO);
   assert.equal(bids[11].price, 118_800);
   assert.equal(asks[11].price, 121_200);
   assert.equal(bids.reduce((sum, quote) => sum + quote.qty, 0), liquidityTotalQty(120_000));
@@ -105,6 +108,17 @@ test("liquidity ladder has dense, substantial depth on both sides", () => {
     assert.ok(bids[index - 1].price > bids[index].price);
     assert.ok(asks[index - 1].price < asks[index].price);
   }
+});
+
+test("a partially consumed ordinary best wall is replaced before it falls below the taker-safe floor", () => {
+  const bestAsk = buildLiquidityLadder(KABU, KABU.initialPrice).find(
+    (quote) => quote.side === "SELL" && quote.level === 0,
+  )!;
+  const lowWater = Math.ceil(bestAsk.qty * (bestAsk.refillLowWaterRatio ?? 1));
+
+  assert.equal(lowWater, Math.ceil(bestAsk.qty * LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO));
+  assert.equal(isQuoteSufficient({ ...bestAsk, id: "kabu-near-floor", qty: lowWater }, bestAsk), true);
+  assert.equal(isQuoteSufficient({ ...bestAsk, id: "kabu-needs-refill", qty: lowWater - 1 }, bestAsk), false);
 });
 
 test("price-normalised ladders keep comparable visible notional from ₩100 through ₩300,000", () => {
@@ -126,15 +140,15 @@ test("price-normalised ladders keep comparable visible notional from ₩100 thro
   const maximum = Math.max(...values);
 
   // The two outer reserve rungs are deliberately outside the ten visible rows,
-  // so a visible side carries a little under the ₩48m full-side target.
-  assert.ok(minimum >= 40_000_000);
-  assert.ok(maximum <= 50_000_000);
+  // so a visible side carries a little under the ₩120m full-side target.
+  assert.ok(minimum >= 100_000_000);
+  assert.ok(maximum <= 125_000_000);
   assert.ok(maximum / minimum < 1.25);
-  assert.equal(liquidityTotalQty(100), 480_000);
-  assert.equal(liquidityTotalQty(10_000), 4_800);
-  assert.equal(liquidityTotalQty(300_000), 160);
-  assert.ok(liquidityBestWallQty(SAKU, 300_000) >= 80);
-  assert.equal(liquidityQtyByLevel(100).reduce((sum, qty) => sum + qty, 0), 480_000);
+  assert.equal(liquidityTotalQty(100), 1_200_000);
+  assert.equal(liquidityTotalQty(10_000), 12_000);
+  assert.equal(liquidityTotalQty(300_000), 400);
+  assert.ok(liquidityBestWallQty(SAKU, 300_000) >= 180);
+  assert.equal(liquidityQtyByLevel(100).reduce((sum, qty) => sum + qty, 0), 1_200_000);
 });
 
 test("SAKU keeps its existing side budget concentrated at the near-price wall", () => {
@@ -145,7 +159,7 @@ test("SAKU keeps its existing side budget concentrated at the near-price wall", 
   const nextBid = ladder.find((quote) => quote.side === "BUY" && quote.level === 1)!;
   const thirdBid = ladder.find((quote) => quote.side === "BUY" && quote.level === 2)!;
 
-  // The per-side budget stays at 160 shares, but the three nearest executable
+  // The per-side budget stays at 400 shares, but the three nearest executable
   // rungs are materially thicker than the generic high-price distribution.
   assert.equal(saku.reduce((sum, qty) => sum + qty, 0), liquidityTotalQty(300_000));
   assert.equal(saku[0], SAKU_MIN_BEST_QTY);
@@ -155,10 +169,11 @@ test("SAKU keeps its existing side budget concentrated at the near-price wall", 
   assert.ok(bestBid.qty > nextBid.qty && nextBid.qty > thirdBid.qty);
   assert.equal(liquidityBestWallQty(SAKU, 300_000), SAKU_MIN_BEST_QTY);
 
-  // Existing legacy 80-share best walls are post-before-cancel normalised to
-  // the new 100-share target on the next maker reconciliation pass.
-  assert.equal(isQuoteSufficient({ ...bestBid, id: "legacy-saku-best", qty: 81 }, bestBid), false);
-  assert.equal(isQuoteSufficient({ ...bestBid, id: "fresh-saku-best", qty: 82 }, bestBid), true);
+  // A predecessor's smaller best wall is post-before-cancel normalised only
+  // once it falls below the profile's refill threshold.
+  const lowWater = Math.ceil(bestBid.qty * (bestBid.refillLowWaterRatio ?? 1));
+  assert.equal(isQuoteSufficient({ ...bestBid, id: "legacy-saku-best", qty: lowWater - 1 }, bestBid), false);
+  assert.equal(isQuoteSufficient({ ...bestBid, id: "fresh-saku-best", qty: lowWater }, bestBid), true);
 });
 
 test("a visible SAKU PARTIAL offsets only its fresh side while the opposite wall keeps the shared target", () => {
@@ -699,7 +714,9 @@ test("adopts price-compatible legacy rungs even when old fixed share quantities 
   assert.equal(adopted!.active.size, 24);
   assert.equal(adopted!.active.get("SELL:0")?.qty, 160);
   assert.equal(adopted!.active.get("BUY:11")?.qty, 160);
-  assert.equal(adopted!.active.get("SELL:0")?.needsNormalization, true);
+  // The new SAKU best-wall target is larger than this legacy row, so low
+  // water replenishment replaces it even though it is not oversized.
+  assert.equal(adopted!.active.get("SELL:0")?.needsNormalization, undefined);
   assert.equal(adopted!.active.get("BUY:11")?.needsNormalization, true);
   assert.notEqual(adopted!.active.get("BUY:0")?.id, duplicatePartial.id);
   assert.equal(adopted!.preserved.get(duplicatePartial.id)?.price, duplicatePartial.price);

@@ -371,26 +371,26 @@ export default function ReplayPage() {
     <div className="space-y-5">
       <section className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold tracking-wide text-amber-400">FIXED REPLAY LAB</p>
+          <p className="text-xs font-semibold tracking-wide text-sky uppercase">FIXED REPLAY LAB</p>
           <h1 className="mt-1 text-2xl font-bold text-white">실전 리플레이</h1>
-          <p className="mt-2 max-w-3xl text-sm text-neutral-400">
+          <p className="mt-2 max-w-3xl text-sm text-ink-muted">
             선택 기간마다 일봉 200개를 먼저 공개하고, 그 뒤의 기간만 한 봉씩 재생하며 별도 가상 계좌로 연습합니다. 기존 7개 모의 종목·주문·봇·잔액에는 영향을 주지 않습니다.
           </p>
         </div>
-        <div className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-right text-xs text-neutral-400">
+        <div className="glass px-3 py-2 text-right text-xs text-ink-muted">
           <p>리플레이 전용 가상 계좌</p>
-          <p className="mt-1 font-semibold tabular-nums text-neutral-100">시작 {formatMoney(STARTING_CASH, currency, priceScale)}</p>
+          <p className="mt-1 font-semibold tabular-nums text-ink">시작 {formatMoney(STARTING_CASH, currency, priceScale)}</p>
         </div>
       </section>
 
-      <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
+      <section className="glass p-4">
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Control label="리플레이 종목">
               <select
                 value={datasetId}
                 onChange={(event) => selectDataset(event.target.value)}
-                className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm"
+                className="w-full rounded border border-hairline bg-abyss-deep/60 px-2 py-2 text-sm"
                 disabled={catalog.length === 0}
               >
                 {DATASET_CATEGORIES.map((category) => {
@@ -412,7 +412,7 @@ export default function ReplayPage() {
               <select
                 value={range}
                 onChange={(event) => selectRange(event.target.value as ReplayRange)}
-                className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm"
+                className="w-full rounded border border-hairline bg-abyss-deep/60 px-2 py-2 text-sm"
               >
                 {REPLAY_RANGES.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
@@ -420,7 +420,7 @@ export default function ReplayPage() {
               </select>
             </Control>
             <Control label="재생 방식">
-              <div className="grid grid-cols-2 gap-1 rounded bg-neutral-950 p-1 text-xs">
+              <div className="grid grid-cols-2 gap-1 rounded bg-abyss-deep/60 p-1 text-xs">
                 <ModeButton active={mode === "historical"} onClick={() => setMode("historical")}>기준 경로</ModeButton>
                 <ModeButton active={mode === "hybrid"} onClick={() => setMode("hybrid")}>봇 혼합</ModeButton>
               </div>
@@ -430,85 +430,85 @@ export default function ReplayPage() {
             type="button"
             onClick={resetScenario}
             disabled={!data}
-            className="rounded border border-neutral-700 px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+            className="rounded border border-hairline px-3 py-2 text-sm text-ink-muted hover:bg-surface-2/70 disabled:opacity-40"
           >
             새 시나리오
           </button>
         </div>
-        <p className="mt-3 text-xs text-neutral-500">모든 기간은 사전 공개 200봉 이후부터 선택한 기간의 봉만 재생합니다.</p>
+        <p className="mt-3 text-xs text-ink-faint">모든 기간은 사전 공개 200봉 이후부터 선택한 기간의 봉만 재생합니다.</p>
 
         {mode === "hybrid" && (
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-neutral-800 pt-3 text-sm">
-            <span className="mr-1 text-neutral-400">봇 변동 한도</span>
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-hairline-soft pt-3 text-sm">
+            <span className="mr-1 text-ink-muted">봇 변동 한도</span>
             {([100, 250, 500] as const).map((bps) => (
               <button
                 key={bps}
                 type="button"
                 onClick={() => setBandBps(bps)}
-                className={`rounded px-2.5 py-1.5 tabular-nums ${bandBps === bps ? "bg-amber-400 text-neutral-950" : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"}`}
+                className={`rounded px-2.5 py-1.5 tabular-nums ${bandBps === bps ? "bg-sky text-abyss" : "bg-surface-2/70 text-ink-muted hover:bg-surface-3/70"}`}
               >
                 ±{(bps / 100).toFixed(bps % 100 ? 1 : 0)}%
               </button>
             ))}
-            <span className="ml-2 text-xs text-neutral-500">실제 가격 경로의 이 범위 밖으로는 절대 움직이지 않습니다.</span>
+            <span className="ml-2 text-xs text-ink-faint">실제 가격 경로의 이 범위 밖으로는 절대 움직이지 않습니다.</span>
           </div>
         )}
       </section>
 
-      {error && <p className="rounded border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-sm text-blue-300">{error}</p>}
-      {loading && <p className="rounded border border-neutral-800 bg-neutral-900 px-3 py-8 text-center text-sm text-neutral-500">과거 시세를 불러오는 중…</p>}
+      {error && <p className="rounded border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">{error}</p>}
+      {loading && <p className="rounded glass px-3 py-8 text-center text-sm text-ink-faint">과거 시세를 불러오는 중…</p>}
 
       {data && snapshot && !loading && (
         <>
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
-            <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-3">
+            <div className="glass p-3">
               <div className="mb-3 flex flex-wrap items-start justify-between gap-3 px-1">
                 <div>
                   <h2 className="font-semibold text-white">{data.dataset.symbol} · {data.dataset.name}</h2>
-                  <p className="mt-1 text-xs text-neutral-500">
+                  <p className="mt-1 text-xs text-ink-faint">
                     {formatDate(snapshot.current.ts)} · 사전 공개 {preRollCandleCount.toLocaleString("ko-KR")}봉 · 실전 진행 {replayCompletedBars.toLocaleString("ko-KR")}/{replayCandleCount.toLocaleString("ko-KR")}봉
                   </p>
                 </div>
                 <div className="text-right tabular-nums">
-                  <p className="text-xl font-bold text-amber-300">{formatMoney(snapshot.current.price, currency, priceScale)}</p>
+                  <p className="num text-xl font-bold text-sky">{formatMoney(snapshot.current.price, currency, priceScale)}</p>
                   {mode === "hybrid" ? (
                     <>
-                      <p className={snapshot.current.perturbationBps >= 0 ? "text-xs text-red-400" : "text-xs text-blue-400"}>
+                      <p className={snapshot.current.perturbationBps >= 0 ? "text-xs text-up" : "text-xs text-down"}>
                         가상 봇 압력 {snapshot.current.perturbationBps >= 0 ? "+" : ""}{(snapshot.current.perturbationBps / 100).toFixed(2)}%
                       </p>
-                      <p className="mt-0.5 text-[11px] text-neutral-500">
+                      <p className="mt-0.5 text-[11px] text-ink-faint">
                         기준 {formatMoney(snapshot.current.referencePrice, currency, priceScale)} · 허용 {formatMoney(snapshot.current.lowerBound, currency, priceScale)}–{formatMoney(snapshot.current.upperBound, currency, priceScale)}
                       </p>
-                      <p className="mt-0.5 text-[11px] text-neutral-500">{virtualBotState(snapshot.current.syntheticPressure)}</p>
+                      <p className="mt-0.5 text-[11px] text-ink-faint">{virtualBotState(snapshot.current.syntheticPressure)}</p>
                     </>
-                  ) : <p className="text-xs text-neutral-500">고정 기준 경로 그대로</p>}
+                  ) : <p className="text-xs text-ink-faint">고정 기준 경로 그대로</p>}
                 </div>
               </div>
               <ReplayChart candles={chartCandles} currentCandle={chartCurrent} currentPrice={snapshot.current.price / priceScale} />
-              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-neutral-800 pt-3">
-                <button type="button" onClick={togglePlayback} className="rounded bg-amber-400 px-3 py-1.5 text-sm font-semibold text-neutral-950 hover:bg-amber-300">
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-hairline-soft pt-3">
+                <button type="button" onClick={togglePlayback} className="btn btn-primary btn-sm">
                   {snapshot.status === "playing" ? "일시정지" : snapshot.status === "finished" ? "처음부터 재생" : "재생"}
                 </button>
-                <button type="button" onClick={advanceOneBar} className="rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-200 hover:bg-neutral-700">한 봉 진행</button>
-                <div className="ml-1 flex rounded bg-neutral-950 p-1">
+                <button type="button" onClick={advanceOneBar} className="rounded bg-surface-2/70 px-3 py-1.5 text-sm text-ink hover:bg-surface-3/70">한 봉 진행</button>
+                <div className="ml-1 flex rounded bg-abyss-deep/60 p-1">
                   {REPLAY_SPEEDS.map((candidate) => (
                     <button
                       key={candidate}
                       type="button"
                       onClick={() => changeSpeed(candidate)}
-                      className={`rounded px-2 py-1 text-xs tabular-nums ${speed === candidate ? "bg-neutral-700 text-white" : "text-neutral-500 hover:text-neutral-200"}`}
+                      className={`rounded px-2 py-1 text-xs tabular-nums ${speed === candidate ? "bg-surface-3/70 text-white" : "text-ink-faint hover:text-ink"}`}
                     >
                       x{candidate}
                     </button>
                   ))}
                 </div>
-                <span className="ml-auto text-xs text-neutral-500">1x 기준 1초마다 다음 일봉</span>
+                <span className="ml-auto text-xs text-ink-faint">1x 기준 1초마다 다음 일봉</span>
               </div>
             </div>
 
             <aside className="space-y-4">
-              <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-                <h2 className="text-sm font-semibold text-neutral-200">리플레이 가상 계좌</h2>
+              <section className="glass p-4">
+                <h2 className="text-sm font-semibold text-ink">리플레이 가상 계좌</h2>
                 <dl className="mt-3 space-y-2 text-sm tabular-nums">
                   <WalletRow label="총 자산" value={formatMoney(total, currency, priceScale)} strong />
                   <WalletRow label="현금" value={formatMoney(wallet.cash, currency, priceScale)} />
@@ -516,39 +516,39 @@ export default function ReplayPage() {
                   <WalletRow label="평단가" value={wallet.qty ? formatMoney(avgCost, currency, priceScale) : "—"} />
                   <WalletRow label="평가손익" value={`${pnl >= 0 ? "+" : ""}${formatMoney(pnl, currency, priceScale)} (${pnl >= 0 ? "+" : ""}${pnlRate.toFixed(2)}%)`} tone={pnl >= 0 ? "up" : "down"} />
                 </dl>
-                <button type="button" onClick={() => { setWallet(initialWallet()); setMessage(null); }} className="mt-3 w-full rounded border border-neutral-700 py-1.5 text-xs text-neutral-400 hover:bg-neutral-800">
+                <button type="button" onClick={() => { setWallet(initialWallet()); setMessage(null); }} className="mt-3 w-full rounded border border-hairline py-1.5 text-xs text-ink-muted hover:bg-surface-2/70">
                   가상 계좌 초기화
                 </button>
               </section>
 
-              <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-                <h2 className="text-sm font-semibold text-neutral-200">현재가 모의 주문</h2>
-                <p className="mt-1 text-xs text-neutral-500">실제 거래소와 완전히 분리된 시장가 체결이며, 현재는 정수 수량만 지원합니다.</p>
-                <label className="mt-3 block text-xs text-neutral-400">
+              <section className="glass p-4">
+                <h2 className="text-sm font-semibold text-ink">현재가 모의 주문</h2>
+                <p className="mt-1 text-xs text-ink-faint">실제 거래소와 완전히 분리된 시장가 체결이며, 현재는 정수 수량만 지원합니다.</p>
+                <label className="mt-3 block text-xs text-ink-muted">
                   수량
                   <input
                     value={qtyInput}
                     onChange={(event) => setQtyInput(event.target.value.replace(/[^0-9]/g, ""))}
                     inputMode="numeric"
-                    className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm tabular-nums text-white"
+                    className="mt-1 w-full rounded border border-hairline bg-abyss-deep/60 px-3 py-2 text-sm tabular-nums text-white"
                   />
                 </label>
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => placeMarketOrder("BUY")} className="rounded bg-red-500/85 py-2 text-sm font-semibold text-white hover:bg-red-400">매수</button>
-                  <button type="button" onClick={() => placeMarketOrder("SELL")} className="rounded bg-blue-500/85 py-2 text-sm font-semibold text-white hover:bg-blue-400">매도</button>
+                  <button type="button" onClick={() => placeMarketOrder("BUY")} className="rounded bg-up/85 py-2 text-sm font-semibold text-white hover:bg-up">매수</button>
+                  <button type="button" onClick={() => placeMarketOrder("SELL")} className="rounded bg-down/85 py-2 text-sm font-semibold text-white hover:bg-down">매도</button>
                 </div>
-                {message && <p className={`mt-3 text-xs ${message.ok ? "text-emerald-400" : "text-blue-400"}`}>{message.text}</p>}
+                {message && <p className={`mt-3 text-xs ${message.ok ? "text-ok" : "text-down"}`}>{message.text}</p>}
               </section>
             </aside>
           </section>
 
-          <section className="rounded-lg border border-neutral-800 bg-neutral-900 p-4 text-xs text-neutral-400">
-            <p>데이터: <span className="text-neutral-300">{data.source.label}</span>{" · "}{DATASET_CATEGORY_LABELS[data.dataset.category]}{" · "}사전 공개 {preRollCandleCount.toLocaleString("ko-KR")}봉 + 실전 {replayCandleCount.toLocaleString("ko-KR")}봉 = 총 {totalCandleCount.toLocaleString("ko-KR")}개 고정 일봉{" · "}기준 {new Date(data.source.fixedAt).toLocaleDateString("ko-KR")}</p>
+          <section className="glass p-4 text-xs text-ink-muted">
+            <p>데이터: <span className="text-ink-muted">{data.source.label}</span>{" · "}{DATASET_CATEGORY_LABELS[data.dataset.category]}{" · "}사전 공개 {preRollCandleCount.toLocaleString("ko-KR")}봉 + 실전 {replayCandleCount.toLocaleString("ko-KR")}봉 = 총 {totalCandleCount.toLocaleString("ko-KR")}개 고정 일봉{" · "}기준 {new Date(data.source.fixedAt).toLocaleDateString("ko-KR")}</p>
             <p className="mt-1">
               {data.source.notice}
-              {data.source.termsUrl && <> <a href={data.source.termsUrl} target="_blank" rel="noreferrer" className="text-amber-400 hover:underline">약관</a></>}
+              {data.source.termsUrl && <> <a href={data.source.termsUrl} target="_blank" rel="noreferrer" className="text-sky hover:underline">약관</a></>}
             </p>
-            <p className="mt-1 text-neutral-500">{data.hybrid.description} 투자 조언이나 실제 주문 기능이 아닙니다.</p>
+            <p className="mt-1 text-ink-faint">{data.hybrid.description} 투자 조언이나 실제 주문 기능이 아닙니다.</p>
           </section>
         </>
       )}
@@ -558,7 +558,7 @@ export default function ReplayPage() {
 
 function Control({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="block text-xs text-neutral-400">
+    <label className="block text-xs text-ink-muted">
       <span className="mb-1 block">{label}</span>
       {children}
     </label>
@@ -567,7 +567,7 @@ function Control({ label, children }: { label: string; children: React.ReactNode
 
 function ModeButton({ active, children, onClick }: { active: boolean; children: React.ReactNode; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={`rounded px-2 py-2 ${active ? "bg-amber-400 font-semibold text-neutral-950" : "text-neutral-400 hover:text-neutral-100"}`}>
+    <button type="button" onClick={onClick} className={`rounded px-2 py-2 ${active ? "bg-sky font-semibold text-abyss" : "text-ink-muted hover:text-ink"}`}>
       {children}
     </button>
   );
@@ -576,8 +576,8 @@ function ModeButton({ active, children, onClick }: { active: boolean; children: 
 function WalletRow({ label, value, tone, strong = false }: { label: string; value: string; tone?: "up" | "down"; strong?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-neutral-500">{label}</dt>
-      <dd className={`${strong ? "font-semibold text-white" : "text-neutral-200"} ${tone === "up" ? "text-red-400" : tone === "down" ? "text-blue-400" : ""}`}>{value}</dd>
+      <dt className="text-ink-faint">{label}</dt>
+      <dd className={`${strong ? "font-semibold text-white" : "text-ink"} ${tone === "up" ? "text-up" : tone === "down" ? "text-down" : ""}`}>{value}</dd>
     </div>
   );
 }

@@ -33,41 +33,75 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="mx-auto mt-16 max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-6">
-      <h1 className="mb-1 text-xl font-bold">회원가입</h1>
-      <p className="mb-4 text-sm text-neutral-400">가입 즉시 가상 현금 1,000만원이 지급됩니다.</p>
-      <form onSubmit={submit} className="space-y-3">
-        <input
-          className="w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
-          placeholder="이메일"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <input
-          className="w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
-          placeholder="닉네임"
-          value={nickname}
-          onChange={(e) => setNickname(e.target.value)}
-        />
-        <input
-          className="w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
-          placeholder="비밀번호 (4자 이상)"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        {error && <p className="text-sm text-red-400">{error}</p>}
-        <button
-          disabled={busy}
-          className="w-full rounded bg-amber-500 py-2 font-semibold text-neutral-950 hover:bg-amber-400 disabled:opacity-50"
-        >
-          가입하기
-        </button>
-      </form>
-      <p className="mt-4 text-sm text-neutral-400">
+    <div className="mx-auto mt-10 w-full max-w-[26rem] sm:mt-20">
+      <div className="glass p-7 sm:p-8">
+        <span className="grid h-11 w-11 place-items-center rounded-xl bg-linear-to-br from-sky to-indigo shadow-glow">
+          <span className="h-3.5 w-3.5 rounded-[4px] bg-abyss" />
+        </span>
+        <h1 className="mt-5 text-2xl font-semibold tracking-tight">회원가입</h1>
+        <p className="mt-1.5 text-sm text-ink-muted">
+          가입 즉시 가상 현금{" "}
+          <span className="num font-semibold text-sky">1,000만원</span>이 지급됩니다.
+        </p>
+
+        <form onSubmit={submit} className="mt-6 space-y-4">
+          <div>
+            <label className="label" htmlFor="signup-email">
+              이메일
+            </label>
+            <input
+              id="signup-email"
+              className="field"
+              placeholder="you@example.com"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label" htmlFor="signup-nickname">
+              닉네임
+            </label>
+            <input
+              id="signup-nickname"
+              className="field"
+              placeholder="표시될 이름"
+              autoComplete="nickname"
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label" htmlFor="signup-password">
+              비밀번호
+            </label>
+            <input
+              id="signup-password"
+              className="field"
+              placeholder="4자 이상"
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+
+          {error && (
+            <p className="rounded-control border border-up/30 bg-up/8 px-3 py-2 text-sm text-up">
+              {error}
+            </p>
+          )}
+
+          <button disabled={busy} className="btn btn-primary btn-block">
+            {busy ? "가입 중…" : "가입하기"}
+          </button>
+        </form>
+      </div>
+
+      <p className="mt-5 text-center text-sm text-ink-muted">
         이미 계정이 있나요?{" "}
-        <Link href="/login" className="text-amber-400 hover:underline">
+        <Link href="/login" className="font-medium text-sky hover:underline">
           로그인
         </Link>
       </p>

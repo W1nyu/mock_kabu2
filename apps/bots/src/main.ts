@@ -1,8 +1,11 @@
-import "./env";
+import { requiredRuntimeEnv } from "./env";
 import { SYMBOLS, type OrderSide, type SymbolDef } from "@mock-kabu/shared";
 import { ApiClient, isRejection } from "./client";
 import { MarketMakerStartupBlockedError, runMarketMaker } from "./market-maker";
 import { MarketModel, referencePriceFromHistory } from "./market-model";
+import { ApiNewsSink } from "./news/api-sink";
+import { startNewsEngine } from "./news/scheduler";
+import { CompositeNewsSink, ConsoleNewsSink } from "./news/sink";
 import {
   chooseBookLevelIndex,
   chooseMarketTakerQuantity,
@@ -11,8 +14,8 @@ import {
   type TakerQuantityDecision,
 } from "./volume-activity";
 
-const BOT_PASSWORD = "botpassword";
-const LIQUIDITY_BOT_PASSWORD = process.env.LIQUIDITY_BOT_PASSWORD ?? BOT_PASSWORD;
+const BOT_PASSWORD = requiredRuntimeEnv("BOT_PASSWORD", "botpassword");
+const LIQUIDITY_BOT_PASSWORD = requiredRuntimeEnv("LIQUIDITY_BOT_PASSWORD", BOT_PASSWORD);
 // Generation 1 (bot11..bot15) can be polluted in an existing local DB before
 // the current matching recovery code is running. Keep it untouched and use a
 // clean dedicated generation rather than mutating historical orders.
@@ -219,7 +222,7 @@ async function runRandomFlowTrader(
     const sample = eventAdjustedSample(ref, def.symbol, activity.sample(def.symbol));
     try {
       const side = ref.chooseFlowSide(def.symbol, Math.random() < 0.5 ? "BUY" : "SELL");
-      const { qty } = await liveMarketQty(client, def, side, ref.get(def.symbol), sample, 1, 18, 0.28);
+      const { qty } = await liveMarketQty(client, def, side, ref.get(def.symbol), sample, 1, 18, 0.08);
       await client.placeOrder({
         symbol: def.symbol,
         side,
@@ -252,7 +255,7 @@ async function runRetailTrader(client: ApiClient, ref: MarketModel, activity: Vo
       if (useMarketOrder) side = ref.chooseFlowSide(def.symbol, side);
 
       if (useMarketOrder) {
-        const { qty } = await liveMarketQty(client, def, side, ref.get(def.symbol), sample, 1, 5, 0.18);
+        const { qty } = await liveMarketQty(client, def, side, ref.get(def.symbol), sample, 1, 5, 0.05);
         await client.placeOrder({ symbol: def.symbol, side, type: "MARKET", qty });
       } else {
         const drift = side === "BUY" ? rand(0.997, 1.001) : rand(0.999, 1.003);
@@ -287,7 +290,7 @@ async function runWhale(client: ApiClient, ref: MarketModel, activity: VolumeAct
       let qty: number;
       let sweep = false;
       if (useMarketOrder) {
-        const decision = await liveMarketQty(client, def, side, ref.get(def.symbol), sample, 8, 90, 0.52);
+        const decision = await liveMarketQty(client, def, side, ref.get(def.symbol), sample, 8, 90, 0.15);
         qty = decision.qty;
         sweep = decision.sweepsBest;
         await client.placeOrder({ symbol: def.symbol, side, type: "MARKET", qty });
@@ -320,7 +323,7 @@ async function runNoiseTrader(client: ApiClient, ref: MarketModel, activity: Vol
       const neutralSide: OrderSide = Math.random() < 0.5 ? "BUY" : "SELL";
       const side = useMarketOrder ? ref.chooseFlowSide(def.symbol, neutralSide) : neutralSide;
       if (useMarketOrder) {
-        const { qty } = await liveMarketQty(client, def, side, ref.get(def.symbol), sample, 1, 10, 0.16);
+        const { qty } = await liveMarketQty(client, def, side, ref.get(def.symbol), sample, 1, 10, 0.04);
         await client.placeOrder({ symbol: def.symbol, side, type: "MARKET", qty });
       } else {
         const drift = side === "BUY" ? rand(0.995, 1.002) : rand(0.998, 1.005);
@@ -353,7 +356,7 @@ async function runMomentumTrader(client: ApiClient, ref: MarketModel, activity: 
         const momentum = (latest - oldest) / oldest;
         if (Math.abs(momentum) > 0.001) {
           const side = ref.chooseFlowSide(def.symbol, momentum > 0 ? "BUY" : "SELL");
-          const { qty } = await liveMarketQty(client, def, side, ref.get(def.symbol), sample, 1, 5, 0.36);
+          const { qty } = await liveMarketQty(client, def, side, ref.get(def.symbol), sample, 1, 5, 0.1);
           await client.placeOrder({
             symbol: def.symbol,
             side,
@@ -541,7 +544,12 @@ async function main() {
   }
 
   const restoredMarket = await restoreMarketState(clients[0]);
-  const ref = new MarketModel(SYMBOLS, { initialPrices: restoredMarket.initialPrices });
+  // News is now the only source of market events. The model's own anonymous
+  // generator is switched off so a price move always has a headline behind it.
+  const ref = new MarketModel(SYMBOLS, {
+    initialPrices: restoredMarket.initialPrices,
+    eventSpawnChance: 0,
+  });
   for (const symbol of SYMBOLS) {
     ref.seedMarketHistory(symbol.symbol, restoredMarket.chartPrices.get(symbol.symbol) ?? []);
   }
@@ -567,6 +575,16 @@ async function main() {
   // Existing bot1..bot10 order history is left untouched.
   SYMBOLS.forEach((def, index) => void runDedicatedMarketMaker(liquidityClients[index], def, ref));
   scheduleLiquidityReserveRebalance();
+
+  // Generated news is the only source of market events now. Each published
+  // story applies its own impulse to `ref`, which the flow bots below read
+  // through chooseFlowSide, so the tape reacts to the headline.
+  startNewsEngine(
+    ref,
+    SYMBOLS,
+    new CompositeNewsSink([new ConsoleNewsSink(), new ApiNewsSink(clients[0])]),
+  );
+
   // Preserve bot1..bot5 as the flow pool. A flow bot can run two independent
   // symbol loops, leaving bot6..bot10 in their specialized roles as listings grow.
   SYMBOLS.forEach((def, index) => {

@@ -144,28 +144,26 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
   const reference = finiteNumber(referencePrice);
   const change = price != null && reference != null && reference > 0 ? price - reference : null;
   const changeRate = change != null && reference != null ? (change / reference) * 100 : null;
-  const tone = change == null || change === 0 ? "text-neutral-200" : change > 0 ? "text-red-400" : "text-blue-400";
+  const tone = change == null || change === 0 ? "text-ink" : change > 0 ? "text-up" : "text-down";
   const direction = change == null || change === 0 ? "보합" : change > 0 ? "▲" : "▼";
   const executionStrength = stats && stats.sellVolume > 0 ? (stats.buyVolume / stats.sellVolume) * 100 : null;
 
   return (
-    <section className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 shadow-sm">
-      <div className="flex flex-col gap-5 px-4 py-4 sm:px-5 lg:flex-row lg:items-end lg:justify-between">
+    <section className="glass overflow-hidden">
+      <div className="flex flex-col gap-6 p-5 sm:p-6 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
         <div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h1 className="text-xl font-bold tracking-tight">
-              {symbol} {name && <span className="text-base font-normal text-neutral-400">{name}</span>}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <h1 className="text-xl font-semibold tracking-tight">
+              {name ?? symbol}
+              {name && <span className="num ml-2 text-sm font-normal text-ink-faint">{symbol}</span>}
             </h1>
-            <span
-              title="체결 채널을 구독해 현재가를 갱신합니다"
-              className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400"
-            >
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+            <span className="chip chip-live" title="체결 채널을 구독해 현재가를 갱신합니다">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
               LIVE
             </span>
           </div>
-          <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 tabular-nums">
-            <p className="text-3xl font-bold tracking-tight text-neutral-50 sm:text-4xl">
+          <div className="num mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <p className="text-4xl font-semibold tracking-tight sm:text-5xl">
               {price != null ? `${fmt.format(price)}원` : "—"}
             </p>
             {change != null && changeRate != null ? (
@@ -175,12 +173,12 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
                 {changeRate.toFixed(2)}%)
               </p>
             ) : (
-              <p className="text-sm text-neutral-500">기준가 대비 —</p>
+              <p className="text-sm text-ink-faint">기준가 대비 —</p>
             )}
           </div>
         </div>
 
-        <dl className="grid grid-cols-2 gap-x-5 gap-y-3 text-sm tabular-nums sm:grid-cols-5">
+        <dl className="num grid grid-cols-2 gap-x-6 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
           <QuoteMetric
             label="기준가"
             value={reference != null ? `${fmt.format(reference)}원` : "—"}
@@ -211,7 +209,7 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
           />
         </dl>
       </div>
-      <p className="border-t border-neutral-800 px-4 py-1.5 text-[11px] text-neutral-500 sm:px-5">
+      <p className="border-t border-hairline-soft px-5 py-2 text-[11px] text-ink-faint sm:px-6">
         현재가는 체결마다 갱신 · 고가/저가/거래량은 KST 당일 체결 기준
       </p>
     </section>
@@ -229,11 +227,14 @@ function QuoteMetric({
   tone?: "up" | "down";
   title: string;
 }) {
-  const valueColor = tone === "up" ? "text-red-400" : tone === "down" ? "text-blue-400" : "text-neutral-100";
+  const valueColor = tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-ink";
   return (
-    <div title={title} className="min-w-24 border-l border-neutral-800 pl-3 first:border-l-0 first:pl-0">
-      <dt className="text-[11px] text-neutral-500">{label}</dt>
-      <dd className={`mt-0.5 font-semibold ${valueColor}`}>{value}</dd>
+    <div
+      title={title}
+      className="min-w-24 border-l border-hairline-soft pl-4 first:border-l-0 first:pl-0 sm:border-l sm:pl-4"
+    >
+      <dt className="text-[11px] tracking-wide text-ink-muted uppercase">{label}</dt>
+      <dd className={`mt-1 font-semibold ${valueColor}`}>{value}</dd>
     </div>
   );
 }

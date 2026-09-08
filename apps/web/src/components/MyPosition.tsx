@@ -85,29 +85,29 @@ export default function MyPosition({ symbol }: { symbol: string }) {
   const value = price * holding.qty;
   const pnl = value - holding.costBasis;
   const pnlRate = holding.costBasis > 0 ? pnl / holding.costBasis : 0;
-  const pnlColor = pnl >= 0 ? "text-red-400" : "text-blue-400";
+  const pnlColor = pnl >= 0 ? "text-up" : "text-down";
   const sign = pnl >= 0 ? "+" : "";
 
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-3 text-sm">
-      <span className="text-xs font-semibold text-neutral-400">내 포지션</span>
+    <div className="glass flex flex-wrap items-center gap-x-7 gap-y-3 px-5 py-3.5 text-sm">
+      <span className="panel-title">내 포지션</span>
       <Item label="보유">
         {fmt.format(holding.qty)}주
         {holding.holdQty > 0 && (
-          <span className="text-neutral-500"> (매도 대기 {fmt.format(holding.holdQty)})</span>
+          <span className="text-ink-faint"> (매도 대기 {fmt.format(holding.holdQty)})</span>
         )}
       </Item>
       <Item label="평단가">{fmt.format(Math.round(holding.avgCost))}</Item>
       <Item label="현재가">{fmt.format(price)}</Item>
       <Item label="평가손익">
-        <span className={pnlColor}>
+        <span className={`font-semibold ${pnlColor}`}>
           {sign}
           {won(pnl)} ({sign}
           {(pnlRate * 100).toFixed(2)}%)
         </span>
       </Item>
       <div className="ml-auto flex items-center gap-3">
-        {message && <span className="text-xs text-neutral-400">{message}</span>}
+        {message && <span className="text-xs text-ink-muted">{message}</span>}
         <button
           onClick={onLiquidateClick}
           disabled={busy || holding.availableQty <= 0}
@@ -116,10 +116,10 @@ export default function MyPosition({ symbol }: { symbol: string }) {
               ? "매도 대기 중인 수량뿐이라 청산할 수 없습니다"
               : "보유 수량 전체를 시장가로 매도합니다"
           }
-          className={`rounded px-3 py-1.5 text-xs font-bold disabled:opacity-40 ${
+          className={`btn btn-sm ${
             confirming
-              ? "bg-blue-500 text-white hover:bg-blue-400"
-              : "border border-blue-500/60 text-blue-400 hover:bg-blue-500/10"
+              ? "btn-sell"
+              : "border-down/50 bg-down/10 text-down hover:bg-down/16"
           }`}
         >
           {confirming ? `${fmt.format(holding.availableQty)}주 전량 매도 확인` : "포지션 청산"}
@@ -131,8 +131,8 @@ export default function MyPosition({ symbol }: { symbol: string }) {
 
 function Item({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <span className="tabular-nums">
-      <span className="mr-1.5 text-xs text-neutral-500">{label}</span>
+    <span className="num">
+      <span className="mr-1.5 text-xs text-ink-faint">{label}</span>
       {children}
     </span>
   );

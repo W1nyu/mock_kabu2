@@ -32,34 +32,59 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="mx-auto mt-16 max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-6">
-      <h1 className="mb-4 text-xl font-bold">로그인</h1>
-      <form onSubmit={submit} className="space-y-3">
-        <input
-          className="w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
-          placeholder="이메일"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <input
-          className="w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
-          placeholder="비밀번호"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        {error && <p className="text-sm text-red-400">{error}</p>}
-        <button
-          disabled={busy}
-          className="w-full rounded bg-amber-500 py-2 font-semibold text-neutral-950 hover:bg-amber-400 disabled:opacity-50"
-        >
-          로그인
-        </button>
-      </form>
-      <p className="mt-4 text-sm text-neutral-400">
+    <div className="mx-auto mt-10 w-full max-w-[26rem] sm:mt-20">
+      <div className="glass p-7 sm:p-8">
+        <span className="grid h-11 w-11 place-items-center rounded-xl bg-linear-to-br from-sky to-indigo shadow-glow">
+          <span className="h-3.5 w-3.5 rounded-[4px] bg-abyss" />
+        </span>
+        <h1 className="mt-5 text-2xl font-semibold tracking-tight">로그인</h1>
+        <p className="mt-1.5 text-sm text-ink-muted">모의 거래소 계정으로 계속하기</p>
+
+        <form onSubmit={submit} className="mt-6 space-y-4">
+          <div>
+            <label className="label" htmlFor="login-email">
+              이메일
+            </label>
+            <input
+              id="login-email"
+              className="field"
+              placeholder="you@example.com"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label" htmlFor="login-password">
+              비밀번호
+            </label>
+            <input
+              id="login-password"
+              className="field"
+              placeholder="••••••••"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+
+          {error && (
+            <p className="rounded-control border border-up/30 bg-up/8 px-3 py-2 text-sm text-up">
+              {error}
+            </p>
+          )}
+
+          <button disabled={busy} className="btn btn-primary btn-block">
+            {busy ? "확인 중…" : "로그인"}
+          </button>
+        </form>
+      </div>
+
+      <p className="mt-5 text-center text-sm text-ink-muted">
         계정이 없나요?{" "}
-        <Link href="/signup" className="text-amber-400 hover:underline">
+        <Link href="/signup" className="font-medium text-sky hover:underline">
           가입하고 1,000만원 받기
         </Link>
       </p>

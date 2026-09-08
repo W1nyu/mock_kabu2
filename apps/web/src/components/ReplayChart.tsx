@@ -53,13 +53,13 @@ interface HoveredCandle {
   close: number;
 }
 
-const UP = "#ef4444";
-const DOWN = "#3b82f6";
+const UP = "#ff5a6e";
+const DOWN = "#6e8aff";
 const STORAGE_KEY = "mock-kabu2:replay:chart:indicators";
 const INDICATORS = [
-  { key: "sma50", label: "50 SMA", color: "#22c55e" },
-  { key: "sma200", label: "200 SMA", color: "#ef4444" },
-  { key: "vwma100", label: "100 VWMA", color: "#f5f5f5" },
+  { key: "sma50", label: "50 SMA", color: "#34d399" },
+  { key: "sma200", label: "200 SMA", color: "#818cf8" },
+  { key: "vwma100", label: "100 VWMA", color: "#cbd5e1" },
 ] as const;
 type IndicatorKey = (typeof INDICATORS)[number]["key"];
 type IndicatorState = Record<IndicatorKey, boolean>;
@@ -117,7 +117,7 @@ function normalizeCandles(candles: readonly ReplayChartCandle[]): ChartCandle[] 
 }
 
 function volumeColor(candle: ChartCandle) {
-  return candle.close >= candle.open ? "rgba(239, 68, 68, 0.45)" : "rgba(59, 130, 246, 0.45)";
+  return candle.close >= candle.open ? "rgba(255, 90, 110, 0.42)" : "rgba(110, 138, 255, 0.42)";
 }
 
 /** O(n) rolling SMA. A long `max` replay must remain responsive while advancing every 100 ms. */
@@ -232,15 +232,15 @@ export default function ReplayChart({
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#a3a3a3",
+        textColor: "#94a3b8",
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "#262626" },
-        horzLines: { color: "#262626" },
+        vertLines: { color: "rgba(255, 255, 255, 0.05)" },
+        horzLines: { color: "rgba(255, 255, 255, 0.05)" },
       },
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#404040" },
-      rightPriceScale: { borderColor: "#404040", scaleMargins: { top: 0.05, bottom: 0.25 } },
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: "rgba(255, 255, 255, 0.10)" },
+      rightPriceScale: { borderColor: "rgba(255, 255, 255, 0.10)", scaleMargins: { top: 0.05, bottom: 0.25 } },
       crosshair: { mode: 0 },
     });
     const candle = chart.addSeries(CandlestickSeries, {
@@ -268,9 +268,9 @@ export default function ReplayChart({
       lastValueVisible: false,
       priceFormat: chartPriceFormat,
     } as const;
-    const sma50 = chart.addSeries(LineSeries, { ...lineOptions, color: "#22c55e" });
-    const sma200 = chart.addSeries(LineSeries, { ...lineOptions, color: "#ef4444" });
-    const vwma100 = chart.addSeries(LineSeries, { ...lineOptions, color: "#f5f5f5" });
+    const sma50 = chart.addSeries(LineSeries, { ...lineOptions, color: "#34d399" });
+    const sma200 = chart.addSeries(LineSeries, { ...lineOptions, color: "#818cf8" });
+    const vwma100 = chart.addSeries(LineSeries, { ...lineOptions, color: "#cbd5e1" });
     const visibility = indicatorsRef.current;
     sma50.applyOptions({ visible: visibility.sma50 });
     sma200.applyOptions({ visible: visibility.sma200 });
@@ -346,7 +346,7 @@ export default function ReplayChart({
     if (derivedPrice != null && Number.isFinite(derivedPrice) && derivedPrice > 0) {
       priceLineRef.current = series.candle.createPriceLine({
         price: derivedPrice,
-        color: "#facc15",
+        color: "#38bdf8",
         lineWidth: 1,
         axisLabelVisible: true,
         title: "현재가",
@@ -382,14 +382,14 @@ export default function ReplayChart({
             onClick={() => toggleIndicator(indicator.key)}
             className={`flex items-center gap-1.5 rounded border px-2 py-0.5 text-xs ${
               indicators[indicator.key]
-                ? "border-neutral-700 bg-neutral-800 text-neutral-200"
-                : "border-neutral-800 text-neutral-600"
+                ? "border-hairline bg-surface-2/70 text-ink"
+                : "border-hairline-soft text-ink-faint"
             }`}
             title={`${indicator.label} 표시 켜기/끄기`}
           >
             <span
               className="inline-block h-2 w-2 rounded-full"
-              style={{ backgroundColor: indicators[indicator.key] ? indicator.color : "#525252" }}
+              style={{ backgroundColor: indicators[indicator.key] ? indicator.color : "rgba(255,255,255,0.16)" }}
             />
             {indicator.label}
           </button>
@@ -414,15 +414,15 @@ function OhlcReadout({ candle }: { candle: HoveredCandle }) {
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none absolute left-2 top-2 z-10 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-neutral-700/80 bg-neutral-950/85 px-2 py-1 text-[11px] tabular-nums shadow-sm backdrop-blur-sm sm:gap-x-3 sm:text-xs"
+      className="pointer-events-none absolute left-2 top-2 z-10 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-hairline bg-abyss-deep/80 px-2 py-1 text-[11px] tabular-nums shadow-sm backdrop-blur-sm sm:gap-x-3 sm:text-xs"
       data-testid="replay-chart-ohlc-readout"
     >
       {values.map(({ label, value }) => {
         const rate = percentFromOpen(value, candle.open);
-        const tone = rate > 0 ? "text-red-400" : rate < 0 ? "text-blue-400" : "text-neutral-300";
+        const tone = rate > 0 ? "text-up" : rate < 0 ? "text-down" : "text-ink-muted";
         return (
-          <span key={label} className="whitespace-nowrap text-neutral-300">
-            <span className="mr-1 text-neutral-500">{label}</span>
+          <span key={label} className="whitespace-nowrap text-ink-muted">
+            <span className="mr-1 text-ink-faint">{label}</span>
             {priceFormatter.format(value)}
             <span className={`ml-1 ${tone}`}>({formatPercent(rate)})</span>
           </span>

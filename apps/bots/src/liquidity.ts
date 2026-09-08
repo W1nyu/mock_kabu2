@@ -23,11 +23,17 @@ export const LIQUIDITY_DISTANCE_TICKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] 
 /** Relative distribution only; actual share quantities depend on price. */
 export const LIQUIDITY_LEVEL_WEIGHTS = [160, 140, 120, 100, 85, 70, 60, 50, 45, 40, 35, 30] as const;
 /** Small ordinary market orders should not exhaust the best quote by default. */
-export const LIQUIDITY_MIN_BEST_QTY = 80;
+export const LIQUIDITY_MIN_BEST_QTY = 160;
+/**
+ * The executable edge is replenished before a bounded taker can walk it.
+ * At KABU's reference price the 160-share wall remains above the ₩12m bot
+ * taker cap even just before a replacement is posted.
+ */
+export const LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO = 0.9;
 /** SAKU keeps more of its existing side budget at the executable price. */
-export const SAKU_MIN_BEST_QTY = 100;
+export const SAKU_MIN_BEST_QTY = 180;
 /** Normalise legacy 80-share SAKU best walls promptly without replacing after every small fill. */
-export const SAKU_BEST_REFILL_LOW_WATER_RATIO = 0.82;
+export const SAKU_BEST_REFILL_LOW_WATER_RATIO = 0.9;
 const LIQUIDITY_WEIGHT_TOTAL = LIQUIDITY_LEVEL_WEIGHTS.reduce((sum, weight) => sum + weight, 0);
 /** The REST/UI order book exposes the nearest ten price levels per side. */
 export const VISIBLE_LIQUIDITY_LEVELS = 10;
@@ -39,7 +45,7 @@ export interface LiquidityQuote {
   level: number;
   price: number;
   qty: number;
-  /** Higher only for SAKU's near-price best wall; consumed by the maker refill check. */
+  /** Best-wall low-water mark, consumed by the maker refill check. */
   refillLowWaterRatio?: number;
 }
 
@@ -188,8 +194,11 @@ function liquidityQuote(
     level,
     price,
     qty,
-    ...(def.symbol === "SAKU" && level === 0
-      ? { refillLowWaterRatio: SAKU_BEST_REFILL_LOW_WATER_RATIO }
+    ...(level === 0
+      ? {
+          refillLowWaterRatio:
+            def.symbol === "SAKU" ? SAKU_BEST_REFILL_LOW_WATER_RATIO : LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO,
+        }
       : {}),
   };
 }

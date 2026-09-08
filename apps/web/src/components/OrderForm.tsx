@@ -152,169 +152,223 @@ export default function OrderForm({
   }
 
   return (
-    <form onSubmit={submit} className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-      <div className="mb-3 grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            setSide("BUY");
-            resetSizing();
-          }}
-          className={`rounded py-2 text-sm font-bold ${side === "BUY" ? "bg-red-500/90 text-white" : "bg-neutral-800 text-neutral-400"}`}
-        >
-          매수
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setSide("SELL");
-            resetSizing();
-          }}
-          className={`rounded py-2 text-sm font-bold ${side === "SELL" ? "bg-blue-500/90 text-white" : "bg-neutral-800 text-neutral-400"}`}
-        >
-          매도
-        </button>
+    <form onSubmit={submit} className="glass overflow-hidden">
+      <div className="panel-head">
+        <span className="panel-title">주문</span>
+        <span className="num text-[11px] text-ink-faint">{symbol}</span>
       </div>
 
-      <div className="mb-3 flex gap-3 text-sm">
-        {(["LIMIT", "MARKET"] as const).map((t) => (
-          <label key={t} className="flex items-center gap-1.5">
-            <input
-              type="radio"
-              checked={type === t}
-              onChange={() => {
+      <div className="space-y-4 p-4">
+        {/* Side — a segmented control inside a well, so the active half reads as lit. */}
+        <div className="well grid grid-cols-2 gap-1 p-1">
+          {(["BUY", "SELL"] as const).map((s) => {
+            const active = side === s;
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  setSide(s);
+                  resetSizing();
+                }}
+                aria-pressed={active}
+                className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
+                  active
+                    ? s === "BUY"
+                      ? "bg-up/18 text-up ring-1 ring-inset ring-up/45"
+                      : "bg-down/18 text-down ring-1 ring-inset ring-down/45"
+                    : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                }`}
+              >
+                {s === "BUY" ? "매수" : "매도"}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Order type */}
+        <div className="well grid grid-cols-2 gap-1 p-1">
+          {(["LIMIT", "MARKET"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => {
                 setType(t);
                 resetSizing();
               }}
-            />
-            {t === "LIMIT" ? "지정가" : "시장가"}
-          </label>
-        ))}
-      </div>
-
-      {type === "LIMIT" && (
-        <label className="mb-2 block text-sm">
-          <span className="text-neutral-400">가격</span>
-          <input
-            className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 tabular-nums"
-            inputMode="numeric"
-            value={price}
-            onChange={(e) => {
-              setPrice(e.target.value.replace(/[^0-9]/g, ""));
-              resetSizing();
-            }}
-            placeholder="호가를 클릭해도 입력됩니다"
-          />
-        </label>
-      )}
-
-      <label className="mb-2 block text-sm">
-        <span className="text-neutral-400">수량</span>
-        <input
-          className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 tabular-nums"
-          inputMode="numeric"
-          value={qty}
-          onChange={(e) => {
-            setQty(e.target.value.replace(/[^0-9]/g, ""));
-            resetSizing();
-          }}
-        />
-      </label>
-
-      <div className="mb-2">
-        <div className="mb-1 flex items-center justify-between text-[11px] text-neutral-500">
-          <span>{side === "BUY" ? "주문 가능 현금 기준" : "매도 가능 수량 기준"}</span>
-          {side === "BUY" && buyRefPrice != null && (
-            <span className="tabular-nums">
-              {type === "MARKET" ? "최근가 110%" : "지정가"} {won(buyRefPrice)}
-            </span>
-          )}
-        </div>
-        <div className="grid grid-cols-4 gap-1.5">
-          {([0.1, 0.25, 0.5, 1] as const).map((pct) => (
-            <button
-              key={pct}
-              type="button"
-              disabled={pctDisabled}
-              onClick={() => applyPct(pct)}
-              aria-pressed={activePct === pct}
-              title={
-                side === "BUY"
-                  ? type === "LIMIT"
-                    ? "주문 가능 현금 대비 (가격 입력 필요)"
-                    : "주문 가능 현금 대비 (최근가 110% 기준)"
-                  : "매도 가능 수량 대비"
-              }
-              className={`rounded py-1 text-xs tabular-nums transition-colors disabled:opacity-40 ${
-                activePct === pct
-                  ? side === "BUY"
-                    ? "bg-red-500/20 text-red-300 ring-1 ring-inset ring-red-500/60"
-                    : "bg-blue-500/20 text-blue-300 ring-1 ring-inset ring-blue-500/60"
-                  : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200"
+              aria-pressed={type === t}
+              className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
+                type === t
+                  ? "bg-white/10 text-ink"
+                  : "text-ink-muted hover:bg-white/6 hover:text-ink"
               }`}
             >
-              {pct === 1 ? "최대" : `${pct * 100}%`}
+              {t === "LIMIT" ? "지정가" : "시장가"}
             </button>
           ))}
         </div>
-      </div>
 
-      <div className="mb-3 space-y-0.5 text-xs text-neutral-400 tabular-nums">
-        {side === "BUY" ? (
-          <>
-            <p>
-              주문 가능 현금: <span className="text-neutral-200">{account ? won(account.available) : "불러오는 중"}</span>
-            </p>
-            {account && (
-              <p className="text-neutral-500">
-                예수금 {won(account.balance)}
-                {account.holdAmount > 0 && ` · 주문 대기 ${won(account.holdAmount)} 제외`}
-              </p>
-            )}
-            {maxBuyQty != null && (
-              <p className="text-neutral-500">현재 기준 최대 {fmt.format(maxBuyQty)}주 매수 가능</p>
-            )}
-          </>
-        ) : (
-          <>
-            <p>
-              매도 가능 수량: <span className="text-neutral-200">{fmt.format(availableQty)}주</span>
-            </p>
-            <p className="text-neutral-500">
-              보유 {fmt.format(holding?.qty ?? 0)}주
-              {holding && holding.holdQty > 0 && ` · 매도 대기 ${fmt.format(holding.holdQty)}주 제외`}
-            </p>
-          </>
+        {type === "LIMIT" && (
+          <div>
+            <label className="label" htmlFor={`order-price-${symbol}`}>
+              가격
+            </label>
+            <input
+              id={`order-price-${symbol}`}
+              className="field num"
+              inputMode="numeric"
+              value={price}
+              onChange={(e) => {
+                setPrice(e.target.value.replace(/[^0-9]/g, ""));
+                resetSizing();
+              }}
+              placeholder="호가를 클릭해도 입력됩니다"
+            />
+          </div>
         )}
-        {estimate != null && (
-          <p>
-            {side === "BUY" && type === "MARKET" ? "예상 최대 홀드 금액" : "예상 주문금액"}: {won(estimate)}
+
+        <div>
+          <label className="label" htmlFor={`order-qty-${symbol}`}>
+            수량
+          </label>
+          <input
+            id={`order-qty-${symbol}`}
+            className="field num"
+            inputMode="numeric"
+            value={qty}
+            onChange={(e) => {
+              setQty(e.target.value.replace(/[^0-9]/g, ""));
+              resetSizing();
+            }}
+            placeholder="0"
+          />
+        </div>
+
+        {/* Quick sizing */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-ink-faint">
+            <span>{side === "BUY" ? "주문 가능 현금 기준" : "매도 가능 수량 기준"}</span>
+            {side === "BUY" && buyRefPrice != null && (
+              <span className="num">
+                {type === "MARKET" ? "최근가 110%" : "지정가"} {won(buyRefPrice)}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {([0.1, 0.25, 0.5, 1] as const).map((pct) => (
+              <button
+                key={pct}
+                type="button"
+                disabled={pctDisabled}
+                onClick={() => applyPct(pct)}
+                aria-pressed={activePct === pct}
+                title={
+                  side === "BUY"
+                    ? type === "LIMIT"
+                      ? "주문 가능 현금 대비 (가격 입력 필요)"
+                      : "주문 가능 현금 대비 (최근가 110% 기준)"
+                    : "매도 가능 수량 대비"
+                }
+                className={`num rounded-lg border py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${
+                  activePct === pct
+                    ? side === "BUY"
+                      ? "border-up/45 bg-up/15 text-up"
+                      : "border-down/45 bg-down/15 text-down"
+                    : "border-hairline-soft bg-surface-2/50 text-ink-muted hover:border-hairline hover:text-ink"
+                }`}
+              >
+                {pct === 1 ? "최대" : `${pct * 100}%`}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Balance readout */}
+        <div className="well num space-y-1 px-3 py-2.5 text-xs">
+          {side === "BUY" ? (
+            <>
+              <p className="flex items-baseline justify-between gap-2">
+                <span className="text-ink-muted">주문 가능 현금</span>
+                <span className="font-semibold">
+                  {account ? won(account.available) : "불러오는 중"}
+                </span>
+              </p>
+              {account && (
+                <p className="flex items-baseline justify-between gap-2 text-ink-faint">
+                  <span>예수금</span>
+                  <span>
+                    {won(account.balance)}
+                    {account.holdAmount > 0 && ` · 대기 ${won(account.holdAmount)} 제외`}
+                  </span>
+                </p>
+              )}
+              {maxBuyQty != null && (
+                <p className="flex items-baseline justify-between gap-2 text-ink-faint">
+                  <span>최대 매수 가능</span>
+                  <span>{fmt.format(maxBuyQty)}주</span>
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="flex items-baseline justify-between gap-2">
+                <span className="text-ink-muted">매도 가능 수량</span>
+                <span className="font-semibold">{fmt.format(availableQty)}주</span>
+              </p>
+              <p className="flex items-baseline justify-between gap-2 text-ink-faint">
+                <span>보유</span>
+                <span>
+                  {fmt.format(holding?.qty ?? 0)}주
+                  {holding && holding.holdQty > 0 && ` · 대기 ${fmt.format(holding.holdQty)}주 제외`}
+                </span>
+              </p>
+            </>
+          )}
+          {estimate != null && (
+            <p className="flex items-baseline justify-between gap-2 border-t border-hairline-soft pt-1.5">
+              <span className="text-ink-muted">
+                {side === "BUY" && type === "MARKET" ? "예상 최대 홀드" : "예상 주문금액"}
+              </span>
+              <span className="font-semibold text-sky">{won(estimate)}</span>
+            </p>
+          )}
+        </div>
+
+        {/* Advisories */}
+        <div className="space-y-1 text-xs">
+          {type === "MARKET" && side === "BUY" && (
+            <p className="text-ink-faint">시장가 매수는 최근가의 110%까지 증거금이 홀드됩니다</p>
+          )}
+          {sizingNote && <p className="text-warn">{sizingNote}</p>}
+          {exceedsAvailableCash && (
+            <p className="text-warn">
+              입력 수량이 현재 주문 가능 현금을 초과합니다. 접수 시 다시 확인됩니다.
+            </p>
+          )}
+          {exceedsAvailableShares && (
+            <p className="text-warn">
+              입력 수량이 현재 매도 가능 수량을 초과합니다. 접수 시 다시 확인됩니다.
+            </p>
+          )}
+        </div>
+
+        {message && (
+          <p
+            className={`rounded-control border px-3 py-2 text-sm ${
+              message.ok ? "border-ok/30 bg-ok/8 text-ok" : "border-up/30 bg-up/8 text-up"
+            }`}
+          >
+            {message.text}
           </p>
         )}
-        {type === "MARKET" && side === "BUY" && (
-          <p>시장가 매수는 최근가의 110%까지 증거금이 홀드됩니다</p>
-        )}
-        {sizingNote && <p className="text-amber-400">{sizingNote}</p>}
-        {exceedsAvailableCash && (
-          <p className="text-amber-400">입력 수량이 현재 주문 가능 현금을 초과합니다. 접수 시 다시 확인됩니다.</p>
-        )}
-        {exceedsAvailableShares && (
-          <p className="text-amber-400">입력 수량이 현재 매도 가능 수량을 초과합니다. 접수 시 다시 확인됩니다.</p>
-        )}
+
+        <button
+          disabled={busy || !validQty || (type === "LIMIT" && limitPrice == null)}
+          className={`btn btn-block ${side === "BUY" ? "btn-buy" : "btn-sell"}`}
+        >
+          {busy ? "접수 중…" : `${side === "BUY" ? "매수" : "매도"} 주문`}
+        </button>
       </div>
-
-      {message && (
-        <p className={`mb-2 text-sm ${message.ok ? "text-emerald-400" : "text-red-400"}`}>
-          {message.text}
-        </p>
-      )}
-
-      <button
-        disabled={busy || !validQty || (type === "LIMIT" && limitPrice == null)}
-        className={`w-full rounded py-2 font-bold text-white disabled:opacity-40 ${side === "BUY" ? "bg-red-500 hover:bg-red-400" : "bg-blue-500 hover:bg-blue-400"}`}
-      >
-        {side === "BUY" ? "매수" : "매도"} 주문
-      </button>
     </form>
   );
 }

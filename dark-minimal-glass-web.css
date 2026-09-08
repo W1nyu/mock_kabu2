@@ -1,0 +1,58 @@
+/* === 다크 모드 미니멀 글래스 테마 토큰 및 실시간 조정 === */
+[data-theme="dark-minimal-glass"] {
+  /* 동적 테마 토큰 */
+  --theme-bg: #090A0F;
+  --theme-surface: #12151F;
+  --theme-surface-subtle: #1C2130;
+  --theme-border: rgba(255, 255, 255, 0.16);
+  --theme-text: #FFFFFF;
+  --theme-text-muted: #94A3B8;
+  --theme-accent: #38BDF8;
+  --theme-accent-secondary: #818CF8;
+  --theme-radius: 12px;
+  --theme-border-width: 1px;
+  --theme-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+  --theme-font-family: 'Inter', sans-serif;
+  --theme-glow: 0 0 20px rgba(56, 189, 248, 0.3);
+
+  /* 컬러 팔레트 */
+  --color-abyss-background: #0B0F19;
+  --color-card-surface: #111827;
+  --color-sky-glow: #38BDF8;
+  --color-muted-slate: #94A3B8;
+
+  /* 실시간 조정 지표 */
+  --tweak-surface-radius: 16px;
+  --tweak-border-width: 1px;
+  --tweak-shadow-depth: 14px;
+  --tweak-backdrop-blur: 16px;
+  --tweak-glow-intensity: 1.2;
+}
+
+/* === 웹 SaaS CSS === */
+.archetype-web {
+  background: var(--theme-bg);
+  color: var(--theme-text);
+  font-family: var(--theme-font-family);
+}
+.web-nav-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--theme-surface);
+  border-bottom: var(--tweak-border-width, 1px) solid var(--theme-border);
+}
+.web-component-container {
+  padding: 24px;
+  background: var(--theme-bg);
+}
+.web-btn-primary {
+  background: var(--theme-accent);
+  color: var(--theme-bg);
+  border: var(--tweak-border-width, 1px) solid transparent;
+  border-radius: var(--theme-control-radius, 8px);
+  padding: 10px 22px;
+  font-weight: 600;
+  box-shadow: 0 var(--tweak-shadow-depth, 8px) 16px rgba(0,0,0,0.2);
+}

@@ -1,6 +1,6 @@
 # mock kabu — 가상 투자·체결 엔진 (로컬 모의 거래소)
 
-가상 자산을 사고파는 모의 거래소입니다. 지정가/시장가 주문 → 인메모리 오더북 매칭 → 정산까지 전 구간이 로컬에서 동작하며, 알고리즘 봇 10개(마켓메이커·소액개미·고래·노이즈·모멘텀)가 다양한 시장 참여자 역할을 해 호가창이 항상 살아 움직입니다. 잔액/보유자산 경합 구간에는 **락 전략 3종(낙관적/비관적/Redis 분산)** 이 구현되어 있고 환경변수로 전환할 수 있습니다.
+가상 자산을 사고파는 모의 거래소입니다. 지정가/시장가 주문 → 인메모리 오더북 매칭 → 정산까지 전 구간이 로컬에서 동작하며, 알고리즘 봇 10개(마켓메이커·소액개미·고래·노이즈·모멘텀)가 다양한 시장 참여자 역할을 해 호가창이 항상 살아 움직이고, 가상 뉴스가 그 수급을 확률적으로 움직입니다. 잔액/보유자산 경합 구간에는 **락 전략 3종(낙관적/비관적/Redis 분산)** 이 구현되어 있고 환경변수로 전환할 수 있습니다.
 
 기획: [docs/superpowers/specs/2026-07-11-virtual-exchange-design.md](docs/superpowers/specs/2026-07-11-virtual-exchange-design.md) (M1~M4 구간)
 
@@ -10,16 +10,30 @@
 apps/web (Next.js :3100) ──REST/WebSocket──> apps/api (NestJS :4100)
                                               ├─ auth/account/order/market/admin 모듈
                                               ├─ outbox relayer ──> Redis Streams(orders)
-                                              └─ 정산 컨슈머 <── Redis Streams(trades)
 apps/matching-engine ── orders 스트림 소비 → 심볼별 오더북 매칭 → trades 발행
-                        └─ 호가/체결 Redis Pub/Sub → api gateway → 브라우저 push
+apps/settlement ── trades 스트림 소비 → 잔고·보유·원장·캔들 정산 → account Pub/Sub
+                        └─ 호가/체결/계정 Redis Pub/Sub → api gateway → 브라우저 push
 apps/bots ── 봇 계정 10개로 api REST 호출 (추세·변동성 군집 기준가 + 마켓메이커/소액개미/고래/노이즈/모멘텀)
 docker-compose: PostgreSQL 16 + Redis 7
 ```
 
+- **전용 유동성 공급자**: 종목별 reserve 계정 5개가 양방향 각각 약 ₩120M의 연속 호가벽을 유지합니다. 최우선 호가에는 일반 주문을 흡수할 최소 수량을 집중하고, 기존 호가를 먼저 채운 뒤에만 교체해 호가 공백과 불필요한 슬리피지를 막습니다.
+- **차트 타임프레임**: 1분·5분·15분·1시간·4시간·1일 봉을 지원합니다. 저장은 1분 봉만 하고 나머지는 조회 시 집계하므로 단일 진실 원천이 유지됩니다. KST가 UTC+9라 09:00 KST가 곧 UTC 자정이며, 따라서 **1일 봉은 09:00 KST에 열리고** 4시간/1시간 봉도 그 경계에 정확히 맞물립니다. 선택한 봉 간격은 브라우저에 저장됩니다.
+- **가상 뉴스**: 종목별 호재/악재와 시장 전체 매크로 뉴스를 템플릿 105종에서 생성해 2~4분마다 발행합니다. 각 뉴스는 강도(0.2~1.0)에 비례해 봇들의 매수/매도 선택 확률과 마켓메이커 기준가를 기울이므로, 강한 호재일수록 오를 **확률**이 높아질 뿐 반드시 오르지는 않습니다. 일부 뉴스는 후속 보도로 이어지며 결과가 뒤집히기도 합니다. 상단 메뉴 **뉴스**(`/news`)에서 볼 수 있고, 호재/악재 여부와 강도는 UI에 표시하지 않습니다.
+- **운영 메모리 경계**: 주문·정산 Streams는 consumer group이 ACK한 구간만 주기적으로 trim하며, production Redis는 `noeviction`입니다. 메모리 한계에서는 금융 이벤트를 버리지 않고 outbox 재시도로 복구합니다.
+
 - **주문 → 체결 → 정산 흐름**: 주문 접수 시 잔액/보유 홀드(락 적용) + orders/outbox 동일 트랜잭션 → relayer가 Redis Streams 발행 → 매칭 엔진(single-writer)이 가격-시간 우선 매칭 → trade 이벤트 → 정산 컨슈머가 잔액·보유 갱신(락 적용) + 홀드 해제 → WebSocket push
 - **멱등성**: 모든 이벤트에 `event_id`, 정산은 `processed_events` 테이블로 중복 소비 무시 (at-least-once)
 - **DB 안전망**: `CHECK(balance >= 0)` 등 제약 + append-only `ledger_entries` 원장
+
+## 저비용 VPS 배포
+
+개발용 `docker-compose.yml`과 별도로, 한 대의 VPS에서 PostgreSQL·Redis·API·매칭 엔진·봇·웹을
+운영할 수 있는 production Compose 구성을 제공합니다. 외부에는 Caddy의 HTTPS(80/443)만 열고,
+DB/Redis/API는 내부 Docker 네트워크에만 둡니다. PostgreSQL은 pgBackRest 암호화 백업과 복구
+스크립트를 포함합니다.
+
+실제 배포 전 준비, 비밀값 생성, 백업·복구 절차는 [저비용 VPS 운영 배포 가이드](docs/production-vps-deployment.md)를 따르세요.
 
 ## 요구 사항
 
@@ -45,7 +59,7 @@ pnpm infra:up
 pnpm db:migrate
 pnpm db:seed
 
-# 5. 전체 기동 (api + matching-engine + bots + web)
+# 5. 전체 기동 (api + settlement + matching-engine + bots + web)
 pnpm dev
 ```
 
@@ -111,7 +125,7 @@ docker compose --project-name mock-kabu2 down -v   # mock_kabu2 컨테이너 + �
 어떤 데이터도 변경하지 않습니다.
 
 ```bash
-# api / matching-engine / bots를 먼저 중지한 뒤 실행
+# api / settlement / matching-engine / bots를 먼저 중지한 뒤 실행
 pnpm recover:settlement
 
 # 출력이 SAFE일 때만 명시적으로 적용
@@ -153,8 +167,9 @@ pnpm check:consistency    # 원장 합계=잔액, 음수 잔액/보유 0건, 홀
 
 ```
 apps/
-  api/              NestJS 모듈러 모놀리스 (auth·account·order·market·admin·gateway·정산)
+  api/              NestJS 경계 API (auth·account·order·market·admin·gateway)
   matching-engine/  순수 TS 프로세스 — 오더북(순수 함수) + Redis Streams 컨슈머
+  settlement/       순수 TS 워커 — 체결 정산·원장·보유·캔들 + 계정 이벤트 발행
   bots/             시장 참여자 봇 (추세·변동성 군집 기준가, 마켓메이커 x3 / 소액개미 x3 / 고래 x1 / 노이즈 x2 / 모멘텀 x1)
   web/              Next.js — 대시보드·호가창·캔들차트·주문·이체·관전 모드
 packages/

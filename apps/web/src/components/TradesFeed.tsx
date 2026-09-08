@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, fmt } from "@/lib/api";
+import { formatKstTime, MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 
 interface Tick {
@@ -66,16 +67,6 @@ function parseLiveTick(data: unknown): Tick | null {
   return tick as Tick;
 }
 
-/** 항상 같은 폭의 HH:mm:ss로 만들어 체결 행의 열 정렬을 유지한다. */
-function formatTradeTime(ts: number) {
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) return "--:--:--";
-
-  return [date.getHours(), date.getMinutes(), date.getSeconds()]
-    .map((value) => String(value).padStart(2, "0"))
-    .join(":");
-}
-
 export default function TradesFeed({ symbol }: { symbol: string }) {
   const [ticks, setTicks] = useState<Tick[]>([]);
 
@@ -106,31 +97,39 @@ export default function TradesFeed({ symbol }: { symbol: string }) {
   }, [symbol]);
 
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-900">
-      <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold text-neutral-400">
-        실시간 체결
+    <div className="glass flex flex-col overflow-hidden">
+      <div className="panel-head">
+        <span className="panel-title">실시간 체결</span>
+        <span className="chip chip-live">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
+          LIVE
+        </span>
       </div>
       <div
-        className={`grid ${tradeGridColumns} gap-x-2 border-b border-neutral-800 px-3 py-1.5 text-[11px] font-medium text-neutral-500`}
+        className={`grid ${tradeGridColumns} gap-x-2 border-b border-hairline-soft px-4 py-1.5 text-[10px] font-semibold tracking-wide text-ink-faint uppercase`}
       >
         <span>가격</span>
         <span className="text-right">수량</span>
-        <span className="justify-self-end">일시</span>
+        <span className="justify-self-end">일시 ({MARKET_TIME_ZONE_LABEL})</span>
       </div>
-      <ul className="max-h-64 overflow-y-auto text-xs tabular-nums">
+      <ul className="num max-h-72 flex-1 overflow-y-auto text-xs">
         {ticks.map((t) => (
           <li
             key={t.tradeId}
-            className={`grid ${tradeGridColumns} items-center gap-x-2 px-3 py-0.5`}
+            className={`grid ${tradeGridColumns} items-center gap-x-2 px-4 py-1 transition-colors hover:bg-white/4`}
           >
-            <span className={t.takerSide === "BUY" ? "text-red-400" : "text-blue-400"}>
+            <span className={`font-medium ${t.takerSide === "BUY" ? "text-up" : "text-down"}`}>
               {fmt.format(t.price)}
             </span>
-            <span className="justify-self-end text-neutral-300">{fmt.format(t.qty)}</span>
-            <span className="justify-self-end whitespace-nowrap text-neutral-500">{formatTradeTime(t.ts)}</span>
+            <span className="justify-self-end text-ink-muted">{fmt.format(t.qty)}</span>
+            <span className="justify-self-end whitespace-nowrap text-ink-faint">
+              {formatKstTime(t.ts)}
+            </span>
           </li>
         ))}
-        {ticks.length === 0 && <li className="px-3 py-2 text-neutral-500">체결 대기중…</li>}
+        {ticks.length === 0 && (
+          <li className="px-4 py-8 text-center text-ink-faint">체결 대기중…</li>
+        )}
       </ul>
     </div>
   );

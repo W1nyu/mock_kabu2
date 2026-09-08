@@ -65,30 +65,49 @@ export default function MyOpenOrders({
   }
 
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-900">
-      <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold text-neutral-400">
-        내 미체결 주문
+    <div className="glass flex flex-col overflow-hidden">
+      <div className="panel-head">
+        <span className="panel-title">내 미체결 주문</span>
+        {orders.length > 0 && <span className="chip">{orders.length}</span>}
       </div>
-      <ul className="max-h-64 overflow-y-auto text-xs tabular-nums">
-        {orders.map((o) => (
-          <li key={o.id} className="flex items-center justify-between gap-2 px-3 py-1">
-            <span className={o.side === "BUY" ? "text-red-400" : "text-blue-400"}>
-              {o.side === "BUY" ? "매수" : "매도"}
-            </span>
-            <span className="text-neutral-300">{o.symbol}</span>
-            <span>{o.price != null ? fmt.format(o.price) : "시장가"}</span>
-            <span className="text-neutral-400">
-              {fmt.format(o.filledQty)}/{fmt.format(o.qty)}
-            </span>
-            <button
-              onClick={() => cancel(o.id)}
-              className="rounded border border-neutral-700 px-2 py-0.5 text-neutral-400 hover:bg-neutral-800"
+      <ul className="num max-h-72 flex-1 overflow-y-auto text-xs">
+        {orders.map((o) => {
+          const pct = o.qty > 0 ? (o.filledQty / o.qty) * 100 : 0;
+          return (
+            <li
+              key={o.id}
+              className="relative flex items-center gap-2 border-b border-hairline-soft px-4 py-2 last:border-b-0"
             >
-              취소
-            </button>
-          </li>
-        ))}
-        {orders.length === 0 && <li className="px-3 py-2 text-neutral-500">미체결 주문 없음</li>}
+              {/* Fill progress reads as a quiet bar under the row. */}
+              <span
+                className="absolute inset-y-0 left-0 bg-white/4"
+                style={{ width: `${pct}%` }}
+                aria-hidden
+              />
+              <span
+                className={`relative w-8 shrink-0 font-semibold ${o.side === "BUY" ? "text-up" : "text-down"}`}
+              >
+                {o.side === "BUY" ? "매수" : "매도"}
+              </span>
+              <span className="relative shrink-0 font-medium">{o.symbol}</span>
+              <span className="relative ml-auto text-ink-muted">
+                {o.price != null ? fmt.format(o.price) : "시장가"}
+              </span>
+              <span className="relative w-16 shrink-0 text-right text-ink-faint">
+                {fmt.format(o.filledQty)}/{fmt.format(o.qty)}
+              </span>
+              <button
+                onClick={() => cancel(o.id)}
+                className="btn btn-ghost btn-sm relative shrink-0"
+              >
+                취소
+              </button>
+            </li>
+          );
+        })}
+        {orders.length === 0 && (
+          <li className="px-4 py-8 text-center text-ink-faint">미체결 주문 없음</li>
+        )}
       </ul>
     </div>
   );

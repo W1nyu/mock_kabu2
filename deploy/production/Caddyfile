@@ -1,0 +1,33 @@
+{
+	admin off
+	email {$CADDY_EMAIL}
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	log {
+		output stdout
+		format console
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	# This endpoint is exclusively for the bots container. It must never reach
+	# Nest through the public proxy, even if an application route changes later.
+	@internal path /internal /internal/*
+	respond @internal "Not found" 404
+
+	# The API has no /api prefix. Keeping it on the same public origin avoids
+	# an extra browser CORS surface while Caddy upgrades Socket.IO WebSockets.
+	@api path /auth /auth/* /account /account/* /orders /orders/* /market /market/* /admin /admin/* /replay /replay/* /health /health/* /socket.io /socket.io/*
+	reverse_proxy @api api:4100
+
+	reverse_proxy web:3100
+}

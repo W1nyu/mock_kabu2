@@ -1,9 +1,13 @@
 "use client";
 
+import type { NewsItemDto } from "@mock-kabu/shared";
+import { NEWS_FEED_SCOPE } from "@mock-kabu/shared";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, getToken, getUser, won } from "@/lib/api";
+import { NewsList } from "@/components/NewsFeed";
+import { mergeNews, parseNewsItem } from "@/lib/news";
 import { subscribe } from "@/lib/socket";
 
 interface AccountInfo {
@@ -68,6 +72,7 @@ export default function DashboardPage() {
   const [symbols, setSymbols] = useState<SymbolRow[]>([]);
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [turnovers, setTurnovers] = useState<Record<string, number>>({});
+  const [news, setNews] = useState<NewsItemDto[]>([]);
   const turnoverWatermarksRef = useRef(new Map<string, number>());
   const pendingTurnoverTicksRef = useRef(new Map<string, Map<string, TradeTick>>());
 
@@ -128,6 +133,25 @@ export default function DashboardPage() {
       unsub();
     };
   }, [refreshAccount, refreshSymbols, router]);
+
+  // The dashboard shows only the newest few; the news tab holds the full feed.
+  useEffect(() => {
+    let active = true;
+    api<NewsItemDto[]>("/market/news?limit=5", { auth: false })
+      .then((rows) => {
+        if (active) setNews((previous) => mergeNews(previous, rows));
+      })
+      .catch(() => {});
+
+    const unsubscribe = subscribe([`news:${NEWS_FEED_SCOPE}`], ({ data }) => {
+      const item = parseNewsItem(data);
+      if (item) setNews((previous) => mergeNews([item], previous).slice(0, 5));
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     const channels = symbols.map(({ symbol }) => `trades:${symbol}`);
@@ -191,123 +215,196 @@ export default function DashboardPage() {
   const totalPnl = liveHoldings.reduce((sum, h) => sum + h.pnl, 0);
   const totalPnlRate = totalCost > 0 ? totalPnl / totalCost : 0;
 
+
+  const hasHoldings = liveHoldings.length > 0;
+  const pnlTone = totalPnl >= 0 ? "text-up" : "text-down";
+
   return (
     <div className="space-y-6">
-      <section className="grid grid-cols-2 gap-4 md:grid-cols-5">
-        <Stat label="총 자산" value={won(total)} highlight />
-        <Stat label="현금 잔액" value={won(account?.balance ?? 0)} />
-        <Stat label="주문 가능" value={won(account?.available ?? 0)} />
-        <Stat label="주식 평가금액" value={won(stockValue)} />
-        <Stat
-          label="평가손익 (전체 수익률)"
-          value={
-            holdings.length > 0
-              ? `${totalPnl >= 0 ? "+" : ""}${won(totalPnl)} (${totalPnl >= 0 ? "+" : ""}${(totalPnlRate * 100).toFixed(2)}%)`
-              : "—"
-          }
-          tone={holdings.length === 0 ? undefined : totalPnl >= 0 ? "up" : "down"}
-        />
+      {/* ── Portfolio hero ─────────────────────────────────────── */}
+      <section className="glass overflow-hidden">
+        <div className="flex flex-col gap-6 p-5 sm:p-6 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
+          <div>
+            <p className="panel-title">총 자산</p>
+            <p className="num mt-2 text-4xl font-semibold tracking-tight sm:text-5xl">
+              {won(total)}
+            </p>
+            <p className="num mt-2 text-sm font-medium">
+              {hasHoldings ? (
+                <>
+                  <span className={pnlTone}>
+                    {totalPnl >= 0 ? "▲" : "▼"} {totalPnl >= 0 ? "+" : ""}
+                    {won(totalPnl)} ({totalPnl >= 0 ? "+" : ""}
+                    {(totalPnlRate * 100).toFixed(2)}%)
+                  </span>
+                  <span className="ml-2 font-normal text-ink-faint">평가손익 · 전체 수익률</span>
+                </>
+              ) : (
+                <span className="font-normal text-ink-faint">평가손익 —</span>
+              )}
+            </p>
+          </div>
+
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
+            <Metric label="현금 잔액" value={won(account?.balance ?? 0)} />
+            <Metric label="주문 가능" value={won(account?.available ?? 0)} />
+            <Metric label="주식 평가금액" value={won(stockValue)} />
+          </dl>
+        </div>
+
+        {/* Allocation bar — cash vs. equity at a glance. */}
+        {total > 0 && (
+          <div className="border-t border-hairline-soft px-5 py-3 sm:px-6">
+            <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-white/6">
+              <div
+                className="bg-sky/70"
+                style={{ width: `${((account?.balance ?? 0) / total) * 100}%` }}
+              />
+              <div className="bg-indigo/70" style={{ width: `${(stockValue / total) * 100}%` }} />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-muted">
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-sky/70" />
+                현금 {(((account?.balance ?? 0) / total) * 100).toFixed(1)}%
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-indigo/70" />
+                주식 {((stockValue / total) * 100).toFixed(1)}%
+              </span>
+            </div>
+          </div>
+        )}
       </section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold text-neutral-400">종목</h2>
-        <div className="overflow-hidden rounded-lg border border-neutral-800">
-          <table className="w-full text-sm">
-            <thead className="bg-neutral-900 text-left text-neutral-400">
+      {/* ── Market ─────────────────────────────────────────────── */}
+      <section className="glass overflow-hidden">
+        <div className="panel-head">
+          <span className="panel-title">종목</span>
+          <span className="chip chip-live">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
+            LIVE
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="tbl tbl-hover">
+            <thead>
               <tr>
-                <th className="px-4 py-2">종목</th>
-                <th className="px-4 py-2 text-right" title="모의 시장 시작 기준가">
+                <th>종목</th>
+                <th className="text-right" title="모의 시장 시작 기준가">
                   기준가(시가)
                 </th>
-                <th className="px-4 py-2 text-right">현재가</th>
-                <th className="px-4 py-2 text-right">등락률</th>
-                <th className="px-4 py-2 text-right" title="KST 당일 누적 체결 금액을 만 원 단위로 표시">
+                <th className="text-right">현재가</th>
+                <th className="text-right">등락률</th>
+                <th className="text-right" title="KST 당일 누적 체결 금액을 만 원 단위로 표시">
                   거래대금 (만 원)
                 </th>
-                <th className="px-4 py-2" />
+                <th />
               </tr>
             </thead>
             <tbody>
               {liveSymbols.map((s) => {
                 const change = ((s.lastPrice - s.initialPrice) / s.initialPrice) * 100;
+                const tone = change > 0 ? "text-up" : change < 0 ? "text-down" : "text-ink-muted";
                 return (
-                  <tr key={s.symbol} className="border-t border-neutral-800 hover:bg-neutral-900">
-                    <td className="px-4 py-2">
-                      <span className="font-semibold">{s.symbol}</span>{" "}
-                      <span className="text-neutral-400">{s.name}</span>
+                  <tr key={s.symbol}>
+                    <td>
+                      <Link
+                        href={`/symbol/${s.symbol}`}
+                        className="flex items-center gap-2.5 transition-colors hover:text-sky"
+                      >
+                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] border border-hairline-soft bg-surface-2/70 text-[11px] font-semibold text-ink-muted">
+                          {s.name.slice(0, 2)}
+                        </span>
+                        <span>
+                          <span className="block font-semibold">{s.name}</span>
+                          <span className="num block text-xs text-ink-faint">{s.symbol}</span>
+                        </span>
+                      </Link>
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-neutral-300">
-                      {fmt.format(s.initialPrice)}원
-                    </td>
-                    <td
-                      className={`px-4 py-2 text-right tabular-nums font-medium ${change > 0 ? "text-red-400" : change < 0 ? "text-blue-400" : ""}`}
-                    >
+                    <td className="num text-right text-ink-muted">{fmt.format(s.initialPrice)}원</td>
+                    <td className={`num text-right font-semibold ${tone}`}>
                       {fmt.format(s.lastPrice)}원
                     </td>
-                    <td
-                      className={`px-4 py-2 text-right tabular-nums ${change > 0 ? "text-red-400" : change < 0 ? "text-blue-400" : "text-neutral-400"}`}
-                    >
+                    <td className={`num text-right ${tone}`}>
                       {change > 0 ? "+" : ""}
                       {change.toFixed(2)}%
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-neutral-200">
-                      {formatTurnoverManWon(s.turnover)}
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <Link
-                        href={`/symbol/${s.symbol}`}
-                        className="rounded bg-neutral-800 px-3 py-1 text-xs hover:bg-neutral-700"
-                      >
+                    <td className="num text-right">{formatTurnoverManWon(s.turnover)}</td>
+                    <td className="text-right">
+                      <Link href={`/symbol/${s.symbol}`} className="btn btn-ghost btn-sm">
                         거래하기
                       </Link>
                     </td>
                   </tr>
                 );
               })}
+              {liveSymbols.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-10 text-center text-sm text-ink-faint">
+                    종목을 불러오는 중…
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold text-neutral-400">보유 자산</h2>
-        {holdings.length === 0 ? (
-          <p className="rounded-lg border border-neutral-800 p-4 text-sm text-neutral-500">
-            보유 종목이 없습니다. 종목을 골라 첫 매수를 해보세요.
-          </p>
+      {/* ── Latest news ────────────────────────────────────────── */}
+      <section className="glass overflow-hidden">
+        <div className="panel-head">
+          <span className="panel-title">최신 뉴스</span>
+          <Link href="/news" className="text-[11px] text-ink-muted transition-colors hover:text-sky">
+            전체 보기 →
+          </Link>
+        </div>
+        <NewsList items={news} emptyLabel="아직 뉴스가 없습니다" />
+      </section>
+
+      {/* ── Holdings ───────────────────────────────────────────── */}
+      <section className="glass overflow-hidden">
+        <div className="panel-head">
+          <span className="panel-title">보유 자산</span>
+          {hasHoldings && (
+            <span className="text-[11px] text-ink-faint">{liveHoldings.length}개 종목</span>
+          )}
+        </div>
+        {!hasHoldings ? (
+          <div className="px-5 py-12 text-center">
+            <p className="text-sm text-ink-muted">보유 종목이 없습니다.</p>
+            <p className="mt-1 text-xs text-ink-faint">
+              위 목록에서 종목을 골라 첫 매수를 해보세요.
+            </p>
+          </div>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-neutral-800">
-            <table className="w-full text-sm">
-              <thead className="bg-neutral-900 text-left text-neutral-400">
+          <div className="overflow-x-auto">
+            <table className="tbl tbl-hover">
+              <thead>
                 <tr>
-                  <th className="px-4 py-2">종목</th>
-                  <th className="px-4 py-2 text-right">보유 수량</th>
-                  <th className="px-4 py-2 text-right">매도 대기</th>
-                  <th className="px-4 py-2 text-right">평단가</th>
-                  <th className="px-4 py-2 text-right">현재가</th>
-                  <th className="px-4 py-2 text-right">평가금액</th>
-                  <th className="px-4 py-2 text-right">평가손익 (수익률)</th>
+                  <th>종목</th>
+                  <th className="text-right">보유 수량</th>
+                  <th className="text-right">매도 대기</th>
+                  <th className="text-right">평단가</th>
+                  <th className="text-right">현재가</th>
+                  <th className="text-right">평가금액</th>
+                  <th className="text-right">평가손익 (수익률)</th>
                 </tr>
               </thead>
               <tbody>
                 {liveHoldings.map((h) => (
-                  <tr key={h.symbol} className="border-t border-neutral-800">
-                    <td className="px-4 py-2 font-semibold">
-                      <Link href={`/symbol/${h.symbol}`} className="hover:text-amber-400">
+                  <tr key={h.symbol}>
+                    <td className="font-semibold">
+                      <Link href={`/symbol/${h.symbol}`} className="hover:text-sky">
                         {h.symbol}
                       </Link>
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums">{fmt.format(h.qty)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-neutral-400">
-                      {fmt.format(h.holdQty)}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums">
-                      {fmt.format(Math.round(h.avgCost))}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums">{fmt.format(h.lastPrice)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{won(h.value)}</td>
+                    <td className="num text-right">{fmt.format(h.qty)}</td>
+                    <td className="num text-right text-ink-faint">{fmt.format(h.holdQty)}</td>
+                    <td className="num text-right">{fmt.format(Math.round(h.avgCost))}</td>
+                    <td className="num text-right">{fmt.format(h.lastPrice)}</td>
+                    <td className="num text-right">{won(h.value)}</td>
                     <td
-                      className={`px-4 py-2 text-right tabular-nums ${h.pnl >= 0 ? "text-red-400" : "text-blue-400"}`}
+                      className={`num text-right font-medium ${h.pnl >= 0 ? "text-up" : "text-down"}`}
                     >
                       {h.pnl >= 0 ? "+" : ""}
                       {won(h.pnl)} ({h.pnl >= 0 ? "+" : ""}
@@ -324,22 +421,11 @@ export default function DashboardPage() {
   );
 }
 
-function Stat({
-  label,
-  value,
-  highlight,
-  tone,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-  tone?: "up" | "down";
-}) {
-  const color = highlight ? "text-amber-400" : tone === "up" ? "text-red-400" : tone === "down" ? "text-blue-400" : "";
+function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-      <p className="text-xs text-neutral-400">{label}</p>
-      <p className={`mt-1 text-lg font-bold tabular-nums ${color}`}>{value}</p>
+    <div className="border-l border-hairline-soft pl-4 first:border-l-0 first:pl-0 sm:border-l sm:pl-4">
+      <dt className="text-[11px] tracking-wide text-ink-muted uppercase">{label}</dt>
+      <dd className="num mt-1 text-lg font-semibold">{value}</dd>
     </div>
   );
 }

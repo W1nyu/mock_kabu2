@@ -4,6 +4,7 @@ import {
   ConnectedSocket,
   MessageBody,
   OnGatewayConnection,
+  OnGatewayDisconnect,
   OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
@@ -11,13 +12,19 @@ import {
 } from "@nestjs/websockets";
 import type Redis from "ioredis";
 import type { Server, Socket } from "socket.io";
-import { REDIS_CHANNEL_PATTERNS, toSocketChannel } from "@mock-kabu/shared";
-import { REDIS_SUB } from "../core/tokens";
+import {
+  CHANNELS,
+  NEWS_FEED_SCOPE,
+  REDIS_CHANNEL_PATTERNS,
+  SYMBOLS,
+  toSocketChannel,
+} from "@mock-kabu/shared";
+import { REDIS, REDIS_SUB } from "../core/tokens";
+import { readApiRuntimeConfig } from "../core/runtime-config";
 
-const WEB_ORIGINS = (process.env.WEB_ORIGIN ?? "http://localhost:3100,http://127.0.0.1:3100")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const WEB_ORIGINS = readApiRuntimeConfig().webOrigins;
+const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
+const MAX_CHANNELS_PER_MESSAGE = 32;
 
 /**
  * 실시간 채널 중계:
@@ -26,27 +33,37 @@ const WEB_ORIGINS = (process.env.WEB_ORIGIN ?? "http://localhost:3100,http://127
  */
 @Injectable()
 @WebSocketGateway({ cors: { origin: WEB_ORIGINS, credentials: true } })
-export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
+export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
+  /** Local socket refcounts for exact private Redis subscriptions. */
+  private readonly accountChannelRefs = new Map<string, number>();
+  private readonly accountChannelBySocket = new Map<string, string>();
+  private readonly activeAccountSubscriptions = new Set<string>();
+  private readonly pendingAccountSubscriptions = new Set<string>();
 
   constructor(
     @Inject(REDIS_SUB) private sub: Redis,
+    @Inject(REDIS) private publisher: Redis,
     private jwt: JwtService,
   ) {}
 
   afterInit() {
-    this.sub.psubscribe(REDIS_CHANNEL_PATTERNS.orderbook, REDIS_CHANNEL_PATTERNS.trades).catch((e) => {
+    this.sub.psubscribe(
+      REDIS_CHANNEL_PATTERNS.orderbook,
+      REDIS_CHANNEL_PATTERNS.trades,
+      REDIS_CHANNEL_PATTERNS.news,
+    ).catch((e) => {
       console.error("[gateway] psubscribe failed", e);
     });
     this.sub.on("pmessage", (_pattern, channel, message) => {
-      try {
-        const socketChannel = toSocketChannel(channel);
-        if (!socketChannel) return;
-        this.server.to(socketChannel).emit("message", { channel: socketChannel, data: JSON.parse(message) });
-      } catch (e) {
-        console.error("[gateway] relay failed", e);
-      }
+      this.relayRedisMessage(channel, message);
+    });
+    // Private account channels are subscribed only while a local, authorized
+    // Socket.IO room has a listener. A broad account:* pattern would make
+    // every API replica parse every account update as the user base grows.
+    this.sub.on("message", (channel, message) => {
+      this.relayRedisMessage(channel, message);
     });
   }
 
@@ -62,29 +79,131 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
     }
   }
 
+  handleDisconnect(socket: Socket) {
+    this.releaseAccountChannel(socket);
+  }
+
   @SubscribeMessage("join")
-  join(@ConnectedSocket() socket: Socket, @MessageBody() channels: string[]) {
-    for (const ch of channels ?? []) {
-      if (ch.startsWith("account:")) {
-        if (socket.data.accountId && ch === `account:${socket.data.accountId}`) {
-          socket.join(ch);
-        }
-      } else if (ch.startsWith("orderbook:") || ch.startsWith("trades:")) {
-        socket.join(ch);
-      }
+  join(@ConnectedSocket() socket: Socket, @MessageBody() channels: unknown) {
+    for (const ch of this.allowedChannels(socket, channels)) {
+      const alreadyJoined = socket.rooms.has(ch);
+      socket.join(ch);
+      if (!alreadyJoined && this.isAccountChannel(ch)) this.retainAccountChannel(socket, ch);
     }
     return { ok: true };
   }
 
   @SubscribeMessage("leave")
-  leave(@ConnectedSocket() socket: Socket, @MessageBody() channels: string[]) {
-    for (const ch of channels ?? []) socket.leave(ch);
+  leave(@ConnectedSocket() socket: Socket, @MessageBody() channels: unknown) {
+    for (const ch of this.allowedChannels(socket, channels)) {
+      const wasJoined = socket.rooms.has(ch);
+      socket.leave(ch);
+      if (wasJoined && this.isAccountChannel(ch)) this.releaseAccountChannel(socket, ch);
+    }
     return { ok: true };
   }
 
-  /** 서비스 코드에서 계정 이벤트 push (잔액/주문/체결 변경) */
+  /**
+   * Publish account events through Redis so a WebSocket connected to any API
+   * replica observes the same change. Gateway room authorization still keeps
+   * account channels private to their owner.
+   */
   notifyAccount(accountId: string, payload: Record<string, unknown>) {
-    const channel = `account:${accountId}`;
-    this.server?.to(channel).emit("message", { channel, data: payload });
+    this.publisher.publish(CHANNELS.account(accountId), JSON.stringify(payload)).catch((error) => {
+      // This is an ephemeral UI invalidation; settlement/order durability is
+      // provided by the streams and database transactions, not Pub/Sub.
+      console.error(`[gateway] account notification publish failed for ${accountId}`, error);
+    });
+  }
+
+  private relayRedisMessage(channel: string, message: string): void {
+    try {
+      const socketChannel = toSocketChannel(channel);
+      if (!socketChannel) return;
+      this.server.to(socketChannel).emit("message", { channel: socketChannel, data: JSON.parse(message) });
+    } catch (error) {
+      console.error("[gateway] relay failed", error);
+    }
+  }
+
+  private retainAccountChannel(socket: Socket, channel: string): void {
+    const previous = this.accountChannelBySocket.get(socket.id);
+    if (previous === channel) return;
+    if (previous) this.releaseAccountChannel(socket, previous);
+
+    this.accountChannelBySocket.set(socket.id, channel);
+    const references = this.accountChannelRefs.get(channel) ?? 0;
+    this.accountChannelRefs.set(channel, references + 1);
+    this.ensureAccountSubscription(channel);
+  }
+
+  private ensureAccountSubscription(channel: string): void {
+    if (this.activeAccountSubscriptions.has(channel) || this.pendingAccountSubscriptions.has(channel)) return;
+    this.pendingAccountSubscriptions.add(channel);
+    void this.sub
+      .subscribe(CHANNELS.account(this.accountIdFromChannel(channel)))
+      .then(() => {
+        if (this.accountChannelRefs.has(channel)) {
+          this.activeAccountSubscriptions.add(channel);
+          return;
+        }
+        // The final socket left while Redis was subscribing. Avoid keeping a
+        // no-listener channel alive once the asynchronous command completes.
+        return this.sub.unsubscribe(CHANNELS.account(this.accountIdFromChannel(channel)));
+      })
+      .catch((error) => {
+        // The next join retries. Account REST polling remains a safe fallback,
+        // so an ephemeral subscription failure must not affect funds.
+        console.error(`[gateway] account channel subscribe failed: ${channel}`, error);
+      })
+      .finally(() => {
+        this.pendingAccountSubscriptions.delete(channel);
+      });
+  }
+
+  private releaseAccountChannel(socket: Socket, expectedChannel?: string): void {
+    const channel = this.accountChannelBySocket.get(socket.id);
+    if (!channel || (expectedChannel && channel !== expectedChannel)) return;
+    this.accountChannelBySocket.delete(socket.id);
+
+    const references = this.accountChannelRefs.get(channel) ?? 0;
+    if (references > 1) {
+      this.accountChannelRefs.set(channel, references - 1);
+      return;
+    }
+    this.accountChannelRefs.delete(channel);
+    if (!this.activeAccountSubscriptions.delete(channel)) return;
+    this.sub.unsubscribe(CHANNELS.account(this.accountIdFromChannel(channel))).catch((error) => {
+      console.error(`[gateway] account channel unsubscribe failed: ${channel}`, error);
+    });
+  }
+
+  private isAccountChannel(channel: string): boolean {
+    return channel.startsWith("account:");
+  }
+
+  private accountIdFromChannel(channel: string): string {
+    return channel.slice("account:".length);
+  }
+
+  private allowedChannels(socket: Socket, channels: unknown): string[] {
+    if (!Array.isArray(channels)) return [];
+
+    return channels
+      .slice(0, MAX_CHANNELS_PER_MESSAGE)
+      .filter((channel): channel is string => typeof channel === "string" && channel.length <= 96)
+      .filter((channel) => this.isAllowedChannel(socket, channel));
+  }
+
+  private isAllowedChannel(socket: Socket, channel: string): boolean {
+    if (socket.data.accountId && channel === `account:${socket.data.accountId}`) return true;
+
+    const [kind, scope, ...rest] = channel.split(":");
+    if (rest.length !== 0) return false;
+
+    // News is public like trades and depth. The firehose scope carries every
+    // story; a per-symbol scope carries that symbol's plus the market-wide ones.
+    if (kind === "news") return scope === NEWS_FEED_SCOPE || ACTIVE_SYMBOLS.has(scope);
+    return (kind === "orderbook" || kind === "trades") && ACTIVE_SYMBOLS.has(scope);
   }
 }

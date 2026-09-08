@@ -4,20 +4,24 @@ import { AdminModule } from "./admin/admin.module";
 import { AuthModule } from "./auth/auth.module";
 import { CoreModule } from "./core/core.module";
 import { GatewayModule } from "./gateway/gateway.module";
+import { HealthModule } from "./health/health.module";
 import { LiquidityModule } from "./liquidity/liquidity.module";
 import { MarketModule } from "./market/market.module";
+import { NewsModule } from "./news/news.module";
 import { OrderModule } from "./order/order.module";
 import { ReplayModule } from "./replay/replay.module";
 
 @Module({
   imports: [
     CoreModule,
+    HealthModule,
     AuthModule,
     GatewayModule,
     LiquidityModule,
     AccountModule,
     OrderModule,
     MarketModule,
+    NewsModule,
     ReplayModule,
     AdminModule,
   ],

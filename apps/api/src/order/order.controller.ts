@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Header, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { JwtUser } from "../auth/auth.service";
 import { OrderService, type PlaceOrderDto } from "./order.service";
@@ -16,6 +16,17 @@ export class OrderController {
   @Delete(":id")
   cancel(@CurrentUser() user: JwtUser, @Param("id") id: string) {
     return this.orders.cancel(user.accountId, id);
+  }
+
+  /**
+   * One authenticated read for a market maker's own live rows and the public
+   * executable snapshot. This avoids two high-frequency REST round trips per
+  * symbol while retaining the ordinary `/orders` response for all clients.
+  */
+  @Get("quote-state")
+  @Header("Cache-Control", "no-store")
+  quoteState(@CurrentUser() user: JwtUser, @Query("symbol") symbol?: string) {
+    return this.orders.liveQuoteState(user.accountId, symbol);
   }
 
   @Get()

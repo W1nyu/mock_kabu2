@@ -1,8 +1,11 @@
 import type { OrderSide, OrderType, OrderbookSnapshot } from "@mock-kabu/shared";
+import { requiredRuntimeEnv } from "./env";
 
-const BASE = process.env.BOT_API_URL ?? "http://localhost:4100";
-const LIQUIDITY_BOOTSTRAP_TOKEN =
-  process.env.LIQUIDITY_BOOTSTRAP_TOKEN ?? process.env.JWT_SECRET ?? "mock-kabu2-local-dev-secret";
+const BASE = requiredRuntimeEnv("BOT_API_URL", "http://localhost:4100");
+const LIQUIDITY_BOOTSTRAP_TOKEN = requiredRuntimeEnv(
+  "LIQUIDITY_BOOTSTRAP_TOKEN",
+  process.env.JWT_SECRET ?? "mock-kabu2-local-dev-secret",
+);
 
 export interface LiveOrder {
   id: string;
@@ -13,6 +16,11 @@ export interface LiveOrder {
   qty: number;
   filledQty: number;
   status: "OPEN" | "PARTIAL";
+}
+
+export interface LiveQuoteState {
+  orders: LiveOrder[];
+  orderbook: OrderbookSnapshot;
 }
 
 export class ApiClient {
@@ -89,10 +97,50 @@ export class ApiClient {
     }>;
   }
 
+  /**
+   * Records a generated news story so the API can persist and broadcast it.
+   * Uses the same bootstrap token as the liquidity endpoint because it is the
+   * same trust boundary: the local bots process talking to the local API
+   * without a user session.
+   */
+  async publishNews(draft: {
+    symbol: string | null;
+    category: string;
+    headline: string;
+    body: string | null;
+    sentiment: "POSITIVE" | "NEGATIVE";
+    impact: number;
+    parentExternalId: string | null;
+    externalId: string;
+  }) {
+    const res = await fetch(`${BASE}/internal/news/publish`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-liquidity-bootstrap-token": LIQUIDITY_BOOTSTRAP_TOKEN,
+      },
+      body: JSON.stringify(draft),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new ApiError(
+        res.status,
+        `POST /internal/news/publish returned ${res.status} ${text.slice(0, 200)}`,
+      );
+    }
+    return res.json() as Promise<{ id: string }>;
+  }
+
   recentTrades(symbol: string, limit = 20) {
     return this.request("GET", `/market/trades/${symbol}?limit=${limit}`) as Promise<
       { id: string; price: number; createdAt: string }[]
     >;
+  }
+
+  /** Own live rows and the public matching snapshot in one authenticated request. */
+  quoteState(symbol: string) {
+    const query = new URLSearchParams({ symbol });
+    return this.request("GET", `/orders/quote-state?${query.toString()}`) as Promise<LiveQuoteState>;
   }
 
   /** Durable one-minute closes, returned in chronological order by the API. */

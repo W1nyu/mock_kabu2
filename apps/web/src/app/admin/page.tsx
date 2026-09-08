@@ -48,19 +48,21 @@ export default function AdminPage() {
       : 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-bold">동시성 실험 관전 모드</h1>
-        <p className="mt-1 text-sm text-neutral-400">
+        <h1 className="text-2xl font-semibold tracking-tight">동시성 실험 관전 모드</h1>
+        <p className="mt-1.5 max-w-3xl text-sm text-ink-muted">
           잔액/보유자산 변경(주문 홀드·이체·정산)이 통과하는 락 계층의 실시간 상태입니다. api의{" "}
-          <code className="rounded bg-neutral-800 px-1">LOCK_STRATEGY</code> 환경변수로 전략을
-          바꿔 재기동하면 여기서 확인할 수 있습니다.
+          <code className="num rounded-[6px] border border-hairline-soft bg-surface-2/70 px-1.5 py-0.5 text-[13px] text-sky">
+            LOCK_STRATEGY
+          </code>{" "}
+          환경변수로 전략을 바꿔 재기동하면 여기서 확인할 수 있습니다.
         </p>
       </div>
 
-      <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
-        <p className="text-xs text-neutral-400">현재 락 전략</p>
-        <p className="mt-1 text-lg font-bold text-amber-400">
+      <div className="glass border-sky/25 bg-sky/6 p-5">
+        <p className="panel-title">현재 락 전략</p>
+        <p className="mt-2 text-lg font-semibold text-sky">
           {counters ? (STRATEGY_LABEL[counters.strategy] ?? counters.strategy) : "…"}
         </p>
       </div>
@@ -73,10 +75,10 @@ export default function AdminPage() {
         <Stat label="최종 실패" value={counters?.failures ?? 0} warn={(counters?.failures ?? 0) > 0} />
       </div>
 
-      <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-        <p className="text-xs text-neutral-400">임계 구역 처리율 (근사)</p>
-        <p className="mt-1 text-2xl font-bold tabular-nums">
-          {tps.toFixed(1)} <span className="text-sm font-normal text-neutral-400">locks/s</span>
+      <div className="glass p-5">
+        <p className="panel-title">임계 구역 처리율 (근사)</p>
+        <p className="num mt-2 text-3xl font-semibold tracking-tight">
+          {tps.toFixed(1)} <span className="text-sm font-normal text-ink-muted">locks/s</span>
         </p>
       </div>
     </div>
@@ -85,9 +87,9 @@ export default function AdminPage() {
 
 function Stat({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-      <p className="text-xs text-neutral-400">{label}</p>
-      <p className={`mt-1 text-lg font-bold tabular-nums ${warn ? "text-amber-400" : ""}`}>
+    <div className="glass p-4">
+      <p className="panel-title">{label}</p>
+      <p className={`num mt-2 text-xl font-semibold ${warn ? "text-warn" : ""}`}>
         {new Intl.NumberFormat("ko-KR").format(value)}
       </p>
     </div>

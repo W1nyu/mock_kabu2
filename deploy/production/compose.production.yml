@@ -1,0 +1,285 @@
+name: ${COMPOSE_PROJECT_NAME:-mock-kabu2-prod}
+
+x-app-build: &app-build
+  context: ../..
+  dockerfile: deploy/production/Dockerfile
+  args:
+    NEXT_PUBLIC_API_URL: https://${APP_DOMAIN:?APP_DOMAIN is required}
+
+x-app-common: &app-common
+  image: ${APP_IMAGE:-mock-kabu2-app:production}
+  init: true
+  networks:
+    - private
+  logging: &default-logging
+    driver: local
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-api-resources: &api-resources
+  deploy:
+    resources:
+      limits:
+        cpus: "1.00"
+        memory: 384M
+      reservations:
+        memory: 128M
+
+x-worker-resources: &worker-resources
+  deploy:
+    resources:
+      limits:
+        cpus: "0.75"
+        memory: 320M
+      reservations:
+        memory: 96M
+
+services:
+  postgres:
+    build:
+      context: ../..
+      dockerfile: deploy/production/postgres/Dockerfile
+    image: ${POSTGRES_IMAGE:-mock-kabu2-postgres:production}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_INITDB_ARGS: --data-checksums
+      PGDATA: /var/lib/postgresql/data/pgdata
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_REPO1_CIPHER_PASS:?PGBACKREST_REPO1_CIPHER_PASS is required}
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=mock-kabu archive-push %p
+      - -c
+      - archive_timeout=900
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - max_connections=80
+      - -c
+      - wal_compression=on
+    shm_size: 256mb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - pgbackrest-data:/var/lib/pgbackrest
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 768M
+        reservations:
+          memory: 384M
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      REDIS_MAXMEMORY: ${REDIS_MAXMEMORY:-256mb}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --appendfsync everysec --maxmemory \"$$REDIS_MAXMEMORY\" --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis-data:/data
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 384M
+        reservations:
+          memory: 128M
+
+  migrate:
+    <<: *app-common
+    build: *app-build
+    command: ["migrate"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  seed:
+    <<: *app-common
+    build: *app-build
+    command: ["seed"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL is required}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+      BOT_PASSWORD: ${BOT_PASSWORD:?BOT_PASSWORD is required}
+      LIQUIDITY_BOT_PASSWORD: ${LIQUIDITY_BOT_PASSWORD:?LIQUIDITY_BOT_PASSWORD is required}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  api:
+    <<: [*app-common, *api-resources]
+    build: *app-build
+    command: ["api"]
+    restart: unless-stopped
+    environment:
+      API_PORT: "4100"
+      WEB_ORIGIN: https://${APP_DOMAIN:?APP_DOMAIN is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      LOCK_STRATEGY: ${LOCK_STRATEGY:-pessimistic}
+      LIQUIDITY_BOOTSTRAP_TOKEN: ${LIQUIDITY_BOOTSTRAP_TOKEN:?LIQUIDITY_BOOTSTRAP_TOKEN is required}
+      LIQUIDITY_BOT_PASSWORD: ${LIQUIDITY_BOT_PASSWORD:?LIQUIDITY_BOT_PASSWORD is required}
+      NODE_OPTIONS: --max-old-space-size=256
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4100/health/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  matching-engine:
+    <<: [*app-common, *worker-resources]
+    build: *app-build
+    command: ["matching"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
+      NODE_OPTIONS: --max-old-space-size=192
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  settlement:
+    <<: [*app-common, *worker-resources]
+    build: *app-build
+    command: ["settlement"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
+      LOCK_STRATEGY: ${LOCK_STRATEGY:-pessimistic}
+      NODE_OPTIONS: --max-old-space-size=192
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+
+  bots:
+    <<: [*app-common, *worker-resources]
+    build: *app-build
+    command: ["bots"]
+    restart: unless-stopped
+    environment:
+      BOT_API_URL: http://api:4100
+      BOT_PASSWORD: ${BOT_PASSWORD:?BOT_PASSWORD is required}
+      LIQUIDITY_BOOTSTRAP_TOKEN: ${LIQUIDITY_BOOTSTRAP_TOKEN:?LIQUIDITY_BOOTSTRAP_TOKEN is required}
+      LIQUIDITY_BOT_PASSWORD: ${LIQUIDITY_BOT_PASSWORD:?LIQUIDITY_BOT_PASSWORD is required}
+      NODE_OPTIONS: --max-old-space-size=192
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    <<: [*app-common, *api-resources]
+    build: *app-build
+    command: ["web"]
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: https://${APP_DOMAIN:?APP_DOMAIN is required}
+      NODE_OPTIONS: --max-old-space-size=256
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3100').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?APP_DOMAIN is required}
+      CADDY_EMAIL: ${CADDY_EMAIL:?CADDY_EMAIL is required}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - edge
+      - private
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 128M
+        reservations:
+          memory: 32M
+
+volumes:
+  postgres-data:
+    name: ${COMPOSE_PROJECT_NAME:-mock-kabu2-prod}-postgres-data
+  pgbackrest-data:
+    name: ${COMPOSE_PROJECT_NAME:-mock-kabu2-prod}-pgbackrest-data
+  redis-data:
+    name: ${COMPOSE_PROJECT_NAME:-mock-kabu2-prod}-redis-data
+  caddy-data:
+    name: ${COMPOSE_PROJECT_NAME:-mock-kabu2-prod}-caddy-data
+  caddy-config:
+    name: ${COMPOSE_PROJECT_NAME:-mock-kabu2-prod}-caddy-config
+
+networks:
+  # Only Caddy joins this network so it can contact the ACME CA for TLS.
+  edge:
+  # PostgreSQL, Redis, and API never receive host-published ports.
+  private:
+    internal: true

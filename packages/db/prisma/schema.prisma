@@ -102,6 +102,8 @@ model Order {
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@index([accountId, createdAt])
+  /// Per-symbol OPEN/PARTIAL reconciliation for dedicated market makers.
+  @@index([accountId, symbol, status, createdAt])
   @@index([symbol, status])
   @@map("orders")
   @@schema("order")
@@ -182,6 +184,32 @@ model MarketSymbol {
   lastPrice    Int    @map("last_price")
 
   @@map("symbols")
+  @@schema("market")
+}
+
+/// 가상 뉴스. sentiment/impact는 봇 가격 모델의 입력이며 공개 API 응답에서는 제외된다.
+model NewsItem {
+  id             String   @id @default(uuid())
+  /// 봇 프로세스가 부여한 식별자. 재시도 시 중복 저장을 막는다.
+  externalId     String   @unique @map("external_id")
+  /// 종목 뉴스면 심볼, 시장 전체 매크로 뉴스면 null
+  symbol         String?
+  category       String // CAPITAL | EARNINGS | ANALYST | BUSINESS | RISK | FLOW | MACRO | SEQUEL
+  headline       String
+  body           String?
+  /// POSITIVE | NEGATIVE — 공개 응답에서 제외된다
+  sentiment      String
+  /// 이벤트 강도 x 100 (20~100). 이 저장소는 정수만 쓰므로 실수 대신 정수 백분율.
+  impact         Int
+  /// 발표 시점 현재가. 발표 후 실현 등락 계산용 (매크로 뉴스는 null)
+  priceAtPublish Int?     @map("price_at_publish")
+  /// 후속 보도인 경우 원 기사의 externalId
+  parentExternalId String? @map("parent_external_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([symbol, createdAt])
+  @@map("news_items")
   @@schema("market")
 }
 

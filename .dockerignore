@@ -1,0 +1,18 @@
+# Keep local state, secrets, and generated artifacts out of production build contexts.
+.git
+.gitignore
+node_modules
+**/node_modules
+.pnpm-store
+.turbo
+dist
+**/dist
+.next
+**/.next
+coverage
+*.log
+.env
+packages/db/.env
+deploy/production/.env.production
+tmp
+error.md

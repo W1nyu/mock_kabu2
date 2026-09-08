@@ -4,7 +4,7 @@ import { OrderService } from "../order.service";
 describe("OrderService.myOrders", () => {
   it("keeps the existing account-wide query when no optional filter is supplied", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
-    const service = new OrderService({ order: { findMany } } as never, {} as never, {} as never);
+    const service = new OrderService({ order: { findMany } } as never, {} as never, {} as never, {} as never);
 
     await service.myOrders("account-1", 50);
 
@@ -17,7 +17,7 @@ describe("OrderService.myOrders", () => {
 
   it("filters a bot reconciliation query to one account-owned symbol and live statuses", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
-    const service = new OrderService({ order: { findMany } } as never, {} as never, {} as never);
+    const service = new OrderService({ order: { findMany } } as never, {} as never, {} as never, {} as never);
 
     await service.myOrders("account-1", 500, { symbol: " KABU ", liveOnly: true });
 

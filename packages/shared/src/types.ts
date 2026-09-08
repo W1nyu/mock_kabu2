@@ -37,3 +37,23 @@ export interface CandleDto {
   close: number;
   volume: number;
 }
+
+/**
+ * A published news story as the browser sees it.
+ *
+ * Deliberately carries no sentiment and no impact strength: the UI shows a
+ * headline, a symbol and a time, and the reader judges the rest. Those fields
+ * exist in the database but must never enter this DTO, or the network tab
+ * would give away what the feed is designed not to say.
+ */
+export interface NewsItemDto {
+  id: string;
+  /** null for a market-wide story. */
+  symbol: string | null;
+  symbolName: string | null;
+  category: string;
+  headline: string;
+  body: string | null;
+  /** epoch ms */
+  ts: number;
+}

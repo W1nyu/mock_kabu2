@@ -84,11 +84,11 @@ describe("LiquidityService.ensureReserves", () => {
   });
 
   it("scales the reserve inventory floor for a future low-priced listing and keeps overlap headroom", () => {
-    // ₩100 needs 480,000 shares for one ₩48m side; three copies cover the
+    // ₩100 needs 1,200,000 shares for one ₩120m side; four copies cover the
     // current ladder plus safe post-before-cancel replacement overlap.
-    expect(liquidityMinimumAvailableQty(100)).toBe(1_440_000);
+    expect(liquidityMinimumAvailableQty(100)).toBe(4_800_000);
     // Current seeded symbols remain on the intentionally generous base floor.
-    expect(liquidityMinimumAvailableQty(8_000)).toBe(50_000);
+    expect(liquidityMinimumAvailableQty(8_000)).toBe(60_000);
     expect(liquidityMinimumAvailableQty(300_000)).toBe(50_000);
   });
 

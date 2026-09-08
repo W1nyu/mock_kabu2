@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import type { BalanceMutator } from "@mock-kabu/concurrency";
 import type { PrismaClient } from "@mock-kabu/db";
 import {
+  KEYS,
   MARKET_BUY_HOLD_FACTOR,
   SYMBOLS,
   type OrderCancelRequestedEvent,
@@ -17,7 +18,8 @@ import {
   type OrderSide,
   type OrderType,
 } from "@mock-kabu/shared";
-import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
+import type Redis from "ioredis";
+import { BALANCE_MUTATOR, PRISMA, REDIS } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
 import { OutboxRelayer } from "./outbox.relayer";
 
@@ -43,6 +45,7 @@ export class OrderService {
   constructor(
     @Inject(PRISMA) private prisma: PrismaClient,
     @Inject(BALANCE_MUTATOR) private mutator: BalanceMutator,
+    @Inject(REDIS) private redis: Redis,
     private realtime: RealtimeGateway,
     private outboxRelayer?: OutboxRelayer,
   ) {}
@@ -162,5 +165,34 @@ export class OrderService {
       orderBy: { createdAt: "desc" },
       take: Math.min(limit, 200),
     });
+  }
+
+  /**
+   * Market-maker reconciliation needs both its durable live orders and the
+   * matching engine's latest snapshot. Serving them from one authenticated
+   * endpoint halves the hot-path HTTP work without making Redis authoritative
+   * for account-owned orders.
+   */
+  async liveQuoteState(accountId: string, rawSymbol?: string) {
+    const symbol = rawSymbol?.trim() || "";
+    if (!SYMBOLS.some((definition) => definition.symbol === symbol)) {
+      throw new NotFoundException(`없는 종목: ${symbol || "(empty)"}`);
+    }
+
+    const [orders, cachedBook] = await Promise.all([
+      this.myOrders(accountId, 200, { symbol, liveOnly: true }),
+      this.redis.get(KEYS.orderbookSnapshot(symbol)),
+    ]);
+    if (cachedBook) return { orders, orderbook: JSON.parse(cachedBook) };
+
+    // During a matching-engine bootstrap the snapshot can legitimately be
+    // absent. Return an empty, price-correct view so makers do not need a
+    // second retrying endpoint solely for this short window.
+    const market = await this.prisma.marketSymbol.findUnique({ where: { symbol } });
+    if (!market) throw new NotFoundException(`없는 종목: ${symbol}`);
+    return {
+      orders,
+      orderbook: { symbol, bids: [], asks: [], lastPrice: market.lastPrice, seq: 0, ts: Date.now() },
+    };
   }
 }

@@ -3,12 +3,13 @@ import { JwtModule } from "@nestjs/jwt";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { JwtAuthGuard } from "./jwt-auth.guard";
+import { jwtSecret } from "../env";
 
 @Module({
   imports: [
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET ?? "mock-kabu2-local-dev-secret",
+      secret: jwtSecret(),
       signOptions: { expiresIn: "7d" },
     }),
   ],

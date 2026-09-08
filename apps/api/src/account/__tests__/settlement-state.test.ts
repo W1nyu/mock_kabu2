@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { closeMustWaitForTrades, stateAfterClose, stateAfterTrade } from "../settlement-state";
+import { closeMustWaitForTrades, stateAfterClose, stateAfterTrade } from "@mock-kabu/shared";
 
 describe("settlement order state", () => {
   test("does not release a filled order for a stale cancellation event", () => {

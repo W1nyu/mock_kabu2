@@ -1,7 +1,9 @@
-import "./env";
 import "reflect-metadata";
+import type { NextFunction, Request, Response } from "express";
 import { NestFactory } from "@nestjs/core";
-import { AppModule } from "./app.module";
+import type { NestExpressApplication } from "@nestjs/platform-express";
+import { validateRuntimeConfiguration } from "./env";
+import { readApiRuntimeConfig } from "./core/runtime-config";
 
 // BigInt(잔액 등)를 JSON 응답에 안전하게 직렬화
 (BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function () {
@@ -9,15 +11,27 @@ import { AppModule } from "./app.module";
 };
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  const webOrigins = (process.env.WEB_ORIGIN ?? "http://localhost:3100,http://127.0.0.1:3100")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  app.enableCors({ origin: webOrigins, credentials: true });
-  const port = Number(process.env.API_PORT ?? 4100);
-  await app.listen(port);
-  console.log(`[api] listening on :${port} (lock strategy: ${process.env.LOCK_STRATEGY ?? "pessimistic"})`);
+  validateRuntimeConfiguration();
+  const runtimeConfig = readApiRuntimeConfig();
+  // Feature modules create their Redis clients from this validated config at
+  // import time. Loading them only after validation keeps every startup error
+  // on the bootstrap failure path below.
+  const { AppModule } = await import("./app.module");
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.enableCors({ origin: runtimeConfig.webOrigins, credentials: true });
+  app.disable("x-powered-by");
+  app.use((_request: Request, response: Response, next: NextFunction) => {
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("X-Frame-Options", "DENY");
+    response.setHeader("Referrer-Policy", "no-referrer");
+    next();
+  });
+  app.enableShutdownHooks(["SIGINT", "SIGTERM"]);
+  await app.listen(runtimeConfig.apiPort);
+  console.log(`[api] listening on :${runtimeConfig.apiPort} (lock strategy: ${runtimeConfig.lockStrategy})`);
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  console.error("[api] bootstrap failed", error);
+  process.exitCode = 1;
+});

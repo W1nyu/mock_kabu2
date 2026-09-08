@@ -40,7 +40,22 @@ function addQty(map: Map<string, number>, id: string, qty: number) {
 async function loadRecoveryInput(db: Tx): Promise<RecoveryInput> {
   const [trades, orders, accounts, holdings, symbols] = await Promise.all([
     db.trade.findMany({ orderBy: [{ createdAt: "asc" }, { id: "asc" }] }),
-    db.order.findMany({ orderBy: { id: "asc" } }),
+    // Recovery needs the durable settlement state only. Avoid decoding
+    // unrelated legacy fields (for example a historical order type) while
+    // preflighting a potentially damaged database snapshot.
+    db.order.findMany({
+      select: {
+        id: true,
+        accountId: true,
+        symbol: true,
+        side: true,
+        qty: true,
+        filledQty: true,
+        status: true,
+        holdPerUnit: true,
+      },
+      orderBy: { id: "asc" },
+    }),
     db.account.findMany({ orderBy: { id: "asc" } }),
     db.holding.findMany({ orderBy: [{ accountId: "asc" }, { symbol: "asc" }] }),
     db.marketSymbol.findMany({ select: { symbol: true }, orderBy: { symbol: "asc" } }),

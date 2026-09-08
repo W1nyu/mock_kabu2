@@ -10,10 +10,18 @@ import {
   type IChartApi,
   type ISeriesApi,
   type MouseEventParams,
+  TickMarkType,
   type PriceFormatCustom,
   type UTCTimestamp,
 } from "lightweight-charts";
+import {
+  CANDLE_INTERVALS,
+  candleIntervalSeconds,
+  DAILY_CANDLE_INTERVAL,
+  DEFAULT_CANDLE_INTERVAL,
+} from "@mock-kabu/shared";
 import { api } from "@/lib/api";
+import { formatKstHm, formatKstMonthDay, formatKstTime } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 
 interface CandleDto {
@@ -41,28 +49,42 @@ interface HoveredCandle {
   close: number;
 }
 
-// 한국 관례: 상승=빨강, 하락=파랑 (양극 인코딩, dataviz 규칙: 텍스트는 뉴트럴 잉크)
-const UP = "#ef4444";
-const DOWN = "#3b82f6";
+// 한국 관례: 상승=빨강, 하락=파랑. 하락 파랑은 sky 액센트(#38BDF8)와 구분되도록
+// 인디고 쪽으로 밀어, 차트에서 "클릭 가능"과 "하락"이 같은 색으로 읽히지 않게 한다.
+const UP = "#ff5a6e";
+const DOWN = "#6e8aff";
 
-/** 지표 정의 — 기본: 50 SMA(초록), 200 SMA(빨강), 100 VWMA(하양), 거래량 */
+/** 지표 정의 — 기본: 50 SMA(민트), 200 SMA(인디고), 100 VWMA(슬레이트), 거래량 */
 const INDICATORS = [
-  { key: "sma50", label: "50 SMA", color: "#22c55e" },
-  { key: "sma200", label: "200 SMA", color: "#ef4444" },
-  { key: "vwma100", label: "100 VWMA", color: "#f5f5f5" },
-  { key: "volume", label: "거래량", color: "#a3a3a3" },
+  { key: "sma50", label: "50 SMA", color: "#34d399" },
+  { key: "sma200", label: "200 SMA", color: "#818cf8" },
+  { key: "vwma100", label: "100 VWMA", color: "#cbd5e1" },
+  { key: "volume", label: "거래량", color: "#94a3b8" },
 ] as const;
 type IndicatorKey = (typeof INDICATORS)[number]["key"];
 type IndicatorState = Record<IndicatorKey, boolean>;
 
 const STORAGE_KEY = "mock-kabu2:chart:indicators";
+const INTERVAL_STORAGE_KEY = "mock-kabu2:chart:interval";
 const DEFAULT_STATE: IndicatorState = { sma50: true, sma200: true, vwma100: true, volume: true };
+const CANDLE_LIMIT = 500;
+/** Below this, fit the whole series instead of holding the default bar spacing. */
+const SPARSE_BAR_COUNT = 60;
 
 function loadIndicatorState(): IndicatorState {
   try {
     return { ...DEFAULT_STATE, ...JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") };
   } catch {
     return DEFAULT_STATE;
+  }
+}
+
+function loadInterval(): string {
+  try {
+    const stored = localStorage.getItem(INTERVAL_STORAGE_KEY);
+    return stored && candleIntervalSeconds(stored) !== null ? stored : DEFAULT_CANDLE_INTERVAL;
+  } catch {
+    return DEFAULT_CANDLE_INTERVAL;
   }
 }
 
@@ -87,7 +109,7 @@ function vwmaAt(candles: Candle[], i: number, window: number): number | null {
 }
 
 function volumeColor(c: Candle): string {
-  return c.close >= c.open ? "rgba(239, 68, 68, 0.45)" : "rgba(59, 130, 246, 0.45)";
+  return c.close >= c.open ? "rgba(255, 90, 110, 0.42)" : "rgba(110, 138, 255, 0.42)";
 }
 
 function asHoveredCandle(value: unknown): HoveredCandle | null {
@@ -109,6 +131,31 @@ function formatPercent(value: number): string {
   // Avoid a visually noisy "-0.00%" when the difference is smaller than the display precision.
   const normalized = Math.abs(value) < 0.005 ? 0 : value;
   return `${normalized > 0 ? "+" : ""}${normalized.toFixed(2)}%`;
+}
+
+/**
+ * The chart speaks in UTCTimestamp seconds. These render the same instant on
+ * the KST clock so the axis agrees with the trade tape beside it.
+ */
+function formatChartTime(time: UTCTimestamp, daily: boolean): string {
+  const ms = time * 1000;
+  // A daily bar has no meaningful intraday time to show; an intraday bar needs
+  // its date once the chart spans more than one session.
+  return daily ? formatKstMonthDay(ms) : `${formatKstMonthDay(ms)} ${formatKstHm(ms)}`;
+}
+
+function formatChartTickMark(time: UTCTimestamp, tickMarkType: TickMarkType): string {
+  const ms = time * 1000;
+  switch (tickMarkType) {
+    case TickMarkType.Year:
+    case TickMarkType.Month:
+    case TickMarkType.DayOfMonth:
+      return formatKstMonthDay(ms);
+    case TickMarkType.TimeWithSeconds:
+      return formatKstTime(ms);
+    default:
+      return formatKstHm(ms);
+  }
 }
 
 const priceFormatter = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
@@ -134,12 +181,14 @@ export default function CandleChart({ symbol }: { symbol: string }) {
   // SSR과 첫 클라이언트 렌더를 기본값으로 일치시키고(hydration mismatch 방지),
   // localStorage 값은 마운트 후에 반영한다
   const [indicators, setIndicators] = useState<IndicatorState>(DEFAULT_STATE);
+  const [interval, setChartInterval] = useState<string>(DEFAULT_CANDLE_INTERVAL);
   const [hoveredCandle, setHoveredCandle] = useState<HoveredCandle | null>(null);
   const indicatorsRef = useRef(indicators);
   indicatorsRef.current = indicators;
 
   useEffect(() => {
     setIndicators(loadIndicatorState());
+    setChartInterval(loadInterval());
   }, []);
 
   // 토글 상태 → 시리즈 가시성 동기화 (심볼 전환으로 차트가 재생성돼도 재적용)
@@ -152,6 +201,10 @@ export default function CandleChart({ symbol }: { symbol: string }) {
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const bucketSeconds = candleIntervalSeconds(interval) ?? 60;
+    const bucketMs = bucketSeconds * 1000;
+    const isDaily = interval === DAILY_CANDLE_INTERVAL;
+
     hoveredCandleRef.current = null;
     hoveredTimeRef.current = null;
     setHoveredCandle(null);
@@ -160,15 +213,29 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#a3a3a3",
+        textColor: "#94a3b8",
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "#262626" },
-        horzLines: { color: "#262626" },
+        vertLines: { color: "rgba(255, 255, 255, 0.05)" },
+        horzLines: { color: "rgba(255, 255, 255, 0.05)" },
       },
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#404040" },
-      rightPriceScale: { borderColor: "#404040", scaleMargins: { top: 0.05, bottom: 0.25 } },
+      // lightweight-charts has no timezone support and renders a UTCTimestamp
+      // as UTC. Rather than shifting the data (which would desynchronise the
+      // live-tick bucketing below), relabel the axis and crosshair in KST.
+      localization: { timeFormatter: (time: UTCTimestamp) => formatChartTime(time, isDaily) },
+      timeScale: {
+        // A daily bar's axis should read as dates, not 09:00 over and over.
+        timeVisible: !isDaily,
+        secondsVisible: false,
+        borderColor: "rgba(255, 255, 255, 0.10)",
+        tickMarkFormatter: (time: UTCTimestamp, tickMarkType: TickMarkType) =>
+          formatChartTickMark(time, tickMarkType),
+      },
+      rightPriceScale: {
+        borderColor: "rgba(255, 255, 255, 0.10)",
+        scaleMargins: { top: 0.05, bottom: 0.25 },
+      },
       crosshair: { mode: 0 },
     });
     const candle = chart.addSeries(CandlestickSeries, {
@@ -195,9 +262,9 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       lastValueVisible: false,
       priceFormat: chartPriceFormat,
     } as const;
-    const sma50 = chart.addSeries(LineSeries, { ...lineOpts, color: "#22c55e" });
-    const sma200 = chart.addSeries(LineSeries, { ...lineOpts, color: "#ef4444" });
-    const vwma100 = chart.addSeries(LineSeries, { ...lineOpts, color: "#f5f5f5" });
+    const sma50 = chart.addSeries(LineSeries, { ...lineOpts, color: "#34d399" });
+    const sma200 = chart.addSeries(LineSeries, { ...lineOpts, color: "#818cf8" });
+    const vwma100 = chart.addSeries(LineSeries, { ...lineOpts, color: "#cbd5e1" });
 
     chartRef.current = chart;
     seriesRef.current = { candle, volume, sma50, sma200, vwma100 };
@@ -249,7 +316,9 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       if (hoveredTimeRef.current === time) setCrosshairCandle(cs[i]);
     };
 
-    api<CandleDto[]>(`/market/candles/${symbol}?interval=1m&limit=500`, { auth: false })
+    api<CandleDto[]>(`/market/candles/${symbol}?interval=${interval}&limit=${CANDLE_LIMIT}`, {
+      auth: false,
+    })
       .then((rows) => {
         const cs: Candle[] = rows.map((c) => ({
           time: (new Date(c.ts).getTime() / 1000) as UTCTimestamp,
@@ -270,7 +339,12 @@ export default function CandleChart({ symbol }: { symbol: string }) {
         sma50.setData(line(smaAt, 50));
         sma200.setData(line(smaAt, 200));
         vwma100.setData(line(vwmaAt, 100));
-        chart.timeScale().scrollToRealTime();
+        // A coarse timeframe early in a market's life has only a handful of
+        // bars; keeping the fine-grained bar spacing would pin them to the
+        // right edge as a sliver. Fit the view until there is enough history
+        // for scrolling to be the more useful behaviour.
+        if (cs.length <= SPARSE_BAR_COUNT) chart.timeScale().fitContent();
+        else chart.timeScale().scrollToRealTime();
       })
       .catch(() => {});
 
@@ -279,7 +353,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       if (!Number.isFinite(data?.price) || !Number.isFinite(data?.ts)) return;
       const price: number = data.price;
       const qty: number = Number.isFinite(data?.qty) ? data.qty : 0;
-      const bucket = (Math.floor(data.ts / 60_000) * 60) as UTCTimestamp;
+      const bucket = (Math.floor(data.ts / bucketMs) * bucketSeconds) as UTCTimestamp;
       const cs = candlesRef.current;
       const last = cs[cs.length - 1];
       if (last && last.time === bucket) {
@@ -304,7 +378,16 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       seriesRef.current = null;
       candlesRef.current = [];
     };
-  }, [symbol]);
+  }, [symbol, interval]);
+
+  function selectInterval(next: string) {
+    try {
+      localStorage.setItem(INTERVAL_STORAGE_KEY, next);
+    } catch {
+      // 저장 실패는 무시 (프라이빗 모드 등)
+    }
+    setChartInterval(next);
+  }
 
   function toggle(key: IndicatorKey) {
     const next = { ...indicatorsRef.current, [key]: !indicatorsRef.current[key] };
@@ -317,29 +400,51 @@ export default function CandleChart({ symbol }: { symbol: string }) {
   }
 
   return (
-    <div>
-      <div className="flex flex-wrap gap-1.5 px-1 pb-2">
-        {INDICATORS.map((ind) => (
-          <button
-            key={ind.key}
-            onClick={() => toggle(ind.key)}
-            className={`flex items-center gap-1.5 rounded border px-2 py-0.5 text-xs ${
-              indicators[ind.key]
-                ? "border-neutral-700 bg-neutral-800 text-neutral-200"
-                : "border-neutral-800 text-neutral-600"
-            }`}
-            title={`${ind.label} 표시 켜기/끄기`}
-          >
-            <span
-              className="inline-block h-2 w-2 rounded-full"
-              style={{ backgroundColor: indicators[ind.key] ? ind.color : "#525252" }}
-            />
-            {ind.label}
-          </button>
-        ))}
+    <div className="glass flex flex-col overflow-hidden">
+      <div className="panel-head flex-wrap gap-y-2">
+        <div className="well flex gap-0.5 p-0.5" role="group" aria-label="봉 간격">
+          {CANDLE_INTERVALS.map((timeframe) => (
+            <button
+              key={timeframe.id}
+              type="button"
+              onClick={() => selectInterval(timeframe.id)}
+              aria-pressed={interval === timeframe.id}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                interval === timeframe.id
+                  ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
+                  : "text-ink-muted hover:bg-white/6 hover:text-ink"
+              }`}
+            >
+              {timeframe.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap justify-end gap-1.5">
+          {INDICATORS.map((ind) => (
+            <button
+              key={ind.key}
+              onClick={() => toggle(ind.key)}
+              aria-pressed={indicators[ind.key]}
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                indicators[ind.key]
+                  ? "border-hairline bg-surface-2/70 text-ink"
+                  : "border-hairline-soft text-ink-faint hover:text-ink-muted"
+              }`}
+              title={`${ind.label} 표시 켜기/끄기`}
+            >
+              <span
+                className="inline-block h-2 w-2 rounded-full transition-colors"
+                style={{
+                  backgroundColor: indicators[ind.key] ? ind.color : "rgba(255,255,255,0.16)",
+                }}
+              />
+              {ind.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="relative">
-        <div ref={containerRef} className="h-80 w-full" />
+      <div className="relative p-2">
+        <div ref={containerRef} className="h-[22rem] w-full lg:h-[26rem]" />
         {hoveredCandle && <OhlcReadout candle={hoveredCandle} />}
       </div>
     </div>
@@ -357,15 +462,15 @@ function OhlcReadout({ candle }: { candle: HoveredCandle }) {
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none absolute left-2 top-2 z-10 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-neutral-700/80 bg-neutral-950/85 px-2 py-1 text-[11px] tabular-nums shadow-sm backdrop-blur-sm sm:gap-x-3 sm:text-xs"
+      className="num pointer-events-none absolute top-4 left-4 z-10 flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-x-2 gap-y-0.5 rounded-[10px] border border-hairline bg-abyss-deep/80 px-2.5 py-1.5 text-[11px] backdrop-blur-md sm:gap-x-3 sm:text-xs"
       data-testid="chart-ohlc-readout"
     >
       {values.map(({ label, value }) => {
         const rate = percentFromOpen(value, candle.open);
-        const tone = rate > 0 ? "text-red-400" : rate < 0 ? "text-blue-400" : "text-neutral-300";
+        const tone = rate > 0 ? "text-up" : rate < 0 ? "text-down" : "text-ink-muted";
         return (
-          <span key={label} className="whitespace-nowrap text-neutral-300">
-            <span className="mr-1 text-neutral-500">{label}</span>
+          <span key={label} className="whitespace-nowrap text-ink">
+            <span className="mr-1 text-ink-faint">{label}</span>
             {priceFormatter.format(value)}
             <span className={`ml-1 ${tone}`}>({formatPercent(rate)})</span>
           </span>
