@@ -238,7 +238,7 @@ describe("ConditionalOrderService trailing stops", () => {
     await flush();
     expect(orders.place).not.toHaveBeenCalled();
     expect(prisma.conditionalOrder.updateMany).toHaveBeenCalledWith({
-      where: { id: "trail", status: "WAITING" },
+      where: { id: "trail", status: "WAITING", OR: [{ watermark: null }, { watermark: { lt: 1_100 } }] },
       data: { triggerPrice: 1_067, watermark: 1_100 },
     });
 
@@ -247,6 +247,25 @@ describe("ConditionalOrderService trailing stops", () => {
     expect(orders.place).not.toHaveBeenCalled();
 
     service.onTick("KABU", 1_067); // -3% 도달
+    await flush();
+    expect(orders.place).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ConditionalOrderService trailing reload", () => {
+  it("keeps a fresher in-memory watermark when the periodic reload returns a stale row", async () => {
+    const stale = waitingRow({ id: "trail", direction: "AT_OR_BELOW", triggerPrice: 970, trailBps: 300, watermark: 1_000 });
+    const { service, orders } = build({ rows: [stale] });
+    await (service as any).reloadIndex();
+    service.onTick("KABU", 1_200); // 메모리: watermark 1,200 / trigger 1,164
+    await flush();
+
+    await (service as any).reloadIndex(); // DB는 아직 1,000/970을 돌려준다
+    const row = (service as any).waiting.get("KABU").get("trail");
+    expect(row.watermark).toBe(1_200);
+    expect(row.triggerPrice).toBe(1_164);
+
+    service.onTick("KABU", 1_100); // 옛 트리거(970)였다면 발동하지 않았을 값 — 새 트리거 1,164 이하이므로 발동
     await flush();
     expect(orders.place).toHaveBeenCalledTimes(1);
   });

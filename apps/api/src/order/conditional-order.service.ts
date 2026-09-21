@@ -343,9 +343,13 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
    * 경합해도 상태를 되돌리지 않는다. 실패해도 메모리 값이 우선이라 발동 판정에는 영향이 없다.
    */
   private persistTrail(row: WaitingRow): void {
+    if (row.watermark == null) return;
+    // 갱신은 비동기로 겹칠 수 있다. 극값은 단조롭게만 움직이므로 DB 값보다 앞선 경우에만 쓴다 —
+    // 늦게 도착한 옛 갱신이 더 새 극값을 덮어쓰지 않는다.
+    const advanced = row.side === "SELL" ? { lt: row.watermark } : { gt: row.watermark };
     void this.prisma.conditionalOrder
       .updateMany({
-        where: { id: row.id, status: "WAITING" },
+        where: { id: row.id, status: "WAITING", OR: [{ watermark: null }, { watermark: advanced }] },
         data: { triggerPrice: row.triggerPrice, watermark: row.watermark },
       })
       .catch((error) => console.error(`[conditional] trailing update failed for ${row.id}`, error));
@@ -412,7 +416,18 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
           bucket = new Map();
           next.set(row.symbol, bucket);
         }
-        bucket.set(row.id, toWaiting(row));
+        const fresh = toWaiting(row);
+        // 메모리의 트레일링 극값이 DB보다 앞서 있으면(아직 쓰이지 않은 갱신) 메모리 값을 지킨다.
+        const known = this.waiting.get(row.symbol)?.get(row.id);
+        if (
+          known?.trailBps != null &&
+          known.watermark != null &&
+          (fresh.watermark == null || advancesWatermark(known.side, fresh.watermark, known.watermark))
+        ) {
+          fresh.watermark = known.watermark;
+          fresh.triggerPrice = known.triggerPrice;
+        }
+        bucket.set(row.id, fresh);
       }
       // 발동 진행 중(이미 인덱스에서 뺀) 행은 DB claim이 막으므로 다시 넣어도 안전하다.
       this.waiting.clear();
