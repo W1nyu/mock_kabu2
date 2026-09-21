@@ -43,6 +43,11 @@ export class AccountController {
     return this.equity.series(user.accountId, normalized);
   }
 
+  @Get("leaderboard")
+  getLeaderboard(@CurrentUser() user: JwtUser, @Query("limit") limit?: string) {
+    return this.account.getLeaderboard(user.accountId, limit ? Number(limit) : undefined);
+  }
+
   @Get("ledger")
   getLedger(@CurrentUser() user: JwtUser, @Query("limit") limit?: string) {
     return this.account.getLedger(user.accountId, limit ? Number(limit) : undefined);

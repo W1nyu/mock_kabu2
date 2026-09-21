@@ -65,12 +65,33 @@ export class AccountService {
   async getRealizedPnl(accountId: string, limit = 50) {
     const dayStart = koreaDayStart();
     const [totals, bySymbol, recent] = await Promise.all([
-      this.prisma.$queryRaw<{ today: bigint; today_qty: bigint; total: bigint; total_qty: bigint }[]>`
+      this.prisma.$queryRaw<
+        {
+          today: bigint;
+          today_qty: bigint;
+          total: bigint;
+          total_qty: bigint;
+          fills: bigint;
+          wins: bigint;
+          losses: bigint;
+          win_sum: bigint;
+          loss_sum: bigint;
+          best: bigint | null;
+          worst: bigint | null;
+        }[]
+      >`
         SELECT
           COALESCE(SUM(realized) FILTER (WHERE traded_at >= ${dayStart}), 0) AS today,
           COALESCE(SUM(qty) FILTER (WHERE traded_at >= ${dayStart}), 0) AS today_qty,
           COALESCE(SUM(realized), 0) AS total,
-          COALESCE(SUM(qty), 0) AS total_qty
+          COALESCE(SUM(qty), 0) AS total_qty,
+          COUNT(*) AS fills,
+          COUNT(*) FILTER (WHERE realized > 0) AS wins,
+          COUNT(*) FILTER (WHERE realized < 0) AS losses,
+          COALESCE(SUM(realized) FILTER (WHERE realized > 0), 0) AS win_sum,
+          COALESCE(SUM(realized) FILTER (WHERE realized < 0), 0) AS loss_sum,
+          MAX(realized) AS best,
+          MIN(realized) AS worst
         FROM account.realized_pnl
         WHERE account_id = ${accountId}
       `,
@@ -87,11 +108,29 @@ export class AccountService {
       }),
     ]);
     const row = totals[0];
+    const fills = Number(row?.fills ?? 0n);
+    const wins = Number(row?.wins ?? 0n);
+    const losses = Number(row?.losses ?? 0n);
+    const winSum = Number(row?.win_sum ?? 0n);
+    const lossSum = Math.abs(Number(row?.loss_sum ?? 0n));
     return {
       today: Number(row?.today ?? 0n),
       todayQty: Number(row?.today_qty ?? 0n),
       total: Number(row?.total ?? 0n),
       totalQty: Number(row?.total_qty ?? 0n),
+      /** 매도 체결 단위 성과. 손익 0인 체결은 승/패 어느 쪽에도 넣지 않는다. */
+      stats: {
+        fills,
+        wins,
+        losses,
+        winRate: wins + losses > 0 ? wins / (wins + losses) : null,
+        avgWin: wins > 0 ? winSum / wins : null,
+        avgLoss: losses > 0 ? lossSum / losses : null,
+        // 손익비(profit factor) = 총이익 / 총손실. 손실이 없으면 정의하지 않는다.
+        profitFactor: lossSum > 0 ? winSum / lossSum : null,
+        best: row?.best != null ? Number(row.best) : null,
+        worst: row?.worst != null ? Number(row.worst) : null,
+      },
       bySymbol: bySymbol.map((group) => {
         const realized = Number(group._sum.realized ?? 0n);
         const costBasis = Number(group._sum.costBasis ?? 0n);
@@ -158,6 +197,80 @@ export class AccountService {
         ts: trade.createdAt.getTime(),
       };
     });
+  }
+
+  /**
+   * 사용자(non-bot) 계정 수익률 랭킹. 수익률 = (총자산 − 순입금) / 순입금.
+   * 순입금은 가입 보너스·시드·이체 원장의 합이며, 총자산은 현재 last_price 기준 평가액이다.
+   * 봇 계정은 유동성 풀이라 제외한다.
+   */
+  async getLeaderboard(viewerAccountId: string, limit = 20) {
+    const rows = await this.prisma.$queryRaw<
+      {
+        account_id: string;
+        nickname: string;
+        equity: bigint;
+        deposits: bigint;
+        realized: bigint;
+        joined_at: Date;
+      }[]
+    >`
+      SELECT
+        a.id AS account_id,
+        u.nickname,
+        a.balance + COALESCE(v.stock_value, 0) AS equity,
+        COALESCE(d.deposits, 0) AS deposits,
+        COALESCE(r.realized, 0) AS realized,
+        u.created_at AS joined_at
+      FROM account.accounts a
+      JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false
+      LEFT JOIN (
+        SELECT h.account_id, SUM(h.qty::bigint * s.last_price) AS stock_value
+        FROM account.holdings h
+        JOIN market.symbols s ON s.symbol = h.symbol
+        GROUP BY h.account_id
+      ) v ON v.account_id = a.id
+      LEFT JOIN (
+        SELECT account_id, SUM(delta) AS deposits
+        FROM account.ledger_entries
+        WHERE reason IN ('SIGNUP_BONUS', 'SEED', 'TRANSFER_IN', 'TRANSFER_OUT')
+        GROUP BY account_id
+      ) d ON d.account_id = a.id
+      LEFT JOIN (
+        SELECT account_id, SUM(realized) AS realized
+        FROM account.realized_pnl
+        GROUP BY account_id
+      ) r ON r.account_id = a.id
+    `;
+    const ranked = rows
+      .map((row) => {
+        const equity = Number(row.equity);
+        const deposits = Number(row.deposits);
+        const pnl = equity - deposits;
+        return {
+          accountId: row.account_id,
+          nickname: row.nickname,
+          equity,
+          deposits,
+          pnl,
+          // 순입금이 0 이하(이체로 전부 내보낸 계정)는 수익률을 정의하지 않고 맨 뒤로 보낸다.
+          returnRate: deposits > 0 ? pnl / deposits : null,
+          realized: Number(row.realized),
+          joinedAt: row.joined_at.toISOString(),
+          me: row.account_id === viewerAccountId,
+        };
+      })
+      .sort((a, b) => {
+        if (a.returnRate == null && b.returnRate == null) return b.equity - a.equity;
+        if (a.returnRate == null) return 1;
+        if (b.returnRate == null) return -1;
+        return b.returnRate - a.returnRate || b.equity - a.equity;
+      })
+      .map((row, index) => ({ rank: index + 1, ...row }));
+    const me = ranked.find((row) => row.me) ?? null;
+    const top = ranked.slice(0, Math.min(Math.max(1, limit), 100));
+    // 상위 밖이어도 내 순위는 항상 함께 돌려준다.
+    return { total: ranked.length, rows: me && !top.some((row) => row.me) ? [...top, me] : top };
   }
 
   async getLedger(accountId: string, limit = 50) {

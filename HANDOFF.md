@@ -47,7 +47,14 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 체결/예약 발동 토스트 알림 (최신 작업)
+## 2026-09-22 — 매매 성과·투자자 랭킹·종목 추세선 (최신 작업)
+
+- **매매 성과**: `GET /account/realized`가 `stats {fills, wins, losses, winRate, avgWin, avgLoss, profitFactor, best, worst}`를 추가로 돌려준다(실현손익 테이블 집계, 손익 0 체결은 승/패 제외). 웹 `PerformanceCard.tsx`가 대시보드 자산 추이 오른쪽(lg 3열 중 1열)에 표시.
+- **투자자 랭킹**: `GET /account/leaderboard?limit=` — 사용자(non-bot) 계정을 수익률 `(총자산 − 순입금) / 순입금` 순으로. 순입금 = `SIGNUP_BONUS/SEED/TRANSFER_IN/TRANSFER_OUT` 원장 합, 총자산 = 현금 + Σ보유×`last_price`(실시간 평가). 순입금 ≤ 0은 수익률 null로 맨 뒤. 응답 `{total, rows}`이며 내 행(`me:true`)은 상위 밖이어도 마지막에 붙는다. 웹 `Leaderboard.tsx`가 대시보드 뉴스 아래·보유 자산 위에 표시(30초 폴링). **Nav 메뉴는 LEGACY MENU LOCK 때문에 추가하지 않았다** — 별도 페이지가 필요하면 제품 결정 후 추가.
+- **종목 추세선**: 대시보드 종목 표에 `Sparkline.tsx`(인라인 SVG) 열 "6시간 흐름" — 5분봉 종가 72개, 실시간 가격이 마지막 점을 대체, 5분마다 재조회.
+- 웹 코드 포맷 주의: 저장소에 prettier 설정이 없어 기본(80열)으로 돌리면 기존 100열 스타일 파일이 통째로 바뀐다. 포맷이 필요하면 `npx prettier --print-width 100`을 쓰거나 패치 범위만 손보기.
+
+## 2026-09-22 — 체결/예약 발동 토스트 알림
 
 - **정산 push 확장**: `apps/settlement/src/main.ts`가 `account:{id}` 채널에 체결 정보를 실어 보낸다 — 매수자에 `{type:"trade", side:"BUY", symbol, price, qty, tradeId}`, 매도자에 `side:"SELL"`(자기 체결이면 한 번). 기존 `account_update`는 `order.closed`에서만 계속 쓰인다. 어떤 payload든 "내 계좌가 바뀌었다"는 신호이므로 기존 구독자(대시보드·주문폼 등)는 그대로 동작한다.
 - **`apps/web/src/components/Toaster.tsx`**(layout에 전역 마운트): 로그인 상태면 `account:{id}`를 구독해 우하단 토스트. 체결은 종목·방향별 1.5초 창에서 합산(`N건 · 평균가`) — 봇 계정으로 로그인해도 폭주하지 않는다. 예약 주문 `TRIGGERED`/`FAILED`도 표시. 최대 4개, 6초 뒤 자동 소멸, `tradeId` 중복 무시. pathname 변화 때 재구독(로그인/로그아웃 대응).

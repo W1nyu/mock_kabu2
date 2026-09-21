@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, getToken, getUser, won } from "@/lib/api";
 import EquityChart from "@/components/EquityChart";
+import Leaderboard from "@/components/Leaderboard";
+import PerformanceCard, { type RealizedStats } from "@/components/PerformanceCard";
 import { NewsList } from "@/components/NewsFeed";
 import Sparkline from "@/components/Sparkline";
 import { mergeNews, parseNewsItem } from "@/lib/news";
@@ -40,6 +42,7 @@ interface RealizedSummary {
   todayQty: number;
   total: number;
   totalQty: number;
+  stats: RealizedStats;
 }
 interface MarketSummary {
   turnover: number | string | null;
@@ -333,8 +336,13 @@ export default function DashboardPage() {
         )}
       </section>
 
-      {/* ── Equity curve ───────────────────────────────────────── */}
-      <EquityChart />
+      {/* ── Equity curve + performance ─────────────────────────── */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <EquityChart />
+        </div>
+        <PerformanceCard stats={realized?.stats ?? null} />
+      </div>
 
       {/* ── Market ─────────────────────────────────────────────── */}
       <section className="glass overflow-hidden">
@@ -426,6 +434,9 @@ export default function DashboardPage() {
         </div>
         <NewsList items={news} emptyLabel="아직 뉴스가 없습니다" />
       </section>
+
+      {/* ── Leaderboard ────────────────────────────────────────── */}
+      <Leaderboard />
 
       {/* ── Holdings ───────────────────────────────────────────── */}
       <section className="glass overflow-hidden">
