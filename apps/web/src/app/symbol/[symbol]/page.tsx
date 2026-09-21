@@ -27,7 +27,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
   const { symbol } = use(params);
   const router = useRouter();
   const [info, setInfo] = useState<SymbolInfo | null>(null);
-  const [priceHint, setPriceHint] = useState<{ symbol: string; price: number } | null>(null);
+  const [priceHint, setPriceHint] = useState<{ symbol: string; price: number; side: "BUY" | "SELL"; seq: number } | null>(null);
   const [livePrice, setLivePrice] = useState<{ symbol: string; price: number } | null>(null);
   const [orderRefreshKey, setOrderRefreshKey] = useState(0);
 
@@ -59,7 +59,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
   }, [symbol]);
 
   const currentInfo = info?.symbol === symbol ? info : null;
-  const currentPriceHint = priceHint?.symbol === symbol ? priceHint.price : null;
+  const currentPriceHint = priceHint?.symbol === symbol ? priceHint : null;
   const currentLivePrice = livePrice?.symbol === symbol ? livePrice.price : null;
 
   return (
@@ -87,7 +87,13 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
         <div className="lg:col-span-2">
           <CandleChart symbol={symbol} />
         </div>
-        <Orderbook symbol={symbol} onPriceClick={(price) => setPriceHint({ symbol, price })} />
+        <Orderbook
+          symbol={symbol}
+          onPriceClick={(price, level) =>
+            // 매도호가(ask)를 누르면 그 값에 사겠다는 뜻, 매수호가(bid)를 누르면 팔겠다는 뜻으로 본다.
+            setPriceHint({ symbol, price, side: level === "ask" ? "BUY" : "SELL", seq: Date.now() })
+          }
+        />
       </div>
 
       <MyPosition symbol={symbol} onProtected={() => setOrderRefreshKey((value) => value + 1)} />

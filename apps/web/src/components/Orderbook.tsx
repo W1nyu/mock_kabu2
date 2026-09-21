@@ -124,7 +124,8 @@ export default function Orderbook({
   onPriceClick,
 }: {
   symbol: string;
-  onPriceClick?: (price: number) => void;
+  /** 가격과 함께 그 단계의 방향(ask/bid)을 알려 준다 — 매도호가 클릭은 매수, 매수호가 클릭은 매도 의도가 보통이다. */
+  onPriceClick?: (price: number, side: "ask" | "bid") => void;
 }) {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [executionStats, setExecutionStats] = useState<SessionExecutionStats | null>(null);
@@ -289,7 +290,7 @@ export default function Orderbook({
                 maxQty={maxQty}
                 change={depthChanges[`ask:${l.price}`]}
                 mine={myDepth[`ask:${l.price}`]}
-                onClick={onPriceClick}
+                onClick={(price) => onPriceClick?.(price, "ask")}
               />
             ) : (
               <EmptyRow key={`a-empty-${i}`} />
@@ -314,7 +315,7 @@ export default function Orderbook({
                 maxQty={maxQty}
                 change={depthChanges[`bid:${l.price}`]}
                 mine={myDepth[`bid:${l.price}`]}
-                onClick={onPriceClick}
+                onClick={(price) => onPriceClick?.(price, "bid")}
               />
             ) : (
               <EmptyRow key={`b-empty-${i}`} />
@@ -342,7 +343,7 @@ export default function Orderbook({
         </div>
       )}
       <p className="border-t border-hairline-soft px-4 py-2 text-[11px] text-ink-faint">
-        가격을 클릭하면 주문 폼에 입력됩니다
+        가격을 클릭하면 주문 폼에 입력됩니다 (매도호가→매수, 매수호가→매도)
         {Object.keys(myDepth).length > 0 && (
           <span className="ml-2 text-sky" title="내 미체결 지정가가 있는 호가 단계">
             ● 내 주문
