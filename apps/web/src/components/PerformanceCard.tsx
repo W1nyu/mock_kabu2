@@ -1,6 +1,7 @@
 "use client";
 
-import { fmt, won } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { api, fmt, getToken, won } from "@/lib/api";
 
 export interface RealizedStats {
   fills: number;
@@ -14,9 +15,54 @@ export interface RealizedStats {
   worst: number | null;
 }
 
-/** 매도 체결 단위 성과 요약 — 승률·평균 손익·손익비·최고/최저. 실현손익 테이블에서 계산. */
+interface EquityPoint {
+  ts: number;
+  equity: number;
+}
+
+interface Drawdown {
+  /** 최고 자산 대비 최대 낙폭 비율 (0~1) */
+  maxDrawdown: number;
+  peak: number;
+  /** 현재 자산의 최고점 대비 낙폭 (0~1) */
+  current: number;
+}
+
+/** 자산 추이 전체 구간에서 최고점 대비 최대 낙폭(MDD)과 현재 낙폭을 구한다. */
+function drawdownOf(points: EquityPoint[]): Drawdown | null {
+  if (points.length < 2) return null;
+  let peak = points[0].equity;
+  let maxDrawdown = 0;
+  for (const p of points) {
+    if (p.equity > peak) peak = p.equity;
+    if (peak > 0) maxDrawdown = Math.max(maxDrawdown, (peak - p.equity) / peak);
+  }
+  const last = points[points.length - 1].equity;
+  return { maxDrawdown, peak, current: peak > 0 ? Math.max(0, (peak - last) / peak) : 0 };
+}
+
+/** 매도 체결 단위 성과 요약 — 승률·평균 손익·손익비·최고/최저 + 자산 추이의 최대 낙폭. */
 export default function PerformanceCard({ stats }: { stats: RealizedStats | null }) {
   const empty = !stats || stats.fills === 0;
+  const [drawdown, setDrawdown] = useState<Drawdown | null>(null);
+
+  useEffect(() => {
+    if (!getToken()) return;
+    let active = true;
+    const load = () => {
+      api<EquityPoint[]>("/account/equity?range=all")
+        .then((points) => {
+          if (active) setDrawdown(drawdownOf(points));
+        })
+        .catch(() => {});
+    };
+    load();
+    const t = window.setInterval(load, 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(t);
+    };
+  }, [stats?.fills]);
   return (
     <section className="glass flex h-full flex-col overflow-hidden">
       <div className="panel-head">
@@ -25,11 +71,29 @@ export default function PerformanceCard({ stats }: { stats: RealizedStats | null
           <span className="text-[11px] text-ink-faint">매도 체결 {fmt.format(stats.fills)}건</span>
         )}
       </div>
+      {drawdown && (
+        <dl className="num grid grid-cols-2 gap-x-4 border-b border-hairline-soft px-5 py-3 text-sm">
+          <Stat
+            label="최대 낙폭 (MDD)"
+            value={`-${(drawdown.maxDrawdown * 100).toFixed(2)}%`}
+            sub={`최고 자산 ${won(drawdown.peak)}`}
+            tone={drawdown.maxDrawdown > 0.05 ? "down" : undefined}
+            title="자산 추이에서 최고점 대비 가장 크게 내려간 비율"
+          />
+          <Stat
+            label="현재 낙폭"
+            value={drawdown.current > 0 ? `-${(drawdown.current * 100).toFixed(2)}%` : "고점"}
+            tone={drawdown.current > 0 ? "down" : "up"}
+            title="지금 자산이 최고 자산에서 얼마나 내려와 있는지"
+          />
+        </dl>
+      )}
       {empty ? (
         <div className="grid flex-1 place-items-center px-5 py-10 text-center">
           <p className="text-sm text-ink-faint">아직 매도 체결이 없습니다. 첫 매도 뒤 승률과 손익비가 계산됩니다.</p>
         </div>
-      ) : (
+      ) : null}
+      {!empty && (
         <dl className="num grid flex-1 grid-cols-2 gap-x-4 gap-y-4 px-5 py-4 text-sm">
           <Stat
             label="승률"
