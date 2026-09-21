@@ -3,6 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, getToken, getUser, saveSession, type SessionUser } from "@/lib/api";
+import {
+  canUseDesktopNotifications,
+  desktopNotificationsEnabled,
+  requestDesktopPermission,
+  setDesktopNotificationsEnabled,
+} from "@/lib/notifications";
 
 type Notice = { ok: boolean; text: string } | null;
 
@@ -21,6 +27,9 @@ export default function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [pwNotice, setPwNotice] = useState<Notice>(null);
   const [pwBusy, setPwBusy] = useState(false);
+  const [desktopOn, setDesktopOn] = useState(false);
+  const [desktopPermission, setDesktopPermission] = useState<string>("default");
+  const [desktopSupported, setDesktopSupported] = useState(true);
 
   useEffect(() => {
     if (!getToken()) {
@@ -30,7 +39,26 @@ export default function SettingsPage() {
     const session = getUser();
     setUser(session);
     setNickname(session?.nickname ?? "");
+    // 브라우저 전용 API는 마운트 후에 읽는다.
+    const supported = canUseDesktopNotifications();
+    setDesktopSupported(supported);
+    setDesktopOn(desktopNotificationsEnabled());
+    setDesktopPermission(supported ? Notification.permission : "unsupported");
   }, [router]);
+
+  async function toggleDesktop() {
+    if (desktopOn) {
+      setDesktopNotificationsEnabled(false);
+      setDesktopOn(false);
+      return;
+    }
+    const permission = await requestDesktopPermission();
+    setDesktopPermission(permission);
+    if (permission === "granted") {
+      setDesktopNotificationsEnabled(true);
+      setDesktopOn(true);
+    }
+  }
 
   async function submitNickname(e: React.FormEvent) {
     e.preventDefault();
@@ -110,6 +138,33 @@ export default function SettingsPage() {
           </button>
         </div>
       </form>
+
+      <section className="glass overflow-hidden">
+        <div className="panel-head">
+          <span className="panel-title">브라우저 알림</span>
+          <span className="text-[11px] text-ink-faint">다른 탭에 있을 때만 시스템 알림</span>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <p className="text-sm text-ink-muted">
+            체결·예약 주문 발동을 이 브라우저의 시스템 알림으로도 받습니다. 화면을 보고 있을 때는 토스트만
+            뜹니다.
+            {desktopPermission === "denied" && (
+              <span className="mt-1 block text-xs text-warn">
+                브라우저에서 알림이 차단돼 있습니다. 주소창의 사이트 설정에서 허용한 뒤 다시 켜세요.
+              </span>
+            )}
+          </p>
+          <button
+            type="button"
+            onClick={toggleDesktop}
+            disabled={!desktopSupported || desktopPermission === "denied"}
+            aria-pressed={desktopOn}
+            className={`btn btn-sm ${desktopOn ? "btn-primary" : "btn-ghost"}`}
+          >
+            {!desktopSupported ? "지원하지 않는 브라우저" : desktopOn ? "켜짐 · 끄기" : "켜기"}
+          </button>
+        </div>
+      </section>
 
       <form onSubmit={submitPassword} className="glass overflow-hidden">
         <div className="panel-head">

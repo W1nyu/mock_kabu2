@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { fmt, getUser } from "@/lib/api";
-import { pushNotification } from "@/lib/notifications";
+import { pushNotification, showDesktopNotification } from "@/lib/notifications";
 import { subscribe } from "@/lib/socket";
 
 interface Toast {
@@ -45,8 +45,9 @@ export default function Toaster() {
     const pending = pendingRef.current;
 
     const push = (toast: Toast) => {
-      // 토스트는 사라지지만 알림함에는 남는다.
+      // 토스트는 사라지지만 알림함에는 남는다. 탭이 가려져 있으면 시스템 알림도 띄운다(설정에서 켠 경우).
       pushNotification(user.accountId, { ...toast, ts: Date.now() });
+      showDesktopNotification(toast);
       setToasts((current) => [...current.slice(-(MAX_VISIBLE - 1)), toast]);
       window.setTimeout(() => {
         setToasts((current) => current.filter((t) => t.id !== toast.id));

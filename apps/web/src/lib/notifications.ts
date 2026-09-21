@@ -74,6 +74,58 @@ export function clearNotifications(accountId: string): void {
   notifyChange();
 }
 
+const DESKTOP_KEY = "mock-kabu2:desktop-notifications";
+
+/** 사용자가 설정에서 켠 경우에만, 그리고 탭이 가려져 있을 때만 브라우저 알림을 띄운다. */
+export function desktopNotificationsEnabled(): boolean {
+  try {
+    return window.localStorage.getItem(DESKTOP_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setDesktopNotificationsEnabled(enabled: boolean): void {
+  try {
+    window.localStorage.setItem(DESKTOP_KEY, enabled ? "1" : "0");
+  } catch {
+    // ignore
+  }
+}
+
+export function canUseDesktopNotifications(): boolean {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
+/** 권한 요청. 이미 결정돼 있으면 그 값을 돌려준다. */
+export async function requestDesktopPermission(): Promise<NotificationPermission | "unsupported"> {
+  if (!canUseDesktopNotifications()) return "unsupported";
+  if (Notification.permission !== "default") return Notification.permission;
+  try {
+    return await Notification.requestPermission();
+  } catch {
+    return "denied";
+  }
+}
+
+export function showDesktopNotification(item: Pick<NotificationItem, "title" | "detail" | "href">): void {
+  if (!canUseDesktopNotifications() || Notification.permission !== "granted") return;
+  if (!desktopNotificationsEnabled()) return;
+  // 화면을 보고 있을 때는 토스트로 충분하다 — 다른 탭/창에 있을 때만 시스템 알림.
+  if (document.visibilityState === "visible") return;
+  try {
+    const notification = new Notification(item.title, { body: item.detail, tag: item.title, silent: true });
+    if (item.href) {
+      notification.onclick = () => {
+        window.focus();
+        window.location.href = item.href!;
+      };
+    }
+  } catch {
+    // 일부 브라우저는 페이지 컨텍스트에서 Notification 생성을 막는다.
+  }
+}
+
 function notifyChange(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(CHANGE_EVENT));
 }
