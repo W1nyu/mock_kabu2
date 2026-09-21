@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { JwtUser } from "../auth/auth.service";
-import { AccountService } from "./account.service";
+import { AccountService, type LeaderboardPeriod } from "./account.service";
 import { EquitySnapshotService, type EquityRange } from "./equity-snapshot.service";
 
 @Controller("account")
@@ -44,8 +44,9 @@ export class AccountController {
   }
 
   @Get("leaderboard")
-  getLeaderboard(@CurrentUser() user: JwtUser, @Query("limit") limit?: string) {
-    return this.account.getLeaderboard(user.accountId, limit ? Number(limit) : undefined);
+  getLeaderboard(@CurrentUser() user: JwtUser, @Query("limit") limit?: string, @Query("period") period?: string) {
+    const normalized: LeaderboardPeriod = period === "today" || period === "week" ? period : "all";
+    return this.account.getLeaderboard(user.accountId, limit ? Number(limit) : undefined, normalized);
   }
 
   /** KST 일별 성과 (종가 자산·전일 대비·실현손익). 최신순. */

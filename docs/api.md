@@ -67,7 +67,7 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/account/realized?limit=` | 실현손익 `{today, todayQty, total, totalQty, bySymbol[], recent[], stats: {fills, wins, losses, winRate, avgWin, avgLoss, profitFactor, best, worst}}` |
 | GET | `/account/equity?range=1d|1w|all` | 분 단위 자산 스냅샷 `[{ts, cash, stockValue, equity}]` (1분/10분/1시간 버킷의 마지막 값) |
 | GET | `/account/daily?days=` | KST 일별 `[{date, closeEquity, closeCash, change, changeRate, realized, fills}]` 최신순 |
-| GET | `/account/leaderboard?limit=` | 사용자 계정 수익률 순위 `{total, rows: [{rank, nickname, equity, deposits, pnl, returnRate, indexRate, alpha, realized, me}]}` — `indexRate`는 가입 이후 지수 등락, `alpha = returnRate − indexRate` (봇·`@smoke.local` 제외, 내 행은 항상 포함) |
+| GET | `/account/leaderboard?limit=&period=all|today|week` | 사용자 계정 수익률 순위 `{total, rows: [{rank, nickname, equity, deposits, pnl, returnRate, indexRate, alpha, realized, me}]}` — `period`가 today/week면 기간 첫 스냅샷 대비 수익률(기간 중 입출금 제외)·기간 실현손익·기간 지수 등락; `alpha = returnRate − indexRate` (봇·`@smoke.local` 제외, 내 행은 항상 포함) |
 | GET | `/account/ledger?limit=` | 현금 원장 |
 | POST | `/account/transfer` | `{toEmail, amount}` 계좌 이체 |
 

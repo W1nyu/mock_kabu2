@@ -12,6 +12,8 @@ import { koreaDayStart } from "../common/market-time";
 import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
 
+export type LeaderboardPeriod = "all" | "today" | "week";
+
 @Injectable()
 export class AccountService {
   constructor(
@@ -204,7 +206,11 @@ export class AccountService {
    * 순입금은 가입 보너스·시드·이체 원장의 합이며, 총자산은 현재 last_price 기준 평가액이다.
    * 봇 계정은 유동성 풀이라 제외한다.
    */
-  async getLeaderboard(viewerAccountId: string, limit = 20) {
+  async getLeaderboard(viewerAccountId: string, limit = 20, period: LeaderboardPeriod = "all") {
+    // 기간 랭킹: 기간 시작 이후 첫 스냅샷을 기준 자산으로, 그 뒤 입출금은 성과에서 뺀다.
+    // 기간 시작 전에 스냅샷이 없는(그 뒤 가입한) 계정은 순입금을 기준으로 삼는다.
+    const since =
+      period === "today" ? koreaDayStart() : period === "week" ? new Date(Date.now() - 7 * 24 * 3_600_000) : new Date(0);
     const rows = await this.prisma.$queryRaw<
       {
         account_id: string;
@@ -214,6 +220,9 @@ export class AccountService {
         realized: bigint;
         joined_at: Date;
         index_ratio: number | null;
+        base_equity: bigint | null;
+        base_ts: Date | null;
+        period_flows: bigint;
       }[]
     >`
       SELECT
@@ -223,18 +232,33 @@ export class AccountService {
         COALESCE(d.deposits, 0) AS deposits,
         COALESCE(r.realized, 0) AS realized,
         u.created_at AS joined_at,
-        -- 가입 시점 대비 시장 지수 배율: 종목별 현재가 / 가입 직전 1분봉 종가(없으면 기준가)의 평균
+        b.equity AS base_equity,
+        b.ts AS base_ts,
+        COALESCE(f.flows, 0) AS period_flows,
+        -- 기준 시점(가입 또는 기간 시작 중 늦은 쪽) 대비 시장 지수 배율:
+        -- 종목별 현재가 / 기준 직전 1분봉 종가(없으면 기준가)의 평균
         (
           SELECT AVG(s.last_price::double precision / COALESCE(c.close, s.initial_price))
           FROM market.symbols s
           LEFT JOIN LATERAL (
             SELECT close FROM market.candles c
-            WHERE c.symbol = s.symbol AND c.interval = '1m' AND c.ts <= u.created_at
+            WHERE c.symbol = s.symbol AND c.interval = '1m' AND c.ts <= GREATEST(u.created_at, ${since})
             ORDER BY c.ts DESC LIMIT 1
           ) c ON true
           WHERE s.symbol IN (${Prisma.join(SYMBOLS.map((symbol) => symbol.symbol))})
         ) AS index_ratio
       FROM account.accounts a
+      LEFT JOIN LATERAL (
+        SELECT equity, ts FROM account.equity_snapshots e
+        WHERE e.account_id = a.id AND e.ts >= ${since}
+        ORDER BY e.ts ASC LIMIT 1
+      ) b ON ${period !== "all"}
+      LEFT JOIN LATERAL (
+        SELECT SUM(delta) AS flows FROM account.ledger_entries l
+        WHERE l.account_id = a.id
+          AND l.reason IN ('SIGNUP_BONUS', 'SEED', 'TRANSFER_IN', 'TRANSFER_OUT')
+          AND l.created_at > COALESCE(b.ts, ${since})
+      ) f ON ${period !== "all"}
       -- 봇과 스모크 테스트(pnpm smoke)가 만든 임시 계정은 순위에서 뺀다.
       JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false AND u.email NOT LIKE '%@smoke.local'
       LEFT JOIN (
@@ -252,6 +276,7 @@ export class AccountService {
       LEFT JOIN (
         SELECT account_id, SUM(realized) AS realized
         FROM account.realized_pnl
+        WHERE traded_at >= ${since}
         GROUP BY account_id
       ) r ON r.account_id = a.id
     `;
@@ -259,8 +284,11 @@ export class AccountService {
       .map((row) => {
         const equity = Number(row.equity);
         const deposits = Number(row.deposits);
-        const pnl = equity - deposits;
-        const returnRate = deposits > 0 ? pnl / deposits : null;
+        // 전체 기간: 순입금 대비. 기간 랭킹: 기간 시작 스냅샷(없으면 순입금) 대비, 기간 중 입출금은 제외.
+        const base = period === "all" ? deposits : row.base_equity != null ? Number(row.base_equity) : deposits;
+        const flows = period === "all" ? 0 : Number(row.period_flows);
+        const pnl = equity - base - flows;
+        const returnRate = base > 0 ? pnl / base : null;
         const indexRate = row.index_ratio != null && Number.isFinite(row.index_ratio) ? row.index_ratio - 1 : null;
         return {
           accountId: row.account_id,

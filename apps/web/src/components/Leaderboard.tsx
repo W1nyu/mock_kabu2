@@ -24,15 +24,43 @@ interface LeaderboardDto {
 
 const REFRESH_MS = 30_000;
 
+type Period = "all" | "today" | "week";
+const PERIODS: { id: Period; label: string; hint: string }[] = [
+  { id: "today", label: "오늘", hint: "KST 오늘 첫 스냅샷 대비" },
+  { id: "week", label: "1주", hint: "최근 7일 첫 스냅샷 대비" },
+  { id: "all", label: "전체", hint: "가입 이후 순입금 대비" },
+];
+const PERIOD_STORAGE_KEY = "dashboard:leaderboard-period";
+
 /** 사용자 계정 수익률 랭킹. 봇은 제외되며, 내 순위는 상위 밖이어도 마지막 줄에 붙는다. */
 export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
   const [board, setBoard] = useState<LeaderboardDto | null>(null);
+  const [period, setPeriod] = useState<Period>("all");
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(PERIOD_STORAGE_KEY);
+      if (saved === "today" || saved === "week" || saved === "all") setPeriod(saved);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  function selectPeriod(next: Period) {
+    setPeriod(next);
+    setBoard(null);
+    try {
+      window.localStorage.setItem(PERIOD_STORAGE_KEY, next);
+    } catch {
+      // ignore
+    }
+  }
 
   useEffect(() => {
     if (!getToken()) return;
     let active = true;
     const load = () => {
-      api<LeaderboardDto>("/account/leaderboard?limit=10")
+      api<LeaderboardDto>(`/account/leaderboard?limit=10&period=${period}`)
         .then((data) => {
           if (active) setBoard(data);
         })
@@ -44,17 +72,37 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
       active = false;
       window.clearInterval(t);
     };
-  }, [refreshKey]);
+  }, [refreshKey, period]);
 
   return (
     <section className="glass overflow-hidden">
-      <div className="panel-head">
-        <span className="panel-title">투자자 랭킹</span>
-        {board && (
-          <span className="text-[11px] text-ink-faint" title="봇 계정은 제외됩니다">
-            {board.total}명 · 순입금 대비 수익률
-          </span>
-        )}
+      <div className="panel-head flex-wrap gap-y-2">
+        <span className="panel-title">
+          투자자 랭킹
+          {board && (
+            <span className="ml-2 font-normal text-ink-faint" title="봇 계정은 제외됩니다">
+              {board.total}명
+            </span>
+          )}
+        </span>
+        <div className="well flex gap-0.5 p-0.5" role="group" aria-label="랭킹 기간">
+          {PERIODS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => selectPeriod(p.id)}
+              aria-pressed={period === p.id}
+              title={p.hint}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                period === p.id
+                  ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
+                  : "text-ink-muted hover:bg-white/6 hover:text-ink"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="tbl tbl-hover">
@@ -63,7 +111,10 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
               <th className="w-12">순위</th>
               <th>투자자</th>
               <th className="text-right">총 자산</th>
-              <th className="text-right" title="(총 자산 − 순입금) ÷ 순입금">
+              <th
+                className="text-right"
+                title={period === "all" ? "(총 자산 − 순입금) ÷ 순입금" : "기간 시작 자산 대비 (기간 중 입출금 제외)"}
+              >
                 수익률
               </th>
               <th className="text-right" title="가입 이후 시장 지수 등락 대비 초과수익 (수익률 − 지수 등락률)">
