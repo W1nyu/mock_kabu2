@@ -45,6 +45,9 @@ export default function OrderForm({
   const [triggerPrice, setTriggerPrice] = useState("");
   // 조건부 모드의 하위 방식: 고정 가격 트리거 또는 고점/저점 추적(트레일링)
   const [stopMode, setStopMode] = useState<"FIXED" | "TRAIL">("FIXED");
+  // 발동 시 접수할 주문 유형. 지정가면 발동가 근처에 걸어 슬리피지를 제한하되 미체결 위험을 진다.
+  const [stopExec, setStopExec] = useState<"MARKET" | "LIMIT">("MARKET");
+  const [stopLimitPrice, setStopLimitPrice] = useState("");
   // 매수 체결 후 손절/익절을 자동 등록하는 브래킷. % 단위로 받고 서버에는 bps로 보낸다.
   const [bracketOn, setBracketOn] = useState(false);
   const [bracketStopPct, setBracketStopPct] = useState("5");
@@ -130,14 +133,17 @@ export default function OrderForm({
             direction: triggerDirection,
             triggerPrice: Number(triggerPrice),
             qty: Number(qty),
-            orderType: "MARKET",
+            orderType: stopExec,
+            ...(stopExec === "LIMIT" ? { limitPrice: Number(stopLimitPrice) } : {}),
           },
         });
         setMessage({
           ok: true,
           text: `예약 주문 등록: ${fmt.format(Number(triggerPrice))}원 ${
             triggerDirection === "AT_OR_ABOVE" ? "이상" : "이하"
-          }이면 ${fmt.format(Number(qty))}주 시장가 ${side === "BUY" ? "매수" : "매도"}`,
+          }이면 ${fmt.format(Number(qty))}주 ${
+            stopExec === "LIMIT" ? `${fmt.format(Number(stopLimitPrice))}원 지정가` : "시장가"
+          } ${side === "BUY" ? "매수" : "매도"}`,
         });
       } else {
         await api("/orders", {
@@ -203,6 +209,13 @@ export default function OrderForm({
     bracketTakeBps >= TRAIL_BPS_MIN &&
     bracketTakeBps <= 10_000;
   const bracketActive = side === "BUY" && type !== "STOP" && bracketOn;
+  // 조건부 지정가 발동: 발동 후 걸 지정가도 호가 단위에 맞아야 한다.
+  const parsedStopLimit = Number(stopLimitPrice);
+  const stopLimitValid =
+    stopExec !== "LIMIT" ||
+    (Number.isSafeInteger(parsedStopLimit) &&
+      parsedStopLimit > 0 &&
+      (tickSize == null || isOnTick(parsedStopLimit, tickSize)));
   // 트레일링: 0.1%~50%, 서버와 같은 bps 단위로 반올림한다.
   const trailBps = Math.round((Number(trailPct) || 0) * 100);
   const validTrail = trailBps >= TRAIL_BPS_MIN && trailBps <= TRAIL_BPS_MAX;
@@ -405,14 +418,67 @@ export default function OrderForm({
                 ))}
               </div>
             )}
+            {stopMode === "FIXED" && (
+              <div className="space-y-2">
+                <div
+                  className="well grid grid-cols-2 gap-1 p-1"
+                  role="group"
+                  aria-label="발동 시 주문 유형"
+                >
+                  {(["MARKET", "LIMIT"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setStopExec(m)}
+                      aria-pressed={stopExec === m}
+                      title={
+                        m === "MARKET"
+                          ? "발동 즉시 시장가로 체결 — 확실히 나가지만 급락장에선 미끄러질 수 있습니다"
+                          : "발동 후 지정가를 겁니다 — 슬리피지를 막지만 가격이 지나가면 미체결로 남습니다"
+                      }
+                      className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
+                        stopExec === m
+                          ? "bg-white/10 text-ink"
+                          : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                      }`}
+                    >
+                      {m === "MARKET" ? "발동 시 시장가" : "발동 시 지정가"}
+                    </button>
+                  ))}
+                </div>
+                {stopExec === "LIMIT" && (
+                  <div>
+                    <label className="label" htmlFor={`order-stop-limit-${symbol}`}>
+                      발동 후 지정가
+                      {tickSize != null && (
+                        <span className="ml-1.5 font-normal text-ink-faint">
+                          호가 단위 {fmt.format(tickSize)}원
+                        </span>
+                      )}
+                    </label>
+                    <input
+                      id={`order-stop-limit-${symbol}`}
+                      className="field num"
+                      inputMode="numeric"
+                      value={stopLimitPrice}
+                      onChange={(e) => setStopLimitPrice(e.target.value.replace(/[^0-9]/g, ""))}
+                      placeholder={validTrigger ? String(parsedTrigger) : "예: 트리거 가격"}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
             <p className="text-[11px] text-ink-faint">
               {stopMode === "TRAIL"
                 ? side === "SELL"
                   ? "트레일링 손절"
                   : "트레일링 매수"
                 : describeCondition(triggerDirection, side)}{" "}
-              · 조건 충족 시 <span className="text-ink-muted">시장가</span>로 접수됩니다. 대기
-              중에는 현금·수량을 홀드하지 않습니다.
+              · 조건 충족 시{" "}
+              <span className="text-ink-muted">
+                {stopMode === "FIXED" && stopExec === "LIMIT" ? "지정가" : "시장가"}
+              </span>
+              로 접수됩니다. 대기 중에는 현금·수량을 홀드하지 않습니다.
             </p>
           </div>
         )}
@@ -644,7 +710,9 @@ export default function OrderForm({
             !validQty ||
             (type === "LIMIT" && (limitPrice == null || offTick)) ||
             (bracketActive && !bracketValid) ||
-            (type === "STOP" && stopMode === "FIXED" && (!validTrigger || triggerAlreadyMet)) ||
+            (type === "STOP" &&
+              stopMode === "FIXED" &&
+              (!validTrigger || triggerAlreadyMet || !stopLimitValid)) ||
             (type === "STOP" && stopMode === "TRAIL" && !validTrail)
           }
           className={`btn btn-block ${side === "BUY" ? "btn-buy" : "btn-sell"}`}

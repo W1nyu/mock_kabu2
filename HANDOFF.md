@@ -47,7 +47,11 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 웹 단위 테스트 (최신 작업)
+## 2026-09-22 — 조건부 지정가 발동 UI (최신 작업)
+
+- 주문폼 조건부·고정 가격 모드에 **발동 시 시장가 | 발동 시 지정가** 토글과 "발동 후 지정가" 입력(호가 단위 검증). API의 `orderType: LIMIT` + `limitPrice`를 그대로 쓴다. 트레일링은 시장가 발동만. 브라우저 미확인(스택 종료 상태) — typecheck만.
+
+## 2026-09-22 — 웹 단위 테스트
 
 - `apps/web`에 vitest(`vitest.config.ts`, node 환경, `src/**/*.test.ts`, `@` alias)와 `pnpm --filter @mock-kabu/web test`. 순수 로직을 `lib/`로 뽑아 테스트: `drawdown.ts`(MDD), `csv.ts`(`toCsv` BOM·따옴표 이스케이프), `sparkline.ts`(`sparklineGeometry`), `guards.ts`(`guardSummary`). 컴포넌트는 소켓·브라우저에 묶여 있어 다루지 않는다. 루트 `pnpm test`(turbo)가 web 포함 10개 태스크 전부 통과 — dev 스택을 내린 상태에서 실행(실행 중이면 db build의 prisma generate가 EPERM).
 - 참고: 이 세션 후반에 dev 스택(`pnpm dev`)이 메모리 부족으로 강제 종료됐다. 이후 변경(웹 테스트, 이하 항목)은 typecheck·단위 테스트로만 검증했고 브라우저 확인은 못 했다.
@@ -211,7 +215,6 @@
 ## 다음 후보 작업 (사용자 미승인 — 착수 전 확인 필요)
 
 2026-09-22 세션에서 남긴 후보 (예전 목록의 현재가 헤더·push 갱신·% 버튼·실시간 시세는 모두 구현됨):
-- 조건부 주문 LIMIT 발동 UI — API는 `orderType: LIMIT` + `limitPrice`를 받지만 주문폼은 시장가 발동만 노출한다.
 - 랭킹 기간 필터(오늘/이번 주) — 지금은 가입 이후 누적만.
 - 자산 스냅샷 90일 이상 장기 보존 정책은 있으나 삭제(퇴장) 계정 정리 없음.
 - 시스템 알림 권한 다이얼로그는 브라우저 자동화로 확인하지 못함 — 수동 확인.
