@@ -157,7 +157,8 @@ async function main() {
   const daily = await call("GET", "/account/daily?days=3");
   check("daily endpoint answers", Array.isArray(daily));
   const board = await call("GET", "/account/leaderboard?limit=5");
-  check("leaderboard includes me", board.rows.some((r) => r.me), board.rows.length);
+  // 스모크 계정(@smoke.local)은 순위에서 제외되므로 내 행이 없어야 정상이다.
+  check("leaderboard answers and hides smoke accounts", Array.isArray(board.rows) && !board.rows.some((r) => r.me), board.rows.length);
   const ready = await call("GET", "/health/ready", null, { auth: false });
   check("health lists background jobs", ready.background?.conditionalOrders?.status === "up" && ready.background?.bracketIntents?.status === "up", ready.background);
 

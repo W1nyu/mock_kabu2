@@ -235,7 +235,8 @@ export class AccountService {
           WHERE s.symbol IN (${Prisma.join(SYMBOLS.map((symbol) => symbol.symbol))})
         ) AS index_ratio
       FROM account.accounts a
-      JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false
+      -- 봇과 스모크 테스트(pnpm smoke)가 만든 임시 계정은 순위에서 뺀다.
+      JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false AND u.email NOT LIKE '%@smoke.local'
       LEFT JOIN (
         SELECT h.account_id, SUM(h.qty::bigint * s.last_price) AS stock_value
         FROM account.holdings h

@@ -86,6 +86,7 @@
 ## 2026-09-22 — 매매 성과·투자자 랭킹·종목 추세선
 
 - **매매 성과**: `GET /account/realized`가 `stats {fills, wins, losses, winRate, avgWin, avgLoss, profitFactor, best, worst}`를 추가로 돌려준다(실현손익 테이블 집계, 손익 0 체결은 승/패 제외). 웹 `PerformanceCard.tsx`가 대시보드 자산 추이 오른쪽(lg 3열 중 1열)에 표시.
+- 랭킹은 `@smoke.local` 이메일(스모크 계정)을 제외한다. 스모크 계정 자체는 DB에 남는다(삭제 스크립트 없음).
 - **랭킹 지수 대비(알파)**: `getLeaderboard`가 LATERAL 서브쿼리로 가입 직전 1분봉 종가(없으면 기준가) 대비 현재가 배율의 종목 평균(`index_ratio`)을 구해 `indexRate = ratio − 1`, `alpha = returnRate − indexRate`를 준다. 웹 표에 "지수 대비 +x.xx%p" 열(툴팁에 가입 이후 지수 등락). 현금만 든 계정은 하락장에서 알파가 양수로 나온다 — 의도(현금 보유가 시장을 이긴 것).
 - **투자자 랭킹**: `GET /account/leaderboard?limit=` — 사용자(non-bot) 계정을 수익률 `(총자산 − 순입금) / 순입금` 순으로. 순입금 = `SIGNUP_BONUS/SEED/TRANSFER_IN/TRANSFER_OUT` 원장 합, 총자산 = 현금 + Σ보유×`last_price`(실시간 평가). 순입금 ≤ 0은 수익률 null로 맨 뒤. 응답 `{total, rows}`이며 내 행(`me:true`)은 상위 밖이어도 마지막에 붙는다. 웹 `Leaderboard.tsx`가 대시보드 뉴스 아래·보유 자산 위에 표시(30초 폴링). **Nav 메뉴는 LEGACY MENU LOCK 때문에 추가하지 않았다** — 별도 페이지가 필요하면 제품 결정 후 추가.
 - **종목 추세선**: 대시보드 종목 표에 `Sparkline.tsx`(인라인 SVG) 열 "6시간 흐름" — 5분봉 종가 72개, 실시간 가격이 마지막 점을 대체, 5분마다 재조회.
@@ -214,7 +215,6 @@
 - 랭킹 기간 필터(오늘/이번 주) — 지금은 가입 이후 누적만.
 - 자산 스냅샷 90일 이상 장기 보존 정책은 있으나 삭제(퇴장) 계정 정리 없음.
 - 시스템 알림 권한 다이얼로그는 브라우저 자동화로 확인하지 못함 — 수동 확인.
-- 스모크(`pnpm smoke`)가 만든 `smoke-*@smoke.local` 계정이 랭킹에 남는다 — 정리 스크립트 또는 랭킹에서 제외 규칙 검토.
 
 스펙상 후속 마일스톤(README 하단): k3d/Helm(M5), k6+Grafana(M6), isolation-lab, AWS(M7+).
 
