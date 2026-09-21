@@ -6,7 +6,7 @@ export interface SymbolDef {
   name: string;
   /** 시드/봇 기준가의 시작값 */
   initialPrice: number;
-  /** 호가 단위 (봇이 호가를 정렬할 때 사용, API는 강제하지 않음) */
+  /** 호가 단위. 지정가 주문은 이 단위의 배수여야 한다(API가 거부) */
   tickSize: number;
 }
 
@@ -18,6 +18,16 @@ export const SYMBOLS: SymbolDef[] = [
   { symbol: "SAKU", name: "사쿠라중공업", initialPrice: 300_000, tickSize: 500 },
   { symbol: "NEKO", name: "네코물산", initialPrice: 25_000, tickSize: 50 },
 ];
+
+/** 종목의 호가 단위. 모르는 종목이면 null. */
+export function tickSizeOf(symbol: string): number | null {
+  return SYMBOLS.find((definition) => definition.symbol === symbol)?.tickSize ?? null;
+}
+
+/** 지정가가 호가 단위 격자 위에 있는지. */
+export function isOnTick(price: number, tickSize: number): boolean {
+  return Number.isInteger(price) && tickSize > 0 && price % tickSize === 0;
+}
 
 /** Redis Streams 키 */
 export const REDIS_NAMESPACE = "mock-kabu2";

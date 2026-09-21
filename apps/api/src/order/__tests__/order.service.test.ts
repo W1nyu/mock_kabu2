@@ -32,3 +32,20 @@ describe("OrderService.myOrders", () => {
     });
   });
 });
+
+describe("OrderService.place tick-size validation", () => {
+  it("rejects a limit price off the symbol's tick grid before touching the database", async () => {
+    const findUnique = vi.fn();
+    const service = new OrderService(
+      { marketSymbol: { findUnique } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.place("account-1", { symbol: "TANU", side: "BUY", type: "LIMIT", price: 7_775, qty: 1 }),
+    ).rejects.toThrow(/호가 단위는 10원/);
+    expect(findUnique).not.toHaveBeenCalled();
+  });
+});

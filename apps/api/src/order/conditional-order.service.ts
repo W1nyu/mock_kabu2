@@ -18,6 +18,8 @@ import {
   advancesWatermark,
   conditionMet,
   describeCondition,
+  isOnTick,
+  tickSizeOf,
   trailingTrigger,
   type ConditionalOrderDto,
   type OrderSide,
@@ -151,6 +153,10 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     if (orderType !== "MARKET" && orderType !== "LIMIT") throw new BadRequestException("orderType은 MARKET/LIMIT");
     if (orderType === "LIMIT" && (!Number.isInteger(limitPrice) || limitPrice! <= 0)) {
       throw new BadRequestException("지정가는 양의 정수");
+    }
+    const tickSize = tickSizeOf(symbol);
+    if (orderType === "LIMIT" && tickSize != null && !isOnTick(limitPrice!, tickSize)) {
+      throw new BadRequestException(`${symbol}의 호가 단위는 ${tickSize.toLocaleString("ko-KR")}원입니다`);
     }
     if (trailBps != null && (!Number.isInteger(trailBps) || trailBps < TRAIL_BPS_MIN || trailBps > TRAIL_BPS_MAX)) {
       throw new BadRequestException(`트레일링 거리는 ${TRAIL_BPS_MIN / 100}%~${TRAIL_BPS_MAX / 100}% 사이여야 합니다`);

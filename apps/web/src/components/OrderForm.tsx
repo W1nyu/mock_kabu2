@@ -6,6 +6,8 @@ import {
   TRAIL_BPS_MIN,
   describeCondition,
   inferTriggerDirection,
+  isOnTick,
+  tickSizeOf,
   trailingTrigger,
   type TriggerDirection,
 } from "@mock-kabu/shared";
@@ -157,6 +159,11 @@ export default function OrderForm({
   const parsedLimitPrice = Number(price);
   const limitPrice =
     Number.isSafeInteger(parsedLimitPrice) && parsedLimitPrice > 0 ? parsedLimitPrice : null;
+  const tickSize = tickSizeOf(symbol);
+  // 서버가 격자 밖 지정가를 거부하므로 미리 알리고 버튼을 잠근다.
+  const offTick = limitPrice != null && tickSize != null && !isOnTick(limitPrice, tickSize);
+  const nearestTick =
+    offTick && tickSize != null ? Math.max(tickSize, Math.round(limitPrice! / tickSize) * tickSize) : null;
 
   const parsedTrigger = Number(triggerPrice);
   const validTrigger = Number.isSafeInteger(parsedTrigger) && parsedTrigger > 0;
@@ -385,6 +392,9 @@ export default function OrderForm({
           <div>
             <label className="label" htmlFor={`order-price-${symbol}`}>
               가격
+              {tickSize != null && (
+                <span className="ml-1.5 font-normal text-ink-faint">호가 단위 {fmt.format(tickSize)}원</span>
+              )}
             </label>
             <input
               id={`order-price-${symbol}`}
@@ -520,6 +530,18 @@ export default function OrderForm({
             </p>
           )}
           {sizingNote && <p className="text-warn">{sizingNote}</p>}
+          {type === "LIMIT" && offTick && nearestTick != null && (
+            <p className="text-warn">
+              호가 단위 {fmt.format(tickSize!)}원에 맞지 않습니다.{" "}
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-ink"
+                onClick={() => setPrice(String(nearestTick))}
+              >
+                {fmt.format(nearestTick)}원으로 맞추기
+              </button>
+            </p>
+          )}
           {exceedsAvailableCash && (
             <p className="text-warn">
               입력 수량이 현재 주문 가능 현금을 초과합니다. 접수 시 다시 확인됩니다.
@@ -546,7 +568,7 @@ export default function OrderForm({
           disabled={
             busy ||
             !validQty ||
-            (type === "LIMIT" && limitPrice == null) ||
+            (type === "LIMIT" && (limitPrice == null || offTick)) ||
             (type === "STOP" && stopMode === "FIXED" && (!validTrigger || triggerAlreadyMet)) ||
             (type === "STOP" && stopMode === "TRAIL" && !validTrail)
           }

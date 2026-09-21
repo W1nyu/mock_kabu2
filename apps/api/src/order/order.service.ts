@@ -13,6 +13,8 @@ import {
   KEYS,
   MARKET_BUY_HOLD_FACTOR,
   SYMBOLS,
+  isOnTick,
+  tickSizeOf,
   type OrderCancelRequestedEvent,
   type OrderPlacedEvent,
   type OrderSide,
@@ -64,6 +66,11 @@ export class OrderService {
     }
     if (!SYMBOLS.some((definition) => definition.symbol === symbol)) {
       throw new NotFoundException(`없는 종목: ${symbol}`);
+    }
+    // 격자 밖 지정가는 호가창에 낯선 단계를 만들고 봇 래더와 어긋나므로 접수 단계에서 막는다.
+    const tickSize = tickSizeOf(symbol);
+    if (type === "LIMIT" && tickSize != null && !isOnTick(price!, tickSize)) {
+      throw new BadRequestException(`${symbol}의 호가 단위는 ${tickSize.toLocaleString("ko-KR")}원입니다`);
     }
 
     const marketSymbol = await this.prisma.marketSymbol.findUnique({ where: { symbol } });
