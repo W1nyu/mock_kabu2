@@ -15,6 +15,7 @@ function waitingRow(overrides: Partial<Record<string, unknown>> = {}) {
     qty: 5,
     orderType: "MARKET",
     limitPrice: null,
+    ocoGroupId: null,
     status: "WAITING",
     triggeredOrderId: null,
     triggerTradePrice: null,
@@ -28,7 +29,16 @@ function waitingRow(overrides: Partial<Record<string, unknown>> = {}) {
 function build(options: { rows?: ReturnType<typeof waitingRow>[]; claimCount?: number; placeError?: Error } = {}) {
   const prisma = {
     conditionalOrder: {
-      findMany: vi.fn().mockResolvedValue(options.rows ?? [waitingRow()]),
+      findMany: vi.fn().mockImplementation((args: any) =>
+        // 인덱스 적재(status=WAITING만)와 OCO 짝 조회(ocoGroupId + id not)를 같은 fixture로 응답한다.
+        Promise.resolve(
+          (options.rows ?? [waitingRow()]).filter((row) =>
+            args?.where?.ocoGroupId
+              ? row.ocoGroupId === args.where.ocoGroupId && row.id !== args.where.id?.not
+              : true,
+          ),
+        ),
+      ),
       updateMany: vi.fn().mockResolvedValue({ count: options.claimCount ?? 1 }),
       update: vi.fn().mockResolvedValue({}),
     },
@@ -127,5 +137,24 @@ describe("ConditionalOrderService trigger loop", () => {
       qty: 5,
       price: 1_210,
     });
+  });
+
+  it("cancels the OCO sibling when one leg triggers", async () => {
+    const stop = waitingRow({ id: "stop", direction: "AT_OR_BELOW", triggerPrice: 900, ocoGroupId: "g1" });
+    const take = waitingRow({ id: "take", direction: "AT_OR_ABOVE", triggerPrice: 1_100, ocoGroupId: "g1" });
+    const { service, prisma, orders } = build({ rows: [stop, take] });
+    await (service as any).reloadIndex();
+
+    service.onTick("KABU", 1_100);
+    await flush();
+
+    // 짝(stop)은 WAITING→CANCELED로, 인덱스에서도 빠져 뒤이은 하락 체결에 발동하지 않는다.
+    expect(prisma.conditionalOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["stop"] }, status: "WAITING" },
+      data: { status: "CANCELED", failReason: "OCO 짝 주문 발동으로 자동 취소" },
+    });
+    service.onTick("KABU", 800);
+    await flush();
+    expect(orders.place).toHaveBeenCalledTimes(1);
   });
 });

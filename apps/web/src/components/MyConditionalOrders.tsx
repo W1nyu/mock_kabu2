@@ -96,6 +96,11 @@ export default function MyConditionalOrders({
               {r.side === "BUY" ? "매수" : "매도"}
             </span>
             <span className="shrink-0 text-ink-muted">{describeCondition(r.direction, r.side)}</span>
+            {r.ocoGroupId && (
+              <span className="chip" title="OCO — 짝 주문이 발동하면 자동 취소됩니다">
+                OCO
+              </span>
+            )}
             <span className="ml-auto whitespace-nowrap">
               {fmt.format(r.triggerPrice)}
               <span className="text-ink-faint">{r.direction === "AT_OR_ABOVE" ? " 이상" : " 이하"}</span>

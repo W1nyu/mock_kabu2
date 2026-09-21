@@ -84,7 +84,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
         <Orderbook symbol={symbol} onPriceClick={(price) => setPriceHint({ symbol, price })} />
       </div>
 
-      <MyPosition symbol={symbol} />
+      <MyPosition symbol={symbol} onProtected={() => setOrderRefreshKey((value) => value + 1)} />
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
         <OrderForm

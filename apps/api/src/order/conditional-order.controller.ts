@@ -1,7 +1,11 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { JwtUser } from "../auth/auth.service";
-import { ConditionalOrderService, type PlaceConditionalOrderDto } from "./conditional-order.service";
+import {
+  ConditionalOrderService,
+  type PlaceConditionalOrderDto,
+  type PlaceOcoDto,
+} from "./conditional-order.service";
 
 @Controller("orders/conditional")
 @UseGuards(JwtAuthGuard)
@@ -11,6 +15,12 @@ export class ConditionalOrderController {
   @Post()
   place(@CurrentUser() user: JwtUser, @Body() body: PlaceConditionalOrderDto) {
     return this.conditional.place(user.accountId, body);
+  }
+
+  /** 손절+익절(또는 눌림+돌파) 한 쌍. 한쪽이 발동하면 다른 쪽은 자동 취소. */
+  @Post("oco")
+  placeOco(@CurrentUser() user: JwtUser, @Body() body: PlaceOcoDto) {
+    return this.conditional.placeOco(user.accountId, body);
   }
 
   @Get()

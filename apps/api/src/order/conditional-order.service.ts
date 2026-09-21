@@ -20,6 +20,7 @@ import {
   type TriggerDirection,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
+import { randomUUID } from "node:crypto";
 import { PRISMA, REDIS_SUB } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
 import { OrderService } from "./order.service";
@@ -34,6 +35,16 @@ export interface PlaceConditionalOrderDto {
   limitPrice?: number;
 }
 
+export interface PlaceOcoDto {
+  symbol: string;
+  side: OrderSide;
+  qty: number;
+  /** 손절(매도) / 눌림(매수) 다리 — 현재가 아래에서 AT_OR_BELOW로 발동 */
+  lowerPrice: number;
+  /** 익절(매도) / 돌파(매수) 다리 — 현재가 위에서 AT_OR_ABOVE로 발동 */
+  upperPrice: number;
+}
+
 interface WaitingRow {
   id: string;
   accountId: string;
@@ -44,7 +55,10 @@ interface WaitingRow {
   qty: number;
   orderType: OrderType;
   limitPrice: number | null;
+  ocoGroupId: string | null;
 }
+
+const OCO_SIBLING_NOTE = "OCO 짝 주문 발동으로 자동 취소";
 
 /** 다른 API 인스턴스가 만든 대기 주문을 늦어도 이 간격 안에 메모리 인덱스로 가져온다. */
 const INDEX_REFRESH_MS = 10_000;
@@ -108,31 +122,19 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     const orderType: OrderType = dto.orderType ?? "MARKET";
     const limitPrice = dto.limitPrice != null ? Number(dto.limitPrice) : null;
 
-    if (!ACTIVE_SYMBOLS.has(symbol)) throw new NotFoundException(`없는 종목: ${symbol}`);
-    if (side !== "BUY" && side !== "SELL") throw new BadRequestException("side는 BUY/SELL");
+    this.assertSymbolSideQty(symbol, side, qty);
     if (direction !== "AT_OR_ABOVE" && direction !== "AT_OR_BELOW") {
       throw new BadRequestException("direction은 AT_OR_ABOVE/AT_OR_BELOW");
     }
     if (!Number.isInteger(triggerPrice) || triggerPrice <= 0) throw new BadRequestException("트리거 가격은 양의 정수");
-    if (!Number.isInteger(qty) || qty <= 0) throw new BadRequestException("수량은 양의 정수");
     if (orderType !== "MARKET" && orderType !== "LIMIT") throw new BadRequestException("orderType은 MARKET/LIMIT");
     if (orderType === "LIMIT" && (!Number.isInteger(limitPrice) || limitPrice! <= 0)) {
       throw new BadRequestException("지정가는 양의 정수");
     }
 
-    const marketSymbol = await this.prisma.marketSymbol.findUnique({ where: { symbol } });
-    if (!marketSymbol) throw new NotFoundException(`없는 종목: ${symbol}`);
-    // 이미 만족하는 조건은 예약의 의미가 없다 — 바로 일반 주문을 내라고 안내한다.
-    if (conditionMet(direction, triggerPrice, marketSymbol.lastPrice)) {
-      throw new BadRequestException(
-        `현재가 ${marketSymbol.lastPrice.toLocaleString("ko-KR")}원이 이미 조건을 만족합니다. 일반 주문을 이용하세요`,
-      );
-    }
-
-    const waitingCount = await this.prisma.conditionalOrder.count({ where: { accountId, status: "WAITING" } });
-    if (waitingCount >= MAX_WAITING_PER_ACCOUNT) {
-      throw new BadRequestException(`대기 중인 예약 주문은 계정당 ${MAX_WAITING_PER_ACCOUNT}건까지입니다`);
-    }
+    const lastPrice = await this.lastPriceOf(symbol);
+    this.assertNotAlreadyMet(direction, triggerPrice, lastPrice);
+    await this.assertWaitingCapacity(accountId, 1);
 
     const row = await this.prisma.conditionalOrder.create({
       data: {
@@ -151,6 +153,73 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     return toDto(row);
   }
 
+  /**
+   * OCO 한 쌍: 현재가 아래 다리(AT_OR_BELOW)와 위 다리(AT_OR_ABOVE)를 같은 그룹으로 등록한다.
+   * 매도면 손절+익절, 매수면 눌림+돌파. 한쪽이 발동하면 다른 쪽은 자동 취소된다.
+   */
+  async placeOco(accountId: string, dto: PlaceOcoDto): Promise<ConditionalOrderDto[]> {
+    const { symbol, side } = dto;
+    const qty = Number(dto.qty);
+    const lowerPrice = Number(dto.lowerPrice);
+    const upperPrice = Number(dto.upperPrice);
+    this.assertSymbolSideQty(symbol, side, qty);
+    if (!Number.isInteger(lowerPrice) || lowerPrice <= 0 || !Number.isInteger(upperPrice) || upperPrice <= 0) {
+      throw new BadRequestException("트리거 가격은 양의 정수");
+    }
+    if (lowerPrice >= upperPrice) throw new BadRequestException("아래 트리거는 위 트리거보다 낮아야 합니다");
+
+    const lastPrice = await this.lastPriceOf(symbol);
+    this.assertNotAlreadyMet("AT_OR_BELOW", lowerPrice, lastPrice);
+    this.assertNotAlreadyMet("AT_OR_ABOVE", upperPrice, lastPrice);
+    await this.assertWaitingCapacity(accountId, 2);
+
+    const ocoGroupId = randomUUID();
+    const legs = [
+      { direction: "AT_OR_BELOW" as const, triggerPrice: lowerPrice },
+      { direction: "AT_OR_ABOVE" as const, triggerPrice: upperPrice },
+    ];
+    const rows = await this.prisma.$transaction(
+      legs.map((leg) =>
+        this.prisma.conditionalOrder.create({
+          data: { accountId, symbol, side, qty, orderType: "MARKET", ocoGroupId, ...leg },
+        }),
+      ),
+    );
+    for (const row of rows) this.index(row);
+    this.realtime.notifyAccount(accountId, { type: "conditional", id: ocoGroupId, status: "WAITING" });
+    return rows.map(toDto);
+  }
+
+  private assertSymbolSideQty(symbol: string, side: string, qty: number): void {
+    if (!ACTIVE_SYMBOLS.has(symbol)) throw new NotFoundException(`없는 종목: ${symbol}`);
+    if (side !== "BUY" && side !== "SELL") throw new BadRequestException("side는 BUY/SELL");
+    if (!Number.isInteger(qty) || qty <= 0) throw new BadRequestException("수량은 양의 정수");
+  }
+
+  private async lastPriceOf(symbol: string): Promise<number> {
+    const marketSymbol = await this.prisma.marketSymbol.findUnique({ where: { symbol } });
+    if (!marketSymbol) throw new NotFoundException(`없는 종목: ${symbol}`);
+    return marketSymbol.lastPrice;
+  }
+
+  /** 이미 만족하는 조건은 예약의 의미가 없다 — 바로 일반 주문을 내라고 안내한다. */
+  private assertNotAlreadyMet(direction: TriggerDirection, triggerPrice: number, lastPrice: number): void {
+    if (conditionMet(direction, triggerPrice, lastPrice)) {
+      throw new BadRequestException(
+        `현재가 ${lastPrice.toLocaleString("ko-KR")}원이 이미 ${triggerPrice.toLocaleString("ko-KR")}원 ${
+          direction === "AT_OR_ABOVE" ? "이상" : "이하"
+        } 조건을 만족합니다. 일반 주문을 이용하세요`,
+      );
+    }
+  }
+
+  private async assertWaitingCapacity(accountId: string, adding: number): Promise<void> {
+    const waitingCount = await this.prisma.conditionalOrder.count({ where: { accountId, status: "WAITING" } });
+    if (waitingCount + adding > MAX_WAITING_PER_ACCOUNT) {
+      throw new BadRequestException(`대기 중인 예약 주문은 계정당 ${MAX_WAITING_PER_ACCOUNT}건까지입니다`);
+    }
+  }
+
   async cancel(accountId: string, id: string): Promise<ConditionalOrderDto> {
     const existing = await this.prisma.conditionalOrder.findUnique({ where: { id } });
     if (!existing || existing.accountId !== accountId) throw new NotFoundException("예약 주문을 찾을 수 없습니다");
@@ -164,9 +233,24 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     });
     this.waiting.get(existing.symbol)?.delete(id);
     if (claimed.count === 0) throw new BadRequestException("이미 발동된 예약 주문입니다");
+    // OCO는 한 몸이다 — 한 다리를 취소하면 짝도 함께 취소한다.
+    if (existing.ocoGroupId) await this.cancelOcoSiblings(existing.ocoGroupId, id, "OCO 짝 주문 취소");
     const row = await this.prisma.conditionalOrder.findUniqueOrThrow({ where: { id } });
     this.realtime.notifyAccount(accountId, { type: "conditional", id, status: row.status });
     return toDto(row);
+  }
+
+  private async cancelOcoSiblings(ocoGroupId: string, exceptId: string, note: string): Promise<void> {
+    const siblings = await this.prisma.conditionalOrder.findMany({
+      where: { ocoGroupId, status: "WAITING", id: { not: exceptId } },
+      select: { id: true, symbol: true },
+    });
+    if (siblings.length === 0) return;
+    await this.prisma.conditionalOrder.updateMany({
+      where: { id: { in: siblings.map((row) => row.id) }, status: "WAITING" },
+      data: { status: "CANCELED", failReason: note },
+    });
+    for (const sibling of siblings) this.waiting.get(sibling.symbol)?.delete(sibling.id);
   }
 
   async list(accountId: string, filter: { symbol?: string; status?: string; limit?: number } = {}) {
@@ -204,6 +288,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
       });
       // 취소됐거나 다른 인스턴스가 먼저 발동시켰다.
       if (claimed.count === 0) return;
+      if (row.ocoGroupId) await this.cancelOcoSiblings(row.ocoGroupId, row.id, OCO_SIBLING_NOTE);
 
       let failReason: string | null = null;
       let triggeredOrderId: string | null = null;
@@ -301,6 +386,7 @@ function toWaiting(row: {
   qty: number;
   orderType: string;
   limitPrice: number | null;
+  ocoGroupId: string | null;
 }): WaitingRow {
   return {
     id: row.id,
@@ -312,6 +398,7 @@ function toWaiting(row: {
     qty: row.qty,
     orderType: row.orderType as OrderType,
     limitPrice: row.limitPrice,
+    ocoGroupId: row.ocoGroupId,
   };
 }
 
@@ -324,6 +411,7 @@ function toDto(row: {
   qty: number;
   orderType: string;
   limitPrice: number | null;
+  ocoGroupId: string | null;
   status: string;
   triggeredOrderId: string | null;
   triggerTradePrice: number | null;
@@ -340,6 +428,7 @@ function toDto(row: {
     qty: row.qty,
     orderType: row.orderType as OrderType,
     limitPrice: row.limitPrice,
+    ocoGroupId: row.ocoGroupId,
     status: row.status as ConditionalOrderDto["status"],
     triggeredOrderId: row.triggeredOrderId,
     triggerTradePrice: row.triggerTradePrice,

@@ -14,6 +14,8 @@ export interface ConditionalOrderDto {
   qty: number;
   orderType: OrderType;
   limitPrice: number | null;
+  /** OCO 짝 그룹. 같은 그룹의 한 행이 발동하면 나머지는 자동 취소 */
+  ocoGroupId: string | null;
   status: ConditionalOrderStatus;
   /** 발동 시 접수된 실제 주문 ID (접수 실패 시 null) */
   triggeredOrderId: string | null;

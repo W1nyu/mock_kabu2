@@ -163,6 +163,8 @@ model ConditionalOrder {
   /// 발동 시 접수할 주문 유형 (MARKET | LIMIT)
   orderType    String   @map("order_type")
   limitPrice   Int?     @map("limit_price")
+  /// OCO(One-Cancels-Other) 짝. 같은 그룹의 한 행이 발동하면 나머지 WAITING 행은 자동 취소
+  ocoGroupId   String?  @map("oco_group_id")
   status       String   @default("WAITING") // WAITING | TRIGGERED | CANCELED | FAILED
   triggeredOrderId  String?   @map("triggered_order_id")
   triggerTradePrice Int?      @map("trigger_trade_price")
@@ -173,6 +175,7 @@ model ConditionalOrder {
 
   @@index([symbol, status])
   @@index([accountId, createdAt])
+  @@index([ocoGroupId])
   @@map("conditional_orders")
   @@schema("order")
 }
