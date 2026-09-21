@@ -316,10 +316,14 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       if (hoveredTimeRef.current === time) setCrosshairCandle(cs[i]);
     };
 
+    // 언마운트/종목 전환 뒤 도착한 응답이나 tick이 제거된 차트를 건드리지 않게 한다.
+    let disposed = false;
+
     api<CandleDto[]>(`/market/candles/${symbol}?interval=${interval}&limit=${CANDLE_LIMIT}`, {
       auth: false,
     })
       .then((rows) => {
+        if (disposed) return;
         const cs: Candle[] = rows.map((c) => ({
           time: (new Date(c.ts).getTime() / 1000) as UTCTimestamp,
           open: c.open,
@@ -349,6 +353,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       .catch(() => {});
 
     const unsub = subscribe([`trades:${symbol}`], ({ data }) => {
+      if (disposed) return;
       // 오염된 페이로드가 차트를 죽이지 않도록 방어 (NaN이 들어가면 시리즈 전체가 깨짐)
       if (!Number.isFinite(data?.price) || !Number.isFinite(data?.ts)) return;
       const price: number = data.price;
@@ -371,12 +376,17 @@ export default function CandleChart({ symbol }: { symbol: string }) {
     });
 
     return () => {
+      disposed = true;
       unsub();
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
-      chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
       candlesRef.current = [];
+      // lightweight-charts는 paint를 rAF로 미루므로, 동기적으로 remove()하면 이미 예약된
+      // 프레임이 폐기된 캔버스를 그리다 "Object is disposed"를 던진다(StrictMode 이중 마운트,
+      // 봉 간격 전환). 먼저 숨겨 새 차트와 겹치지 않게 한 뒤 다음 프레임에 제거한다.
+      chart.chartElement().style.display = "none";
+      window.requestAnimationFrame(() => chart.remove());
     };
   }, [symbol, interval]);
 

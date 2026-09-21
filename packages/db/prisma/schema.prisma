@@ -75,6 +75,30 @@ model LedgerEntry {
   @@schema("account")
 }
 
+/// 매도 체결별 실현손익. 정산 컨슈머가 costBasis 비례 차감과 같은 트랜잭션에 기록한다.
+/// realized = 매도 대금 − 차감 원가. 누적 realized + 남은 costBasis = 총 매입원가.
+model RealizedPnl {
+  id          BigInt   @id @default(autoincrement())
+  accountId   String   @map("account_id")
+  symbol      String
+  /// 매도 체결 ID — 재정산돼도 두 번 기록되지 않는다
+  tradeId     String   @unique @map("trade_id")
+  qty         Int
+  price       Int
+  /// 이번 매도로 차감한 매입원가(원)
+  costBasis   BigInt   @map("cost_basis")
+  /// 실현손익(원) = price × qty − costBasis
+  realized    BigInt
+  /// 체결 시각 (event ts). KST 당일 집계 기준
+  tradedAt    DateTime @map("traded_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([accountId, tradedAt])
+  @@index([accountId, symbol])
+  @@map("realized_pnl")
+  @@schema("account")
+}
+
 /// 이벤트 중복 소비 방지 (정산 멱등성)
 model ProcessedEvent {
   eventId     String   @id @map("event_id")

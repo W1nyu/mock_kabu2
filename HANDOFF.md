@@ -1,4 +1,4 @@
-# HANDOFF — mock_kabu 작업 인수인계 (2026-07-13)
+# HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
 다른 AI 모델/세션이 이 프로젝트 작업을 이어받기 위한 문서. 프로젝트 개요·실행법은 [README.md](README.md), 원 기획은 `docs/superpowers/specs/2026-07-11-virtual-exchange-design.md` 참고.
 
@@ -47,7 +47,15 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 거래 페이지 포지션 바 + 청산 (최신 작업)
+## 2026-09-22 — 실현손익 추적 (최신 작업)
+
+- **DB**: migration `20260922090000_add_realized_pnl` → `account.realized_pnl` (계정·종목·`trade_id` unique·수량·가격·차감 원가·실현손익·체결시각). 정산 컨슈머(`apps/settlement/src/main.ts` `settleTrade`)가 매도자 `costBasis` 비례 차감과 **같은 트랜잭션**에 한 행을 남긴다. `trade_id` unique가 재전달을 한 번 더 막는다. 불변식: 누적 `realized` + 남은 `costBasis` = 총 매입원가.
+- **공통 계산**: `packages/shared/src/settlement.ts` `realizedPnlForSale()` — 컨슈머와 복구 플래너(`packages/db/scripts/settlement-recovery-plan.ts`, `plan.realizedPnl`)가 같은 BigInt 내림 규칙을 쓴다. 테스트: `apps/api/src/account/__tests__/settlement-state.test.ts`, `packages/db/scripts/__tests__/settlement-recovery-plan.node-test.ts`.
+- **API**: `GET /account/realized?limit=` → `{ today, todayQty, total, totalQty, bySymbol[], recent[] }` (KST 당일 경계는 `apps/api/src/common/market-time.ts` `koreaDayStart`, market summary와 공유). `GET /account/trades?limit=&symbol=` → 내 체결(매수/매도/자전, taker 여부, 매도 행에 `realized`·`costBasis`).
+- **웹**: 대시보드 hero에 "오늘 실현손익 / 누적 실현손익" 타일, `/orders`에 **주문 | 체결** 탭(체결 탭은 실현손익·수익률 열, 탭 선택은 `localStorage("orders:tab")`), 거래 페이지 포지션 바에 종목 누적 실현손익.
+- 주의: 테이블 도입 전의 매도는 행이 없어 집계에서 빠진다(의도). 봇 시드 보유(원가 0)의 매도는 대금 전체가 실현으로 잡히고 `realizedRate`는 null.
+
+## 거래 페이지 포지션 바 + 청산
 
 `apps/web/src/components/MyPosition.tsx` (신규) — 거래 페이지(`/symbol/{symbol}`)의 차트와 주문폼 사이에 배치. **해당 종목 보유가 있을 때만 렌더** (없으면 null).
 

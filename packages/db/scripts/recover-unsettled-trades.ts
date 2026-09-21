@@ -244,6 +244,9 @@ async function applyPlan(tx: Tx, plan: RecoveryPlan) {
   for (const entry of plan.ledgerEntries) {
     await tx.ledgerEntry.create({ data: entry });
   }
+  for (const row of plan.realizedPnl) {
+    await tx.realizedPnl.create({ data: row });
+  }
   for (const account of plan.accounts) {
     await tx.account.update({
       where: { id: account.id },

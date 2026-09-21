@@ -8,6 +8,7 @@ import {
   SYMBOLS,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
+import { koreaDayStart } from "../common/market-time";
 import { PRISMA, REDIS } from "../core/tokens";
 
 const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
@@ -165,9 +166,3 @@ export class MarketController {
   }
 }
 
-const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
-
-function koreaDayStart(now = Date.now()): Date {
-  const shifted = new Date(now + KST_OFFSET_MS);
-  return new Date(Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - KST_OFFSET_MS);
-}

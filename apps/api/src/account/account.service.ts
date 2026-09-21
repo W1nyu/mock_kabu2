@@ -8,6 +8,7 @@ import {
 import type { BalanceMutator } from "@mock-kabu/concurrency";
 import type { PrismaClient } from "@mock-kabu/db";
 import { SYMBOLS } from "@mock-kabu/shared";
+import { koreaDayStart } from "../common/market-time";
 import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
 
@@ -53,6 +54,108 @@ export class AccountService {
         avgCost: h.qty > 0 ? costBasis / h.qty : 0,
         pnl,
         pnlRate: costBasis > 0 ? pnl / costBasis : 0,
+      };
+    });
+  }
+
+  /**
+   * 실현손익 요약. 매도 체결마다 정산이 남긴 realized_pnl을 KST 당일/누적/종목별로 합산한다.
+   * 테이블 도입 전의 매도는 행이 없으므로 그 이전 손익은 포함되지 않는다.
+   */
+  async getRealizedPnl(accountId: string, limit = 50) {
+    const dayStart = koreaDayStart();
+    const [totals, bySymbol, recent] = await Promise.all([
+      this.prisma.$queryRaw<{ today: bigint; today_qty: bigint; total: bigint; total_qty: bigint }[]>`
+        SELECT
+          COALESCE(SUM(realized) FILTER (WHERE traded_at >= ${dayStart}), 0) AS today,
+          COALESCE(SUM(qty) FILTER (WHERE traded_at >= ${dayStart}), 0) AS today_qty,
+          COALESCE(SUM(realized), 0) AS total,
+          COALESCE(SUM(qty), 0) AS total_qty
+        FROM account.realized_pnl
+        WHERE account_id = ${accountId}
+      `,
+      this.prisma.realizedPnl.groupBy({
+        by: ["symbol"],
+        where: { accountId },
+        _sum: { realized: true, qty: true, costBasis: true },
+        orderBy: { symbol: "asc" },
+      }),
+      this.prisma.realizedPnl.findMany({
+        where: { accountId },
+        orderBy: { id: "desc" },
+        take: Math.min(Math.max(1, limit), 200),
+      }),
+    ]);
+    const row = totals[0];
+    return {
+      today: Number(row?.today ?? 0n),
+      todayQty: Number(row?.today_qty ?? 0n),
+      total: Number(row?.total ?? 0n),
+      totalQty: Number(row?.total_qty ?? 0n),
+      bySymbol: bySymbol.map((group) => {
+        const realized = Number(group._sum.realized ?? 0n);
+        const costBasis = Number(group._sum.costBasis ?? 0n);
+        return {
+          symbol: group.symbol,
+          qty: group._sum.qty ?? 0,
+          realized,
+          costBasis,
+          // 차감 원가 대비 수익률. 원가 0(레거시 시드 매도)은 정의하지 않는다.
+          realizedRate: costBasis > 0 ? realized / costBasis : null,
+        };
+      }),
+      recent: recent.map((entry) => ({
+        id: Number(entry.id),
+        symbol: entry.symbol,
+        tradeId: entry.tradeId,
+        qty: entry.qty,
+        price: entry.price,
+        costBasis: Number(entry.costBasis),
+        realized: Number(entry.realized),
+        tradedAt: entry.tradedAt,
+      })),
+    };
+  }
+
+  /** 내 체결 내역. 매수·매도 양쪽 원장을 계정 기준 한 줄로 합쳐 최신순으로 돌려준다. */
+  async getTrades(accountId: string, limit = 100, symbol?: string) {
+    const take = Math.min(Math.max(1, limit), 200);
+    const [trades, realized] = await Promise.all([
+      this.prisma.trade.findMany({
+        where: {
+          OR: [{ buyerAccountId: accountId }, { sellerAccountId: accountId }],
+          ...(symbol ? { symbol } : {}),
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take,
+      }),
+      this.prisma.realizedPnl.findMany({
+        where: { accountId, ...(symbol ? { symbol } : {}) },
+        orderBy: { id: "desc" },
+        take,
+        select: { tradeId: true, realized: true, costBasis: true },
+      }),
+    ]);
+    const realizedByTrade = new Map(realized.map((row) => [row.tradeId, row]));
+    return trades.map((trade) => {
+      const isBuyer = trade.buyerAccountId === accountId;
+      const isSeller = trade.sellerAccountId === accountId;
+      // 자기 체결은 매칭 엔진이 막지만, 만약 있다면 매수·매도 양쪽 원장이므로 SELF로 표시한다.
+      const side = isBuyer && isSeller ? "SELF" : isBuyer ? "BUY" : "SELL";
+      const realizedRow = isSeller ? realizedByTrade.get(trade.id) : undefined;
+      return {
+        tradeId: trade.id,
+        symbol: trade.symbol,
+        side,
+        price: trade.price,
+        qty: trade.qty,
+        amount: trade.price * trade.qty,
+        orderId: isBuyer ? trade.buyOrderId : trade.sellOrderId,
+        /** 내가 taker(주문을 넣어 체결시킨 쪽)였는지 */
+        taker: trade.takerSide === (isBuyer ? "BUY" : "SELL"),
+        realized: realizedRow ? Number(realizedRow.realized) : null,
+        costBasis: realizedRow ? Number(realizedRow.costBasis) : null,
+        ts: trade.createdAt.getTime(),
       };
     });
   }

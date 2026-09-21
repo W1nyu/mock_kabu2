@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { api, fmt, getToken, getUser } from "@/lib/api";
+import { api, fmt, getToken, getUser, won } from "@/lib/api";
 import { formatKstTime, MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 
@@ -16,6 +16,19 @@ interface OrderRow {
   filledQty: number;
   status: string;
   createdAt: string;
+}
+
+interface FillRow {
+  tradeId: string;
+  symbol: string;
+  side: "BUY" | "SELL" | "SELF";
+  price: number;
+  qty: number;
+  amount: number;
+  taker: boolean;
+  realized: number | null;
+  costBasis: number | null;
+  ts: number;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -33,12 +46,44 @@ const STATUS_TONE: Record<string, string> = {
   PARTIAL: "chip-down",
 };
 
+type Tab = "orders" | "fills";
+
+const TABS: { id: Tab; label: string; hint: string }[] = [
+  { id: "orders", label: "주문", hint: "최근 100건의 주문을 실시간으로 반영합니다." },
+  { id: "fills", label: "체결", hint: "최근 100건의 체결과 매도 실현손익을 실시간으로 반영합니다." },
+];
+
+const TAB_STORAGE_KEY = "orders:tab";
+
 export default function OrdersPage() {
   const router = useRouter();
+  const [tab, setTab] = useState<Tab>("orders");
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [fills, setFills] = useState<FillRow[]>([]);
+
   const load = useCallback(() => {
     api<OrderRow[]>("/orders?limit=100").then(setOrders).catch(() => {});
+    api<FillRow[]>("/account/trades?limit=100").then(setFills).catch(() => {});
   }, []);
+
+  // localStorage는 마운트 후에만 읽는다 — useState 초기값에서 읽으면 hydration mismatch.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(TAB_STORAGE_KEY);
+      if (saved === "orders" || saved === "fills") setTab(saved);
+    } catch {
+      // 비공개 창 등에서 storage 접근이 막혀도 기본 탭으로 동작한다.
+    }
+  }, []);
+
+  function selectTab(next: Tab) {
+    setTab(next);
+    try {
+      window.localStorage.setItem(TAB_STORAGE_KEY, next);
+    } catch {
+      // ignore
+    }
+  }
 
   useEffect(() => {
     if (!getToken()) {
@@ -56,68 +101,171 @@ export default function OrdersPage() {
     };
   }, [load, router]);
 
+  const current = TABS.find((t) => t.id === tab) ?? TABS[0];
+
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">주문 내역</h1>
-        <p className="mt-1 text-sm text-ink-muted">최근 100건의 주문을 실시간으로 반영합니다.</p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {tab === "orders" ? "주문 내역" : "체결 내역"}
+          </h1>
+          <p className="mt-1 text-sm text-ink-muted">{current.hint}</p>
+        </div>
+        <div className="well flex gap-0.5 p-0.5" role="tablist" aria-label="내역 종류">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => selectTab(t.id)}
+              className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
+                tab === t.id
+                  ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
+                  : "text-ink-muted hover:bg-white/6 hover:text-ink"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="glass overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="tbl tbl-hover">
-            <thead>
-              <tr>
-                <th>시각 ({MARKET_TIME_ZONE_LABEL})</th>
-                <th>종목</th>
-                <th>구분</th>
-                <th className="text-right">가격</th>
-                <th className="text-right">체결/수량</th>
-                <th className="text-right">상태</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((o) => (
-                <tr key={o.id}>
-                  <td className="num whitespace-nowrap text-ink-muted">
-                    {formatKstTime(new Date(o.createdAt).getTime())}
-                  </td>
-                  <td className="font-semibold">{o.symbol}</td>
-                  <td>
-                    <span
-                      className={`font-medium ${o.side === "BUY" ? "text-up" : "text-down"}`}
-                    >
-                      {o.side === "BUY" ? "매수" : "매도"}
-                    </span>
-                    <span className="ml-1.5 text-xs text-ink-faint">
-                      {o.type === "LIMIT" ? "지정가" : "시장가"}
-                    </span>
-                  </td>
-                  <td className="num text-right">
-                    {o.price != null ? fmt.format(o.price) : "—"}
-                  </td>
-                  <td className="num text-right">
-                    {fmt.format(o.filledQty)}
-                    <span className="text-ink-faint">/{fmt.format(o.qty)}</span>
-                  </td>
-                  <td className="text-right">
-                    <span className={`chip ${STATUS_TONE[o.status] ?? ""}`}>
-                      {STATUS_LABEL[o.status] ?? o.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {orders.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="py-14 text-center text-sm text-ink-faint">
-                    주문 내역이 없습니다
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          {tab === "orders" ? <OrdersTable orders={orders} /> : <FillsTable fills={fills} />}
         </div>
       </div>
     </div>
+  );
+}
+
+function OrdersTable({ orders }: { orders: OrderRow[] }) {
+  return (
+    <table className="tbl tbl-hover">
+      <thead>
+        <tr>
+          <th>시각 ({MARKET_TIME_ZONE_LABEL})</th>
+          <th>종목</th>
+          <th>구분</th>
+          <th className="text-right">가격</th>
+          <th className="text-right">체결/수량</th>
+          <th className="text-right">상태</th>
+        </tr>
+      </thead>
+      <tbody>
+        {orders.map((o) => (
+          <tr key={o.id}>
+            <td className="num whitespace-nowrap text-ink-muted">
+              {formatKstTime(new Date(o.createdAt).getTime())}
+            </td>
+            <td className="font-semibold">{o.symbol}</td>
+            <td>
+              <span className={`font-medium ${o.side === "BUY" ? "text-up" : "text-down"}`}>
+                {o.side === "BUY" ? "매수" : "매도"}
+              </span>
+              <span className="ml-1.5 text-xs text-ink-faint">
+                {o.type === "LIMIT" ? "지정가" : "시장가"}
+              </span>
+            </td>
+            <td className="num text-right">{o.price != null ? fmt.format(o.price) : "—"}</td>
+            <td className="num text-right">
+              {fmt.format(o.filledQty)}
+              <span className="text-ink-faint">/{fmt.format(o.qty)}</span>
+            </td>
+            <td className="text-right">
+              <span className={`chip ${STATUS_TONE[o.status] ?? ""}`}>
+                {STATUS_LABEL[o.status] ?? o.status}
+              </span>
+            </td>
+          </tr>
+        ))}
+        {orders.length === 0 && (
+          <tr>
+            <td colSpan={6} className="py-14 text-center text-sm text-ink-faint">
+              주문 내역이 없습니다
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+const SIDE_LABEL: Record<FillRow["side"], string> = { BUY: "매수", SELL: "매도", SELF: "자전" };
+
+function FillsTable({ fills }: { fills: FillRow[] }) {
+  return (
+    <table className="tbl tbl-hover">
+      <thead>
+        <tr>
+          <th>시각 ({MARKET_TIME_ZONE_LABEL})</th>
+          <th>종목</th>
+          <th>구분</th>
+          <th className="text-right">체결가</th>
+          <th className="text-right">수량</th>
+          <th className="text-right">체결금액</th>
+          <th className="text-right" title="매도 체결에서 평단가 대비 확정된 손익">
+            실현손익
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {fills.map((f) => {
+          const sideTone = f.side === "BUY" ? "text-up" : f.side === "SELL" ? "text-down" : "text-ink-muted";
+          return (
+            <tr key={f.tradeId}>
+              <td className="num whitespace-nowrap text-ink-muted">{formatKstTime(f.ts)}</td>
+              <td className="font-semibold">{f.symbol}</td>
+              <td>
+                <span className={`font-medium ${sideTone}`}>{SIDE_LABEL[f.side]}</span>
+                <span
+                  className="ml-1.5 text-xs text-ink-faint"
+                  title={f.taker ? "내 주문이 기존 호가를 체결시켰습니다" : "내 호가에 상대 주문이 체결됐습니다"}
+                >
+                  {f.taker ? "테이커" : "메이커"}
+                </span>
+              </td>
+              <td className="num text-right">{fmt.format(f.price)}</td>
+              <td className="num text-right">{fmt.format(f.qty)}</td>
+              <td className="num text-right">{won(f.amount)}</td>
+              <td className="num text-right">
+                {f.realized == null ? (
+                  <span className="text-ink-faint">—</span>
+                ) : (
+                  <RealizedCell realized={f.realized} costBasis={f.costBasis} />
+                )}
+              </td>
+            </tr>
+          );
+        })}
+        {fills.length === 0 && (
+          <tr>
+            <td colSpan={7} className="py-14 text-center text-sm text-ink-faint">
+              체결 내역이 없습니다
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+function RealizedCell({ realized, costBasis }: { realized: number; costBasis: number | null }) {
+  const tone = realized > 0 ? "text-up" : realized < 0 ? "text-down" : "text-ink-muted";
+  const sign = realized > 0 ? "+" : "";
+  const rate = costBasis && costBasis > 0 ? (realized / costBasis) * 100 : null;
+  return (
+    <span className={`font-medium ${tone}`}>
+      {sign}
+      {won(realized)}
+      {rate != null && (
+        <span className="ml-1 text-xs opacity-80">
+          ({sign}
+          {rate.toFixed(2)}%)
+        </span>
+      )}
+    </span>
   );
 }

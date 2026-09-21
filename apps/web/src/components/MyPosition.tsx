@@ -14,9 +14,14 @@ interface HoldingRow {
   avgCost: number;
 }
 
+interface RealizedSummary {
+  bySymbol: { symbol: string; realized: number; qty: number; realizedRate: number | null }[];
+}
+
 /** 해당 종목 보유 포지션 요약 — 평단가·실시간 수익률·청산. 포지션이 없으면 렌더하지 않음 */
 export default function MyPosition({ symbol }: { symbol: string }) {
   const [holding, setHolding] = useState<HoldingRow | null>(null);
+  const [realized, setRealized] = useState<number | null>(null);
   const [livePrice, setLivePrice] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -27,10 +32,17 @@ export default function MyPosition({ symbol }: { symbol: string }) {
     api<HoldingRow[]>("/account/holdings")
       .then((rows) => setHolding(rows.find((h) => h.symbol === symbol && h.qty > 0) ?? null))
       .catch(() => {});
+    api<RealizedSummary>("/account/realized?limit=1")
+      .then((summary) => {
+        const row = summary.bySymbol.find((entry) => entry.symbol === symbol);
+        setRealized(row && row.qty > 0 ? row.realized : null);
+      })
+      .catch(() => {});
   }, [symbol]);
 
   useEffect(() => {
     setHolding(null);
+    setRealized(null);
     setLivePrice(null);
     setConfirming(false);
     setMessage(null);
@@ -106,6 +118,17 @@ export default function MyPosition({ symbol }: { symbol: string }) {
           {(pnlRate * 100).toFixed(2)}%)
         </span>
       </Item>
+      {realized != null && (
+        <Item label="실현손익">
+          <span
+            className={`font-semibold ${realized > 0 ? "text-up" : realized < 0 ? "text-down" : ""}`}
+            title="이 종목의 매도 체결에서 지금까지 확정된 손익 합계"
+          >
+            {realized > 0 ? "+" : ""}
+            {won(realized)}
+          </span>
+        </Item>
+      )}
       <div className="ml-auto flex items-center gap-3">
         {message && <span className="text-xs text-ink-muted">{message}</span>}
         <button

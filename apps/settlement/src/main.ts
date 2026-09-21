@@ -9,6 +9,7 @@ import {
   STREAMS,
   WORKERS,
   closeMustWaitForTrades,
+  realizedPnlForSale,
   stateAfterClose,
   stateAfterTrade,
   type OrderClosedEvent,
@@ -372,16 +373,26 @@ class SettlementWorker {
       const sellerHolding = await ctx.tx.holding.findUniqueOrThrow({
         where: { accountId_symbol: { accountId: event.sellerAccountId, symbol: event.symbol } },
       });
-      const basisReduction =
-        sellerHolding.qty > 0
-          ? (sellerHolding.costBasis * BigInt(event.qty)) / BigInt(sellerHolding.qty)
-          : 0n;
+      const sale = realizedPnlForSale(sellerHolding, event.qty, event.price);
       await ctx.tx.holding.update({
         where: { accountId_symbol: { accountId: event.sellerAccountId, symbol: event.symbol } },
         data: {
           qty: { decrement: event.qty },
           holdQty: { decrement: event.qty },
-          costBasis: { decrement: basisReduction },
+          costBasis: { decrement: sale.basisReduction },
+        },
+      });
+      // 실현손익은 원가 차감과 같은 트랜잭션에 남긴다. tradeId unique가 재전달을 한 번 더 막는다.
+      await ctx.tx.realizedPnl.create({
+        data: {
+          accountId: event.sellerAccountId,
+          symbol: event.symbol,
+          tradeId: event.tradeId,
+          qty: event.qty,
+          price: event.price,
+          costBasis: sale.basisReduction,
+          realized: sale.realized,
+          tradedAt: new Date(event.ts),
         },
       });
 

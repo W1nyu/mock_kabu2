@@ -33,6 +33,12 @@ interface SymbolRow {
   lastPrice: number;
   initialPrice: number;
 }
+interface RealizedSummary {
+  today: number;
+  todayQty: number;
+  total: number;
+  totalQty: number;
+}
 interface MarketSummary {
   turnover: number | string | null;
   lastTradeTs: number | string | null;
@@ -69,6 +75,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
+  const [realized, setRealized] = useState<RealizedSummary | null>(null);
   const [symbols, setSymbols] = useState<SymbolRow[]>([]);
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [turnovers, setTurnovers] = useState<Record<string, number>>({});
@@ -79,6 +86,7 @@ export default function DashboardPage() {
   const refreshAccount = useCallback(() => {
     api<AccountInfo>("/account").then(setAccount).catch(() => {});
     api<HoldingRow[]>("/account/holdings").then(setHoldings).catch(() => {});
+    api<RealizedSummary>("/account/realized?limit=1").then(setRealized).catch(() => {});
   }, []);
 
   const refreshSymbols = useCallback(() => {
@@ -245,10 +253,22 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-5">
             <Metric label="현금 잔액" value={won(account?.balance ?? 0)} />
             <Metric label="주문 가능" value={won(account?.available ?? 0)} />
             <Metric label="주식 평가금액" value={won(stockValue)} />
+            <Metric
+              label="오늘 실현손익"
+              value={realized ? signedWon(realized.today) : "—"}
+              tone={realized ? toneOf(realized.today) : undefined}
+              title="KST 당일 매도 체결에서 평단가 대비 확정된 손익"
+            />
+            <Metric
+              label="누적 실현손익"
+              value={realized ? signedWon(realized.total) : "—"}
+              tone={realized ? toneOf(realized.total) : undefined}
+              title="지금까지의 모든 매도 체결에서 확정된 손익 합계"
+            />
           </dl>
         </div>
 
@@ -421,11 +441,33 @@ export default function DashboardPage() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function signedWon(n: number): string {
+  return `${n > 0 ? "+" : ""}${won(n)}`;
+}
+
+function toneOf(n: number): "up" | "down" | undefined {
+  return n > 0 ? "up" : n < 0 ? "down" : undefined;
+}
+
+function Metric({
+  label,
+  value,
+  tone,
+  title,
+}: {
+  label: string;
+  value: string;
+  tone?: "up" | "down";
+  title?: string;
+}) {
+  const color = tone === "up" ? "text-up" : tone === "down" ? "text-down" : "";
   return (
-    <div className="border-l border-hairline-soft pl-4 first:border-l-0 first:pl-0 sm:border-l sm:pl-4">
+    <div
+      title={title}
+      className="border-l border-hairline-soft pl-4 first:border-l-0 first:pl-0 sm:border-l sm:pl-4"
+    >
       <dt className="text-[11px] tracking-wide text-ink-muted uppercase">{label}</dt>
-      <dd className="num mt-1 text-lg font-semibold">{value}</dd>
+      <dd className={`num mt-1 text-base font-semibold whitespace-nowrap ${color}`}>{value}</dd>
     </div>
   );
 }

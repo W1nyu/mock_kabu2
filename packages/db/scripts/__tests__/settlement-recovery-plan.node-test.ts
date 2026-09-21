@@ -112,6 +112,19 @@ test("plans a normal trade with ledger, reservation, holding, and order updates"
     { id: "buy-order", filledQty: 10, status: "FILLED" },
     { id: "sell-order", filledQty: 10, status: "FILLED" },
   ]);
+  // 800원 원가의 10주 전량 매도 → 원가 800 차감, 실현 900 − 800 = 100
+  assert.deepEqual(plan.realizedPnl, [
+    {
+      accountId: SELLER,
+      symbol: SYMBOL,
+      tradeId: "trade-1",
+      qty: 10,
+      price: 90,
+      costBasis: 800n,
+      realized: 100n,
+      tradedAt: new Date("2026-07-12T00:00:00.000Z"),
+    },
+  ]);
 });
 
 test("mirrors normal settlement semantics for a self trade", () => {

@@ -18,6 +18,20 @@ export class AccountController {
     return this.account.getHoldings(user.accountId);
   }
 
+  @Get("realized")
+  getRealizedPnl(@CurrentUser() user: JwtUser, @Query("limit") limit?: string) {
+    return this.account.getRealizedPnl(user.accountId, limit ? Number(limit) : undefined);
+  }
+
+  @Get("trades")
+  getTrades(
+    @CurrentUser() user: JwtUser,
+    @Query("limit") limit?: string,
+    @Query("symbol") symbol?: string,
+  ) {
+    return this.account.getTrades(user.accountId, limit ? Number(limit) : undefined, symbol || undefined);
+  }
+
   @Get("ledger")
   getLedger(@CurrentUser() user: JwtUser, @Query("limit") limit?: string) {
     return this.account.getLedger(user.accountId, limit ? Number(limit) : undefined);

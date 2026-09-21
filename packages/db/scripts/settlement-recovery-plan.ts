@@ -120,6 +120,18 @@ export interface ReservationHoldingAdjustment {
   toHoldQty: number;
 }
 
+/** Realized profit/loss row the normal settlement consumer writes per sell fill. */
+export interface PlannedRealizedPnl {
+  accountId: string;
+  symbol: string;
+  tradeId: string;
+  qty: number;
+  price: number;
+  costBasis: bigint;
+  realized: bigint;
+  tradedAt: Date;
+}
+
 export interface AffectedCandleBucket {
   symbol: string;
   /** UTC minute boundary; PostgreSQL timestamps are stored without a zone. */
@@ -135,6 +147,7 @@ export interface RecoveryPlan {
   settledTradeIds: string[];
   processedEventIds: string[];
   ledgerEntries: PlannedLedgerEntry[];
+  realizedPnl: PlannedRealizedPnl[];
   accounts: PlannedAccount[];
   holdings: PlannedHolding[];
   orders: PlannedOrder[];
@@ -244,6 +257,7 @@ function buildSettlementPlan(input: RecoveryInput): SettlementPlan {
   }
   const initialHoldings = new Map(holdingStates);
   const ledgerEntries: PlannedLedgerEntry[] = [];
+  const realizedPnl: PlannedRealizedPnl[] = [];
   const settledTradeIds: string[] = [];
   const bucketByKey = new Map<string, AffectedCandleBucket>();
 
@@ -432,6 +446,16 @@ function buildSettlementPlan(input: RecoveryInput): SettlementPlan {
         sellerHoldingAfter.qty -= trade.qty;
         sellerHoldingAfter.holdQty -= trade.qty;
         sellerHoldingAfter.costBasis -= basisReduction;
+        realizedPnl.push({
+          accountId: trade.sellerAccountId,
+          symbol: trade.symbol,
+          tradeId: trade.id,
+          qty: trade.qty,
+          price: trade.price,
+          costBasis: basisReduction,
+          realized: BigInt(trade.price) * BigInt(trade.qty) - basisReduction,
+          tradedAt: trade.createdAt,
+        });
         if (
           sellerHoldingAfter.qty < 0 ||
           sellerHoldingAfter.holdQty < 0 ||
@@ -523,6 +547,7 @@ function buildSettlementPlan(input: RecoveryInput): SettlementPlan {
     settledTradeIds,
     processedEventIds: [...settledTradeIds],
     ledgerEntries,
+    realizedPnl,
     accounts,
     holdings,
     orders: plannedOrders,
