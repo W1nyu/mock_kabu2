@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, getToken, getUser, won } from "@/lib/api";
+import DailyPerformance from "@/components/DailyPerformance";
 import EquityChart from "@/components/EquityChart";
 import Leaderboard from "@/components/Leaderboard";
 import PerformanceCard, { type RealizedStats } from "@/components/PerformanceCard";
@@ -435,8 +436,11 @@ export default function DashboardPage() {
         <NewsList items={news} emptyLabel="아직 뉴스가 없습니다" />
       </section>
 
-      {/* ── Leaderboard ────────────────────────────────────────── */}
-      <Leaderboard />
+      {/* ── Leaderboard + daily performance ────────────────────── */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Leaderboard />
+        <DailyPerformance />
+      </div>
 
       {/* ── Holdings ───────────────────────────────────────────── */}
       <section className="glass overflow-hidden">

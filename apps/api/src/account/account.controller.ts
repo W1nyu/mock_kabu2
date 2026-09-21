@@ -48,6 +48,12 @@ export class AccountController {
     return this.account.getLeaderboard(user.accountId, limit ? Number(limit) : undefined);
   }
 
+  /** KST 일별 성과 (종가 자산·전일 대비·실현손익). 최신순. */
+  @Get("daily")
+  getDaily(@CurrentUser() user: JwtUser, @Query("days") days?: string) {
+    return this.equity.daily(user.accountId, days ? Number(days) : undefined);
+  }
+
   @Get("ledger")
   getLedger(@CurrentUser() user: JwtUser, @Query("limit") limit?: string) {
     return this.account.getLedger(user.accountId, limit ? Number(limit) : undefined);

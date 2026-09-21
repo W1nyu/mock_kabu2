@@ -13,6 +13,18 @@ const COMPACT_TIERS: { olderThanMs: number; keepEverySeconds: number }[] = [
 
 export type EquityRange = "1d" | "1w" | "all";
 
+export interface DailyPerformance {
+  /** KST 기준 날짜 YYYY-MM-DD */
+  date: string;
+  closeEquity: number | null;
+  closeCash: number | null;
+  /** 전일 종가 자산 대비 증감. 전일 스냅샷이 없으면 null */
+  change: number | null;
+  changeRate: number | null;
+  realized: number;
+  fills: number;
+}
+
 export interface EquityPoint {
   ts: number;
   cash: number;
@@ -136,6 +148,70 @@ export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
       console.error("[equity] snapshot failed", error);
       return 0;
     }
+  }
+
+  /**
+   * KST 일별 성과. 하루의 마지막 스냅샷을 종가 자산으로, 전일 종가 대비 증감과 그날의
+   * 실현손익·매도 체결 수를 합친다. 첫날은 전일이 없어 증감을 정의하지 않는다.
+   */
+  async daily(accountId: string, days = 30): Promise<DailyPerformance[]> {
+    const take = Math.min(Math.max(1, days), 365);
+    const rows = await this.prisma.$queryRaw<
+      {
+        day: Date;
+        close_equity: bigint | null;
+        close_cash: bigint | null;
+        realized: bigint;
+        fills: bigint;
+      }[]
+    >`
+      WITH eq AS (
+        SELECT DISTINCT ON (day) day, equity, cash
+        FROM (
+          SELECT date_trunc('day', ts + interval '9 hours') AS day, ts, equity, cash
+          FROM account.equity_snapshots
+          WHERE account_id = ${accountId}
+        ) s
+        ORDER BY day DESC, ts DESC
+      ),
+      pnl AS (
+        SELECT date_trunc('day', traded_at + interval '9 hours') AS day,
+          SUM(realized) AS realized, COUNT(*) AS fills
+        FROM account.realized_pnl
+        WHERE account_id = ${accountId}
+        GROUP BY 1
+      )
+      SELECT
+        COALESCE(eq.day, pnl.day) AS day,
+        eq.equity AS close_equity,
+        eq.cash AS close_cash,
+        COALESCE(pnl.realized, 0) AS realized,
+        COALESCE(pnl.fills, 0) AS fills
+      FROM eq
+      FULL OUTER JOIN pnl ON pnl.day = eq.day
+      ORDER BY day DESC
+      LIMIT ${take + 1}
+    `;
+    // 오래된 순으로 전일 종가를 이어 붙인 뒤 최신순으로 돌려준다. LIMIT +1은 첫 표시일의 전일용.
+    const ascending = [...rows].reverse();
+    const out: DailyPerformance[] = [];
+    let previousClose: number | null = null;
+    for (const row of ascending) {
+      const closeEquity = row.close_equity != null ? Number(row.close_equity) : null;
+      const change = closeEquity != null && previousClose != null ? closeEquity - previousClose : null;
+      out.push({
+        // KST 자정으로 맞춘 시각을 UTC 기준으로 되돌려 YYYY-MM-DD를 만든다.
+        date: new Date(row.day.getTime()).toISOString().slice(0, 10),
+        closeEquity,
+        closeCash: row.close_cash != null ? Number(row.close_cash) : null,
+        change,
+        changeRate: change != null && previousClose ? change / previousClose : null,
+        realized: Number(row.realized),
+        fills: Number(row.fills),
+      });
+      if (closeEquity != null) previousClose = closeEquity;
+    }
+    return out.slice(-take).reverse();
   }
 
   async series(accountId: string, range: EquityRange): Promise<EquityPoint[]> {
