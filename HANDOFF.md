@@ -47,7 +47,13 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 계정 설정 (최신 작업)
+## 2026-09-22 — API 하드닝 (최신 작업)
+
+- **주문 상한**: shared `MAX_ORDER_QTY`(1천만 주)·`MAX_ORDER_PRICE`(10억 원). DB price/qty가 Int32라 상한 없이는 이상 주문이 호가창을 왜곡한다. `OrderService.place`에서 400.
+- **주문 멱등성**: `POST /orders`에 `Idempotency-Key` 헤더(1~128자)를 주면 `placeIdempotent()`가 Redis `SET NX EX 86400`로 키를 선점하고, 같은 키의 재시도에는 기존 주문을 `idempotentReplay:true`와 함께 돌려준다(접수 실패 시 키 삭제, 동시 재시도는 최대 2초 대기). 웹 주문폼은 제출마다 `newIdempotencyKey()`를 보낸다(더블 클릭·재시도 보호). 키 `KEYS.orderIdempotency`.
+- **로그인 무차별 대입 완화**: `LoginRateLimitGuard`(`POST /auth/login`)가 IP+이메일당 60초 창 10회 초과 시 429. Redis `INCR/EXPIRE`(`KEYS.loginAttempts`)라 복제본 간 공유, Redis 장애 시 허용(가용성 우선). 봇 20계정은 이메일이 달라 영향 없음.
+
+## 2026-09-22 — 계정 설정
 
 - `PATCH /auth/me {nickname}`(1~20자, 새 token/user 발급 — 닉네임이 JWT에 들어 있어서)와 `POST /auth/password {currentPassword, newPassword}`(현재 비밀번호 검증, 4자 이상).
 - 웹 `/settings` 페이지: 닉네임 저장은 `saveSession()`으로 세션을 갈아 끼우고, `lib/api.ts`의 새 `onSessionChange()`를 Nav가 구독해 경로 이동 없이 우상단 칩이 바뀐다. 진입은 **Nav 우상단 사용자 칩 클릭**뿐 — 기본 메뉴 목록(LEGACY MENU LOCK)은 그대로.

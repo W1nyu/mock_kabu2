@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Header,
+  Headers,
   Param,
   Patch,
   Post,
@@ -29,11 +30,18 @@ export class OrderController {
    * 커밋된 뒤 별도로 저장되므로, 잘못된 bracket은 주문 전에 미리 검증해 둘 다 거부한다.
    */
   @Post()
-  async place(@CurrentUser() user: JwtUser, @Body() body: PlaceOrderDto & { bracket?: BracketSpec }) {
+  async place(
+    @CurrentUser() user: JwtUser,
+    @Body() body: PlaceOrderDto & { bracket?: BracketSpec },
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
     const spec = body.bracket ? BracketService.validateSpec(body.bracket) : null;
     if (spec && body.side !== "BUY") throw new BadRequestException("자동 손절/익절은 매수 주문에만 붙일 수 있습니다");
-    const order = await this.orders.place(user.accountId, body);
-    if (!spec) return order;
+    // Idempotency-Key 헤더(1~128자)가 있으면 재시도가 두 번째 주문을 만들지 않는다.
+    const key = idempotencyKey?.trim();
+    if (key != null && (key.length === 0 || key.length > 128)) throw new BadRequestException("Idempotency-Key는 1~128자");
+    const order = key ? await this.orders.placeIdempotent(user.accountId, body, key) : await this.orders.place(user.accountId, body);
+    if (!spec || (order as { idempotentReplay?: boolean }).idempotentReplay) return order;
     const intent = await this.bracket.attach(user.accountId, order.id, order.symbol, spec);
     return { ...order, bracket: intent };
   }

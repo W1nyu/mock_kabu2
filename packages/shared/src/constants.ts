@@ -19,6 +19,13 @@ export const SYMBOLS: SymbolDef[] = [
   { symbol: "NEKO", name: "네코물산", initialPrice: 25_000, tickSize: 50 },
 ];
 
+/**
+ * 주문 한 건의 상한. DB의 price/qty는 32비트 정수이고 체결 금액은 BigInt로 계산하므로,
+ * 여기서 막지 않으면 오버플로가 아니라 "말이 안 되는" 주문(수억 주)이 호가창을 왜곡한다.
+ */
+export const MAX_ORDER_QTY = 10_000_000;
+export const MAX_ORDER_PRICE = 1_000_000_000;
+
 /** 종목의 호가 단위. 모르는 종목이면 null. */
 export function tickSizeOf(symbol: string): number | null {
   return SYMBOLS.find((definition) => definition.symbol === symbol)?.tickSize ?? null;
@@ -83,6 +90,10 @@ export const KEYS = {
   workerHealth: (worker: string) => redisKey(`heartbeat-status:${worker}`),
   /** 단일 writer 워커의 token-guarded Redis leader lease */
   leaderLease: (worker: string) => redisKey(`lease:${worker}`),
+  /** 로그인 시도 카운터 (IP+이메일, 짧은 TTL) */
+  loginAttempts: (source: string) => redisKey(`ratelimit:login:${source}`),
+  /** 주문 멱등 키 → 주문 ID (24시간 TTL) */
+  orderIdempotency: (accountId: string, key: string) => redisKey(`idempotency:order:${accountId}:${key}`),
 } as const;
 
 /** Names used for worker heartbeats and operational health reports. */

@@ -12,7 +12,7 @@ import {
   type TriggerDirection,
 } from "@mock-kabu/shared";
 import { useEffect, useState } from "react";
-import { api, fmt, getUser, won } from "@/lib/api";
+import { api, fmt, getUser, newIdempotencyKey, won } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 
 interface AccountInfo {
@@ -137,6 +137,7 @@ export default function OrderForm({
       } else {
         await api("/orders", {
           method: "POST",
+          headers: { "idempotency-key": newIdempotencyKey() },
           body: {
             symbol,
             side,

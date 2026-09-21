@@ -56,9 +56,9 @@ export class ApiError extends Error {
 
 export async function api<T = unknown>(
   path: string,
-  options: { method?: string; body?: unknown; auth?: boolean } = {},
+  options: { method?: string; body?: unknown; auth?: boolean; headers?: Record<string, string> } = {},
 ): Promise<T> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = { "content-type": "application/json", ...(options.headers ?? {}) };
   if (options.auth !== false) {
     const token = getToken();
     if (token) headers.authorization = `Bearer ${token}`;
@@ -79,6 +79,13 @@ export async function api<T = unknown>(
     throw new ApiError(res.status, message);
   }
   return res.json() as Promise<T>;
+}
+
+/** 주문 재시도가 두 번째 주문을 만들지 않도록 제출마다 새로 만드는 멱등 키. */
+export function newIdempotencyKey(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export const fmt = new Intl.NumberFormat("ko-KR");

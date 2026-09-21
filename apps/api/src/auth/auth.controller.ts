@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Patch, Post, UseGuards } from "@nestjs/common";
 import { AuthService, type JwtUser } from "./auth.service";
+import { LoginRateLimitGuard } from "./login-rate-limit.guard";
 import { CurrentUser, JwtAuthGuard } from "./jwt-auth.guard";
 
 @Controller("auth")
@@ -12,6 +13,7 @@ export class AuthController {
   }
 
   @Post("login")
+  @UseGuards(LoginRateLimitGuard)
   login(@Body() body: { email: string; password: string }) {
     return this.auth.login(body.email, body.password);
   }

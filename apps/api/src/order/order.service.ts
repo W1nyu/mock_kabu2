@@ -12,6 +12,8 @@ import type { PrismaClient } from "@mock-kabu/db";
 import {
   KEYS,
   MARKET_BUY_HOLD_FACTOR,
+  MAX_ORDER_PRICE,
+  MAX_ORDER_QTY,
   SYMBOLS,
   isOnTick,
   tickSizeOf,
@@ -41,6 +43,7 @@ export interface MyOrdersFilter {
 }
 
 const LIVE_ORDER_STATUSES = ["OPEN", "PARTIAL"];
+const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
 
 @Injectable()
 export class OrderService {
@@ -52,6 +55,41 @@ export class OrderService {
     private outboxRelayer?: OutboxRelayer,
   ) {}
 
+  /**
+   * 멱등 키가 있으면 같은 키로 이미 접수된 주문을 돌려준다. 키 선점(SET NX)은 접수 전에 하고,
+   * 접수가 실패하면 키를 지워 클라이언트가 같은 키로 다시 시도할 수 있게 한다.
+   */
+  async placeIdempotent(accountId: string, dto: PlaceOrderDto, idempotencyKey: string) {
+    const key = KEYS.orderIdempotency(accountId, idempotencyKey);
+    const claimed = await this.redis.set(key, "pending", "EX", IDEMPOTENCY_TTL_SECONDS, "NX");
+    if (claimed !== "OK") {
+      const existing = await this.waitForIdempotentOrder(key);
+      if (existing) return { ...existing, idempotentReplay: true };
+      throw new UnprocessableEntityException("같은 멱등 키의 주문이 아직 처리 중입니다. 잠시 후 다시 조회하세요");
+    }
+    try {
+      const order = await this.place(accountId, dto);
+      await this.redis.set(key, order.id, "EX", IDEMPOTENCY_TTL_SECONDS);
+      return order;
+    } catch (error) {
+      await this.redis.del(key).catch(() => {});
+      throw error;
+    }
+  }
+
+  private async waitForIdempotentOrder(key: string) {
+    // 동시에 들어온 재시도는 첫 요청이 주문 ID를 쓰기까지 잠깐 기다린다.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const value = await this.redis.get(key);
+      if (value && value !== "pending") {
+        return this.prisma.order.findUnique({ where: { id: value } });
+      }
+      if (value == null) return null;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return null;
+  }
+
   /** 주문 접수 — 잔액/보유 홀드(락 적용) + orders/outbox 동일 트랜잭션 (스펙 3.2의 1~2단계) */
   async place(accountId: string, dto: PlaceOrderDto) {
     const { symbol, side, type } = dto;
@@ -61,8 +99,12 @@ export class OrderService {
     if (!["BUY", "SELL"].includes(side)) throw new BadRequestException("side는 BUY/SELL");
     if (!["LIMIT", "MARKET"].includes(type)) throw new BadRequestException("type은 LIMIT/MARKET");
     if (!Number.isInteger(qty) || qty <= 0) throw new BadRequestException("수량은 양의 정수");
+    if (qty > MAX_ORDER_QTY) throw new BadRequestException(`한 주문의 수량은 ${MAX_ORDER_QTY.toLocaleString("ko-KR")}주까지입니다`);
     if (type === "LIMIT" && (!Number.isInteger(price) || price! <= 0)) {
       throw new BadRequestException("지정가는 양의 정수");
+    }
+    if (type === "LIMIT" && price! > MAX_ORDER_PRICE) {
+      throw new BadRequestException(`지정가는 ${MAX_ORDER_PRICE.toLocaleString("ko-KR")}원까지입니다`);
     }
     if (!SYMBOLS.some((definition) => definition.symbol === symbol)) {
       throw new NotFoundException(`없는 종목: ${symbol}`);
