@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { clearSession, getUser, type SessionUser } from "@/lib/api";
+import { clearSession, getUser, onSessionChange, type SessionUser } from "@/lib/api";
 
 /**
  * Primary customer navigation is deliberately limited to these four flows.
@@ -30,6 +30,9 @@ export default function Nav() {
   useEffect(() => {
     setUser(getUser());
   }, [pathname]);
+
+  // 설정 페이지에서 닉네임을 바꾸면 경로 이동 없이도 칩이 따라 바뀌어야 한다.
+  useEffect(() => onSessionChange(() => setUser(getUser())), []);
 
   return (
     <header className="sticky top-0 z-50 border-b border-hairline-soft bg-abyss/60 backdrop-blur-glass backdrop-saturate-150">
@@ -66,12 +69,22 @@ export default function Nav() {
         <div className="ml-auto flex items-center gap-2">
           {user ? (
             <>
-              <span className="hidden items-center gap-2 rounded-full border border-hairline bg-surface-2/60 py-1 pr-3 pl-1 sm:flex">
+              {/* 사용자 칩은 계정 설정으로 가는 유일한 입구다 — 기본 메뉴 목록은 늘리지 않는다. */}
+              <Link
+                href="/settings"
+                title="계정 설정 (닉네임·비밀번호)"
+                aria-current={pathname === "/settings" ? "page" : undefined}
+                className={`hidden items-center gap-2 rounded-full border py-1 pr-3 pl-1 transition-colors sm:flex ${
+                  pathname === "/settings"
+                    ? "border-sky/40 bg-sky/10"
+                    : "border-hairline bg-surface-2/60 hover:border-hairline-strong hover:bg-surface-3/70"
+                }`}
+              >
                 <span className="grid h-6 w-6 place-items-center rounded-full bg-linear-to-br from-sky/80 to-indigo/80 text-[11px] font-bold text-abyss">
                   {user.nickname.slice(0, 1).toUpperCase()}
                 </span>
                 <span className="text-[13px] text-ink-muted">{user.nickname}</span>
-              </span>
+              </Link>
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={() => {

@@ -76,6 +76,27 @@ export class AuthService {
     });
   }
 
+  /** 닉네임 변경. 새 토큰을 발급해 클라이언트가 세션의 닉네임을 갱신할 수 있게 한다. */
+  async updateNickname(userId: string, nickname: string) {
+    const trimmed = (nickname ?? "").trim();
+    if (trimmed.length < 1 || trimmed.length > 20) throw new BadRequestException("닉네임은 1~20자여야 합니다");
+    const user = await this.prisma.user.update({ where: { id: userId }, data: { nickname: trimmed } });
+    const account = await this.prisma.account.findUnique({ where: { userId: user.id } });
+    if (!account) throw new UnauthorizedException("계좌가 없습니다");
+    return this.issueToken({ userId: user.id, accountId: account.id, email: user.email, nickname: user.nickname });
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    if (!newPassword || newPassword.length < 4) throw new BadRequestException("새 비밀번호는 4자 이상이어야 합니다");
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException("사용자를 찾을 수 없습니다");
+    const ok = await bcrypt.compare(currentPassword ?? "", user.passwordHash);
+    if (!ok) throw new UnauthorizedException("현재 비밀번호가 올바르지 않습니다");
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    return { ok: true };
+  }
+
   private issueToken(payload: JwtUser) {
     const token = this.jwt.sign({ sub: payload.userId, ...payload });
     return { token, user: payload };

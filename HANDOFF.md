@@ -47,7 +47,12 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 주문 정정 (최신 작업)
+## 2026-09-22 — 계정 설정 (최신 작업)
+
+- `PATCH /auth/me {nickname}`(1~20자, 새 token/user 발급 — 닉네임이 JWT에 들어 있어서)와 `POST /auth/password {currentPassword, newPassword}`(현재 비밀번호 검증, 4자 이상).
+- 웹 `/settings` 페이지: 닉네임 저장은 `saveSession()`으로 세션을 갈아 끼우고, `lib/api.ts`의 새 `onSessionChange()`를 Nav가 구독해 경로 이동 없이 우상단 칩이 바뀐다. 진입은 **Nav 우상단 사용자 칩 클릭**뿐 — 기본 메뉴 목록(LEGACY MENU LOCK)은 그대로.
+
+## 2026-09-22 — 주문 정정
 
 - `PATCH /orders/:id {price?, qty?}` (`OrderService.amend`): 지정가 미체결만. 취소 요청 → 최대 4초 동안 100ms 간격으로 DB에서 종결을 확인 → 종결 확인 시 남은 수량(요청 qty와 실제 미체결 중 작은 값)으로 새 지정가 접수. 확인 전 전량 체결이면 `{amended:false, reason}`, 확인 지연이면 422(새 주문 없음). 호가 단위·변경 없음 검증. 응답 `{amended, reason, canceled, order}`. 단일 writer 매칭이라 원자적 교체가 아니며 취소와 재접수 사이에 다른 참가자가 먼저 체결될 수 있다(의도된 한계).
 - 웹 `MyOpenOrders.tsx`: 지정가 행의 **정정** 버튼 → 인라인 가격/남은 수량 입력(호가 단위·남은 수량 검증, 변경 없으면 비활성) → 확인. 테스트 `order.service.test.ts` amend 3건.

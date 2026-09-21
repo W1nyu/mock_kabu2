@@ -4,6 +4,13 @@ const TOKEN_KEY = "mock-kabu2:token";
 const USER_KEY = "mock-kabu2:user";
 const SESSION_CHANGE_EVENT = "mock-kabu2:session-change";
 
+/** 같은 탭 안에서 세션(토큰·닉네임)이 바뀔 때 알림을 받는다. 해제 함수를 돌려준다. */
+export function onSessionChange(listener: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener(SESSION_CHANGE_EVENT, listener);
+  return () => window.removeEventListener(SESSION_CHANGE_EVENT, listener);
+}
+
 export interface SessionUser {
   userId: string;
   accountId: string;

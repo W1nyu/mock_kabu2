@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Patch, Post, UseGuards } from "@nestjs/common";
 import { AuthService, type JwtUser } from "./auth.service";
 import { CurrentUser, JwtAuthGuard } from "./jwt-auth.guard";
 
@@ -20,5 +20,18 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: JwtUser) {
     return user;
+  }
+
+  /** 닉네임 변경. 응답의 새 token/user로 세션을 갱신할 것. */
+  @Patch("me")
+  @UseGuards(JwtAuthGuard)
+  updateMe(@CurrentUser() user: JwtUser, @Body() body: { nickname: string }) {
+    return this.auth.updateNickname(user.userId, body.nickname);
+  }
+
+  @Post("password")
+  @UseGuards(JwtAuthGuard)
+  changePassword(@CurrentUser() user: JwtUser, @Body() body: { currentPassword: string; newPassword: string }) {
+    return this.auth.changePassword(user.userId, body.currentPassword, body.newPassword);
   }
 }
