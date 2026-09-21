@@ -11,6 +11,7 @@ import OrderForm from "@/components/OrderForm";
 import Orderbook from "@/components/Orderbook";
 import QuoteHeader from "@/components/QuoteHeader";
 import SymbolNews from "@/components/SymbolNews";
+import SymbolStrip from "@/components/SymbolStrip";
 import TradesFeed from "@/components/TradesFeed";
 import { api, getToken } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
@@ -63,12 +64,17 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
 
   return (
     <div className="space-y-4">
-      <Link
-        href="/"
-        className="inline-flex items-center gap-1.5 text-[13px] text-ink-muted transition-colors hover:text-sky"
-      >
-        <span aria-hidden>←</span> 대시보드
-      </Link>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Link
+          href="/"
+          className="inline-flex shrink-0 items-center gap-1.5 text-[13px] text-ink-muted transition-colors hover:text-sky"
+        >
+          <span aria-hidden>←</span> 대시보드
+        </Link>
+        <div className="min-w-0 flex-1">
+          <SymbolStrip current={symbol} />
+        </div>
+      </div>
 
       <QuoteHeader
         symbol={symbol}
