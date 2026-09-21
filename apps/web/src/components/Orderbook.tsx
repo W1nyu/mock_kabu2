@@ -248,6 +248,11 @@ export default function Orderbook({
         ? "text-up"
         : "text-down";
 
+  // 보이는 10단 잔량 합으로 매수/매도 호가 불균형을 본다. 체결강도(과거 체결)와 달리 지금 대기 중인 힘이다.
+  const bidDepth = (snap?.bids ?? []).reduce((sum, level) => sum + level.qty, 0);
+  const askDepth = (snap?.asks ?? []).reduce((sum, level) => sum + level.qty, 0);
+  const depthTotal = bidDepth + askDepth;
+  const bidShare = depthTotal > 0 ? bidDepth / depthTotal : null;
   const maxQty = Math.max(
     1,
     ...(snap?.asks ?? []).map((l) => l.qty),
@@ -318,6 +323,24 @@ export default function Orderbook({
         </div>
       </div>
 
+      {bidShare != null && (
+        <div
+          className="num border-t border-hairline-soft px-4 py-2 text-[11px]"
+          title="보이는 호가 10단의 매수 잔량 대 매도 잔량 비율입니다. 대기 중인 힘의 균형이며, 체결강도(이미 체결된 양)와는 다릅니다."
+        >
+          <div className="flex items-center justify-between text-ink-muted">
+            <span className="text-up">매수 잔량 {fmt.format(bidDepth)}</span>
+            <span className={bidShare > 0.55 ? "text-up" : bidShare < 0.45 ? "text-down" : "text-ink-faint"}>
+              호가 균형 {(bidShare * 100).toFixed(0)} : {(100 - bidShare * 100).toFixed(0)}
+            </span>
+            <span className="text-down">매도 잔량 {fmt.format(askDepth)}</span>
+          </div>
+          <div className="mt-1 flex h-1 w-full overflow-hidden rounded-full bg-white/6">
+            <div className="bg-up/70 transition-[width] duration-300" style={{ width: `${bidShare * 100}%` }} />
+            <div className="bg-down/70 transition-[width] duration-300" style={{ width: `${(1 - bidShare) * 100}%` }} />
+          </div>
+        </div>
+      )}
       <p className="border-t border-hairline-soft px-4 py-2 text-[11px] text-ink-faint">
         가격을 클릭하면 주문 폼에 입력됩니다
         {Object.keys(myDepth).length > 0 && (

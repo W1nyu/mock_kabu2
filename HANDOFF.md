@@ -107,6 +107,7 @@
 - **호가 단위 강제**: `OrderService.place`와 조건부 LIMIT 접수가 `tickSizeOf(symbol)` 격자 밖 지정가를 400(`"SAKU의 호가 단위는 500원입니다"`)으로 거부한다(shared `isOnTick`). 봇은 이미 `alignToTick`으로 정렬하므로 영향 없음(DB 확인: 격자 밖 지정가 0건). 주문폼은 가격 라벨에 단위를 보여주고, 어긋나면 "N원으로 맞추기" 링크와 함께 버튼을 잠근다.
 - **일별 성과**: `GET /account/daily?days=` (`EquitySnapshotService.daily`) — KST 날짜별로 그날 마지막 스냅샷의 종가 자산·전일 종가 대비 증감·실현손익 합·매도 체결 수. 스냅샷과 실현손익을 FULL OUTER JOIN 해 둘 중 하나만 있는 날도 나온다. 웹 `DailyPerformance.tsx`가 대시보드에서 투자자 랭킹 옆(lg 2열)에 최근 14일 표시, 첫 행에 "오늘" chip.
 - **거래 페이지 UI**: 상단에 `SymbolStrip.tsx`(5종목 현재가·등락률 실시간, 클릭 전환), 호가창 `Orderbook.tsx`의 `useMyDepth`가 `/orders?symbol&status=live`로 내 미체결 지정가 단계에 파란 점 표시(계정 push + 15초 폴백).
+- **호가 균형 바**: `Orderbook.tsx` 하단에 보이는 10단 매수/매도 잔량 합과 비율 바(55%↑ 빨강, 45%↓ 파랑). 체결강도(과거 체결)와 구분해 툴팁에 설명.
 - **소소한 UX**: 대시보드 종목 표 헤더 정렬(종목/현재가/등락률/거래대금, `localStorage("dashboard:symbol-sort")`), `/orders` 체결 탭 **CSV 내려받기**(UTF-8 BOM, KST 시각).
 - **차트 체결 마커**: `useMyFills(symbol)`(`/account/trades?symbol=`, 계정 push로 갱신)를 `CandleChart`가 `createSeriesMarkers`로 그린다 — 같은 봉·같은 방향은 하나로 합쳐 "매수 300"처럼 수량 표기, 매수는 봉 아래 ▲빨강, 매도는 봉 위 ▼파랑. 봉 간격 전환 시 버킷을 다시 계산.
 - **차트 가격선**: `apps/web/src/lib/usePositionLines.ts`가 내 평단가(흰 파선, "평단 N주")와 이 종목의 대기 중 예약 트리거(손절 파랑/익절 빨강 점선, 트레일링 노랑)를 읽어 `CandleChart`가 `createPriceLine`으로 그린다. 계정 push + 15초 폴백으로 갱신, 차트 재생성(심볼/봉 전환) 시 `chartEpoch`로 다시 그림. 가격선은 자동 스케일에 포함되지 않아 화면 밖에 있을 수 있다(의도).
