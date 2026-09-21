@@ -48,9 +48,7 @@ export default function MyPosition({
 
   const refresh = useCallback(() => {
     api<HoldingRow[]>("/account/holdings")
-      .then((rows) =>
-        setHolding(rows.find((h) => h.symbol === symbol && h.qty > 0) ?? null),
-      )
+      .then((rows) => setHolding(rows.find((h) => h.symbol === symbol && h.qty > 0) ?? null))
       .catch(() => {});
     api<RealizedSummary>("/account/realized?limit=1")
       .then((summary) => {
@@ -99,9 +97,7 @@ export default function MyPosition({
           qty: holding.availableQty,
         },
       });
-      setMessage(
-        `청산 주문 접수: ${fmt.format(holding.availableQty)}주 시장가 매도`,
-      );
+      setMessage(`청산 주문 접수: ${fmt.format(holding.availableQty)}주 시장가 매도`);
       refresh();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "청산 실패");
@@ -178,10 +174,7 @@ export default function MyPosition({
         <Item label="보유">
           {fmt.format(holding.qty)}주
           {holding.holdQty > 0 && (
-            <span className="text-ink-faint">
-              {" "}
-              (매도 대기 {fmt.format(holding.holdQty)})
-            </span>
+            <span className="text-ink-faint"> (매도 대기 {fmt.format(holding.holdQty)})</span>
           )}
         </Item>
         <Item label="평단가">{fmt.format(Math.round(holding.avgCost))}</Item>
@@ -225,14 +218,10 @@ export default function MyPosition({
                 : "보유 수량 전체를 시장가로 매도합니다"
             }
             className={`btn btn-sm ${
-              confirming
-                ? "btn-sell"
-                : "border-down/50 bg-down/10 text-down hover:bg-down/16"
+              confirming ? "btn-sell" : "border-down/50 bg-down/10 text-down hover:bg-down/16"
             }`}
           >
-            {confirming
-              ? `${fmt.format(holding.availableQty)}주 전량 매도 확인`
-              : "포지션 청산"}
+            {confirming ? `${fmt.format(holding.availableQty)}주 전량 매도 확인` : "포지션 청산"}
           </button>
         </div>
       </div>
@@ -277,12 +266,9 @@ export default function MyPosition({
             {protectBusy ? "등록 중…" : "OCO 예약"}
           </button>
           <span className="text-ink-faint">
-            현재가 {fmt.format(price)} · 한쪽이 발동하면 다른 쪽은 자동 취소 ·
-            대기 중 홀드 없음
+            현재가 {fmt.format(price)} · 한쪽이 발동하면 다른 쪽은 자동 취소 · 대기 중 홀드 없음
           </span>
-          {protectError && (
-            <span className="basis-full text-warn">{protectError}</span>
-          )}
+          {protectError && <span className="basis-full text-warn">{protectError}</span>}
         </form>
       )}
     </div>
@@ -310,12 +296,7 @@ function ProtectField({
   tone?: "up" | "down";
   hint?: string;
 }) {
-  const color =
-    tone === "up"
-      ? "text-up"
-      : tone === "down"
-        ? "text-down"
-        : "text-ink-muted";
+  const color = tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-ink-muted";
   return (
     <label htmlFor={id} className="flex flex-col gap-1">
       <span className={`text-[11px] ${color}`}>{label}</span>
@@ -331,13 +312,7 @@ function ProtectField({
   );
 }
 
-function Item({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function Item({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <span className="num">
       <span className="mr-1.5 text-xs text-ink-faint">{label}</span>

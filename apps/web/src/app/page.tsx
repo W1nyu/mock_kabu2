@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, getToken, getUser, won } from "@/lib/api";
 import EquityChart from "@/components/EquityChart";
 import { NewsList } from "@/components/NewsFeed";
+import Sparkline from "@/components/Sparkline";
 import { mergeNews, parseNewsItem } from "@/lib/news";
 import { subscribe } from "@/lib/socket";
 
@@ -44,6 +45,15 @@ interface MarketSummary {
   turnover: number | string | null;
   lastTradeTs: number | string | null;
 }
+interface CandleDto {
+  ts: string;
+  close: number;
+}
+
+/** 종목 표 미니 추세선: 5분봉 종가 최근 6시간(72개). 실시간 가격은 마지막 점을 대신한다. */
+const SPARK_INTERVAL = "5m";
+const SPARK_POINTS = 72;
+const SPARK_REFRESH_MS = 5 * 60 * 1000;
 
 function finiteNumber(value: unknown): number | null {
   if (value == null || value === "") return null;
@@ -81,6 +91,7 @@ export default function DashboardPage() {
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [turnovers, setTurnovers] = useState<Record<string, number>>({});
   const [news, setNews] = useState<NewsItemDto[]>([]);
+  const [sparks, setSparks] = useState<Record<string, number[]>>({});
   const turnoverWatermarksRef = useRef(new Map<string, number>());
   const pendingTurnoverTicksRef = useRef(new Map<string, Map<string, TradeTick>>());
 
@@ -161,6 +172,31 @@ export default function DashboardPage() {
       unsubscribe();
     };
   }, []);
+
+  // 추세선은 5분봉이라 5분마다만 다시 읽고, 그 사이는 실시간 가격으로 마지막 점만 움직인다.
+  useEffect(() => {
+    if (symbols.length === 0) return;
+    let active = true;
+    const load = () => {
+      Promise.all(
+        symbols.map(async ({ symbol }) => {
+          const rows = await api<CandleDto[]>(
+            `/market/candles/${symbol}?interval=${SPARK_INTERVAL}&limit=${SPARK_POINTS}`,
+            { auth: false },
+          ).catch(() => [] as CandleDto[]);
+          return [symbol, rows.map((c) => c.close).filter((v) => Number.isFinite(v))] as const;
+        }),
+      ).then((entries) => {
+        if (active) setSparks(Object.fromEntries(entries));
+      });
+    };
+    load();
+    const t = window.setInterval(load, SPARK_REFRESH_MS);
+    return () => {
+      active = false;
+      window.clearInterval(t);
+    };
+  }, [symbols]);
 
   useEffect(() => {
     const channels = symbols.map(({ symbol }) => `trades:${symbol}`);
@@ -322,6 +358,9 @@ export default function DashboardPage() {
                 <th className="text-right" title="KST 당일 누적 체결 금액을 만 원 단위로 표시">
                   거래대금 (만 원)
                 </th>
+                <th className="text-right" title="최근 6시간 5분봉 종가 흐름">
+                  6시간 흐름
+                </th>
                 <th />
               </tr>
             </thead>
@@ -355,6 +394,9 @@ export default function DashboardPage() {
                     </td>
                     <td className="num text-right">{formatTurnoverManWon(s.turnover)}</td>
                     <td className="text-right">
+                      <SparkCell values={sparks[s.symbol]} livePrice={s.lastPrice} />
+                    </td>
+                    <td className="text-right">
                       <Link href={`/symbol/${s.symbol}`} className="btn btn-ghost btn-sm">
                         거래하기
                       </Link>
@@ -364,7 +406,7 @@ export default function DashboardPage() {
               })}
               {liveSymbols.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-sm text-ink-faint">
+                  <td colSpan={7} className="py-10 text-center text-sm text-ink-faint">
                     종목을 불러오는 중…
                   </td>
                 </tr>
@@ -442,6 +484,18 @@ export default function DashboardPage() {
         )}
       </section>
     </div>
+  );
+}
+
+function SparkCell({ values, livePrice }: { values: number[] | undefined; livePrice: number }) {
+  const series = values && values.length > 0 ? [...values.slice(0, -1), livePrice] : [];
+  const first = series[0];
+  const tone: "up" | "down" | "flat" =
+    series.length < 2 || first == null || livePrice === first ? "flat" : livePrice > first ? "up" : "down";
+  return (
+    <span className="inline-block align-middle" title={series.length >= 2 ? `6시간 전 ${fmt.format(first)}원 → 현재 ${fmt.format(livePrice)}원` : undefined}>
+      <Sparkline values={series} tone={tone} />
+    </span>
   );
 }
 
