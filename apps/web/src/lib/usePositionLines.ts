@@ -20,6 +20,52 @@ interface HoldingRow {
   avgCost: number;
 }
 
+export interface FillMark {
+  tradeId: string;
+  ts: number;
+  side: "BUY" | "SELL";
+  price: number;
+  qty: number;
+}
+
+interface TradeRow {
+  tradeId: string;
+  side: "BUY" | "SELL" | "SELF";
+  price: number;
+  qty: number;
+  ts: number;
+}
+
+/** 이 종목의 내 최근 체결 — 차트 위 매수/매도 마커용. 계정 push가 오면 다시 읽는다. */
+export function useMyFills(symbol: string, limit = 120): FillMark[] {
+  const [fills, setFills] = useState<FillMark[]>([]);
+  useEffect(() => {
+    if (!getToken()) return;
+    let active = true;
+    setFills([]);
+    const load = () => {
+      api<TradeRow[]>(`/account/trades?symbol=${symbol}&limit=${limit}`)
+        .then((rows) => {
+          if (!active) return;
+          setFills(
+            rows
+              .filter((row) => row.side === "BUY" || row.side === "SELL")
+              .map((row) => ({ tradeId: row.tradeId, ts: row.ts, side: row.side as "BUY" | "SELL", price: row.price, qty: row.qty })),
+          );
+        })
+        .catch(() => {});
+    };
+    load();
+    const user = getUser();
+    const unsub = user ? subscribe([`account:${user.accountId}`], () => load()) : () => {};
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, [symbol, limit]);
+  return fills;
+}
+
 const AVG_COLOR = "#f5f5f5";
 const STOP_COLOR = "#6e8aff";
 const TAKE_COLOR = "#ff5a6e";

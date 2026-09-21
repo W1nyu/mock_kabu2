@@ -5,6 +5,10 @@ import {
   CandlestickSeries,
   ColorType,
   createChart,
+  createSeriesMarkers,
+  type ISeriesMarkersPluginApi,
+  type SeriesMarker,
+  type Time,
   HistogramSeries,
   LineSeries,
   type IChartApi,
@@ -22,7 +26,7 @@ import {
   DEFAULT_CANDLE_INTERVAL,
 } from "@mock-kabu/shared";
 import { api } from "@/lib/api";
-import { usePositionLines } from "@/lib/usePositionLines";
+import { useMyFills, usePositionLines } from "@/lib/usePositionLines";
 import { formatKstHm, formatKstMonthDay, formatKstTime } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 
@@ -191,6 +195,36 @@ export default function CandleChart({ symbol }: { symbol: string }) {
   const positionLines = usePositionLines(symbol);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const [chartEpoch, setChartEpoch] = useState(0);
+  // 내 체결 마커: 같은 봉의 같은 방향은 한 마커로 합쳐 수량을 적는다.
+  const myFills = useMyFills(symbol);
+  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+
+  useEffect(() => {
+    const s = seriesRef.current;
+    if (!s) return;
+    const bucketSeconds = candleIntervalSeconds(interval) ?? 60;
+    const grouped = new Map<string, { time: UTCTimestamp; side: "BUY" | "SELL"; qty: number; amount: number }>();
+    for (const fill of myFills) {
+      const time = (Math.floor(fill.ts / 1000 / bucketSeconds) * bucketSeconds) as UTCTimestamp;
+      const key = `${time}:${fill.side}`;
+      const entry = grouped.get(key) ?? { time, side: fill.side, qty: 0, amount: 0 };
+      entry.qty += fill.qty;
+      entry.amount += fill.qty * fill.price;
+      grouped.set(key, entry);
+    }
+    const markers: SeriesMarker<Time>[] = [...grouped.values()]
+      .sort((a, b) => a.time - b.time)
+      .map((entry) => ({
+        time: entry.time,
+        position: entry.side === "BUY" ? "belowBar" : "aboveBar",
+        shape: entry.side === "BUY" ? "arrowUp" : "arrowDown",
+        color: entry.side === "BUY" ? UP : DOWN,
+        text: `${entry.side === "BUY" ? "매수" : "매도"} ${entry.qty.toLocaleString("ko-KR")}`,
+        size: 1,
+      }));
+    if (!markersRef.current) markersRef.current = createSeriesMarkers(s.candle, markers);
+    else markersRef.current.setMarkers(markers);
+  }, [myFills, interval, chartEpoch]);
 
   useEffect(() => {
     const s = seriesRef.current;
@@ -290,6 +324,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
 
     chartRef.current = chart;
     priceLinesRef.current = [];
+    markersRef.current = null;
     // 시리즈가 새로 만들어졌으니 가격선 effect를 다시 돌린다.
     setChartEpoch((value) => value + 1);
     seriesRef.current = { candle, volume, sma50, sma200, vwma100 };
