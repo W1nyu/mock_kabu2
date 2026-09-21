@@ -3,6 +3,12 @@ import type { PrismaClient } from "@mock-kabu/db";
 import { PRISMA } from "../core/tokens";
 
 const SNAPSHOT_INTERVAL_MS = 60_000;
+/** 하루 한 번 오래된 1분 행을 솎아낸다. 7일 지나면 10분 격자만, 90일 지나면 1시간 격자만 남긴다. */
+const COMPACT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const COMPACT_TIERS: { olderThanMs: number; keepEverySeconds: number }[] = [
+  { olderThanMs: 7 * 24 * 60 * 60 * 1000, keepEverySeconds: 600 },
+  { olderThanMs: 90 * 24 * 60 * 60 * 1000, keepEverySeconds: 3_600 },
+];
 
 export type EquityRange = "1d" | "1w" | "all";
 
@@ -29,6 +35,7 @@ const RANGE_MS: Record<EquityRange, number | null> = {
 @Injectable()
 export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private compactTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
 
   constructor(@Inject(PRISMA) private prisma: PrismaClient) {}
@@ -37,11 +44,37 @@ export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
     // 즉시 한 번 찍고, 그 뒤로는 매 분 경계에 맞춰 기록한다.
     void this.snapshot();
     this.scheduleNext();
+    void this.compact();
+    this.compactTimer = setInterval(() => void this.compact(), COMPACT_INTERVAL_MS);
   }
 
   onModuleDestroy() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.compactTimer) clearInterval(this.compactTimer);
+  }
+
+  /**
+   * 조회 버킷(1w=10분, all=1시간)이 "버킷의 마지막 행"을 쓰므로, 각 버킷의 마지막 1분 행
+   * (예: 10분 격자면 :09, :19, …, 1시간 격자면 :59)만 남기면 과거 구간의 차트 모양이 유지된다.
+   * 1시간 격자의 :59는 10분 격자에도 속하므로 두 단계가 서로를 지우지 않는다.
+   */
+  async compact(now = Date.now()): Promise<number> {
+    let removed = 0;
+    for (const tier of COMPACT_TIERS) {
+      const before = new Date(now - tier.olderThanMs);
+      try {
+        removed += await this.prisma.$executeRaw`
+          DELETE FROM account.equity_snapshots
+          WHERE ts < ${before}
+            AND ((floor(extract(epoch FROM ts))::bigint + 60) % ${tier.keepEverySeconds}) <> 0
+        `;
+      } catch (error) {
+        console.error("[equity] compaction failed", error);
+      }
+    }
+    if (removed > 0) console.log(`[equity] compacted ${removed} old snapshot rows`);
+    return removed;
   }
 
   private scheduleNext() {

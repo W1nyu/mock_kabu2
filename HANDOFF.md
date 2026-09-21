@@ -62,7 +62,7 @@
 ## 2026-09-22 — 자산 추이 스냅샷 + 대시보드 차트
 
 - **DB**: migration `20260922110000_add_equity_snapshots` → `account.equity_snapshots` (`account_id`, 분 단위 `ts`, `cash`, `stock_value`, `equity`; `(account_id, ts)` unique).
-- **기록** `apps/api/src/account/equity-snapshot.service.ts`: 부팅 직후 1회 + 매 분 경계(+250ms)에 **한 SQL**로 모든 **사용자(non-bot) 계정**을 기록(현금 + Σ보유수량×`market.symbols.last_price`). `ON CONFLICT DO NOTHING`이라 API 복제본이 여러 개여도 중복 없음. 봇 계정은 제외(유동성 풀이라 의미 없음). 보존 정책은 아직 없음(사용자 4명 기준 하루 약 6k행) — 커지면 1분 행을 N일 후 10분 버킷으로 압축하는 정리 작업을 추가할 것.
+- **기록** `apps/api/src/account/equity-snapshot.service.ts`: 부팅 직후 1회 + 매 분 경계(+250ms)에 **한 SQL**로 모든 **사용자(non-bot) 계정**을 기록(현금 + Σ보유수량×`market.symbols.last_price`). `ON CONFLICT DO NOTHING`이라 API 복제본이 여러 개여도 중복 없음. 봇 계정은 제외(유동성 풀이라 의미 없음). 보존: 부팅 시와 하루 한 번 `compact()`가 7일 지난 행은 10분 격자(각 버킷의 마지막 분 :09/:19/…), 90일 지난 행은 1시간 격자(:59)만 남기고 지운다 — 조회가 "버킷의 마지막 행"을 쓰므로 과거 차트 모양이 유지된다.
 - **API**: `GET /account/equity?range=1d|1w|all` → `[{ts, cash, stockValue, equity}]`. 버킷 폭 1분/10분/1시간, 버킷당 **마지막** 스냅샷(종가 방식) — `DISTINCT ON (bucket) … ORDER BY bucket, ts DESC`.
 - **웹** `apps/web/src/components/EquityChart.tsx`: 대시보드 hero 아래 면적 차트(lightweight-charts `AreaSeries`). 첫 점 대비 증감으로 색(상승 빨강/하락 파랑/보합 sky), 헤더에 hover 시점(또는 현재)의 자산·증감·현금/주식 내역, 1일/1주/전체 토글은 `localStorage("dashboard:equity-range")`(마운트 후 읽음). 60초 폴링. 스냅샷 2개 미만이면 안내 문구.
 - 주의: 스냅샷은 `last_price` 기준이라 대시보드 hero의 실시간 총자산과 최대 1분 차이가 난다(의도). 차트 제거는 CandleChart와 같은 "숨기고 다음 프레임에 remove" 패턴.
