@@ -158,3 +158,64 @@ describe("ConditionalOrderService trigger loop", () => {
     expect(orders.place).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ConditionalOrderService placement validation", () => {
+  function buildForPlace(lastPrice: number, waitingCount = 0) {
+    const prisma = {
+      conditionalOrder: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(waitingCount),
+        create: vi.fn().mockImplementation(({ data }: any) =>
+          Promise.resolve({
+            ...waitingRow(),
+            ...data,
+            id: `${data.direction}-${data.triggerPrice}`,
+            createdAt: new Date(),
+          }),
+        ),
+      },
+      marketSymbol: { findUnique: vi.fn().mockResolvedValue({ symbol: "KABU", lastPrice }) },
+      $transaction: vi.fn().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops)),
+    };
+    const realtime = { notifyAccount: vi.fn() };
+    const sub = { on: vi.fn(), off: vi.fn(), psubscribe: vi.fn().mockResolvedValue(1) };
+    const service = new ConditionalOrderService(prisma as never, sub as never, {} as never, realtime as never);
+    return { service, prisma };
+  }
+
+  it("rejects a trigger the current price already satisfies", async () => {
+    const { service } = buildForPlace(1_000);
+    await expect(
+      service.place("acct-1", { symbol: "KABU", side: "SELL", direction: "AT_OR_BELOW", triggerPrice: 1_000, qty: 1 }),
+    ).rejects.toThrow(/이미/);
+  });
+
+  it("creates an OCO pair sharing one group id and keeps both in the index", async () => {
+    const { service, prisma } = buildForPlace(1_000);
+    const rows = await service.placeOco("acct-1", { symbol: "KABU", side: "SELL", qty: 3, lowerPrice: 900, upperPrice: 1_100 });
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].ocoGroupId).toBeTruthy();
+    expect(rows[0].ocoGroupId).toBe(rows[1].ocoGroupId);
+    expect(rows.map((r) => r.direction).sort()).toEqual(["AT_OR_ABOVE", "AT_OR_BELOW"]);
+    expect(prisma.conditionalOrder.create).toHaveBeenCalledTimes(2);
+    expect((service as any).waiting.get("KABU").size).toBe(2);
+  });
+
+  it("rejects an OCO whose legs are not on opposite sides of the current price", async () => {
+    const { service } = buildForPlace(1_000);
+    await expect(
+      service.placeOco("acct-1", { symbol: "KABU", side: "SELL", qty: 3, lowerPrice: 1_100, upperPrice: 1_200 }),
+    ).rejects.toThrow(/이미/);
+    await expect(
+      service.placeOco("acct-1", { symbol: "KABU", side: "SELL", qty: 3, lowerPrice: 950, upperPrice: 940 }),
+    ).rejects.toThrow(/낮아야/);
+  });
+
+  it("enforces the per-account waiting cap counting both OCO legs", async () => {
+    const { service } = buildForPlace(1_000, 49);
+    await expect(
+      service.placeOco("acct-1", { symbol: "KABU", side: "SELL", qty: 3, lowerPrice: 900, upperPrice: 1_100 }),
+    ).rejects.toThrow(/50건/);
+  });
+});
