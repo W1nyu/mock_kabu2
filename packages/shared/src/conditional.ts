@@ -30,6 +30,20 @@ export interface ConditionalOrderDto {
   createdAt: string;
 }
 
+/** 매수 주문에 붙인 "체결 후 손절/익절 자동 등록" 의도. */
+export interface BracketIntentDto {
+  id: string;
+  orderId: string;
+  symbol: string;
+  stopBps: number;
+  takeBps: number;
+  status: "PENDING" | "ARMED" | "CANCELED";
+  armedQty: number;
+  avgFillPrice: number | null;
+  note: string | null;
+  createdAt: string;
+}
+
 /** 체결가 하나가 조건을 만족하는지. 경계값 포함(이상/이하). */
 export function conditionMet(direction: TriggerDirection, triggerPrice: number, price: number): boolean {
   return direction === "AT_OR_ABOVE" ? price >= triggerPrice : price <= triggerPrice;

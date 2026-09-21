@@ -47,7 +47,14 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 매매 성과·투자자 랭킹·종목 추세선 (최신 작업)
+## 2026-09-22 — 브래킷 주문: 매수 체결 후 손절/익절 자동 등록 (최신 작업)
+
+- **DB**: migration `20260922140000_add_bracket_intents` → `order.bracket_intents` (`order_id` unique, `stop_bps` 10~5000, `take_bps` 10~10000, `status` PENDING/ARMED/CANCELED, `armed_qty`, `avg_fill_price`, `note`).
+- **API**: `POST /orders`에 선택 필드 `bracket: {stopBps, takeBps}` — 매수에만 허용(매도면 400, 주문 전에 검증). 주문이 커밋된 뒤 `BracketService.attach()`가 의도를 저장하고 응답에 `bracket`을 실어 준다. `GET /orders/bracket?symbol=`, `DELETE /orders/bracket/:id`(PENDING만).
+- **`apps/api/src/order/bracket.service.ts`**: 3초마다 PENDING을 훑어 부모 주문이 종결(FILLED/CANCELED/REJECTED)되면 `updateMany(PENDING→ARMED)`로 claim 후: 체결 0이면 CANCELED("체결 없이 종결된 주문"); 체결 있으면 `matching.trades`의 평균가로 손절 `floor(avg×(1−stop))`·익절 `ceil(avg×(1+take))`를 계산해 **체결 수량만큼** `ConditionalOrderService.placeOco()`. 체결과 등록 사이에 이미 선을 넘었으면 OCO 대신 **즉시 시장가 매도**(note에 사유·주문 ID). 등록 실패는 PENDING으로 되돌려 재시도. 헬스 `background.bracketIntents`. 테스트 `bracket.service.test.ts`(미종결 무시·평균가 OCO·부분 체결·무체결 취소·즉시 매도), `order.controller.test.ts`.
+- **웹**: 주문폼 매수(지정가/시장가)에 "체결 후 손절/익절 자동 등록" 체크박스 + 손절/익절 % 입력(기본 5/10). 예약 주문 패널 맨 위에 PENDING 의도를 "대기 · 체결 후 자동 보호 · 손절 −5.0% · 익절 +10.0% [취소]"로 표시, ARMED push는 상단 notice. 런타임 검증: MOCK 20주 시장가 + 3%/8% → 수 초 내 평균가 42,750 기준 OCO 41,467/46,170 등록; 미체결 지정가 취소 시 의도 CANCELED.
+
+## 2026-09-22 — 매매 성과·투자자 랭킹·종목 추세선
 
 - **매매 성과**: `GET /account/realized`가 `stats {fills, wins, losses, winRate, avgWin, avgLoss, profitFactor, best, worst}`를 추가로 돌려준다(실현손익 테이블 집계, 손익 0 체결은 승/패 제외). 웹 `PerformanceCard.tsx`가 대시보드 자산 추이 오른쪽(lg 3열 중 1열)에 표시.
 - **투자자 랭킹**: `GET /account/leaderboard?limit=` — 사용자(non-bot) 계정을 수익률 `(총자산 − 순입금) / 순입금` 순으로. 순입금 = `SIGNUP_BONUS/SEED/TRANSFER_IN/TRANSFER_OUT` 원장 합, 총자산 = 현금 + Σ보유×`last_price`(실시간 평가). 순입금 ≤ 0은 수익률 null로 맨 뒤. 응답 `{total, rows}`이며 내 행(`me:true`)은 상위 밖이어도 마지막에 붙는다. 웹 `Leaderboard.tsx`가 대시보드 뉴스 아래·보유 자산 위에 표시(30초 폴링). **Nav 메뉴는 LEGACY MENU LOCK 때문에 추가하지 않았다** — 별도 페이지가 필요하면 제품 결정 후 추가.

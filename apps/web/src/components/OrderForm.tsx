@@ -44,6 +44,10 @@ export default function OrderForm({
   const [triggerPrice, setTriggerPrice] = useState("");
   // 조건부 모드의 하위 방식: 고정 가격 트리거 또는 고점/저점 추적(트레일링)
   const [stopMode, setStopMode] = useState<"FIXED" | "TRAIL">("FIXED");
+  // 매수 체결 후 손절/익절을 자동 등록하는 브래킷. % 단위로 받고 서버에는 bps로 보낸다.
+  const [bracketOn, setBracketOn] = useState(false);
+  const [bracketStopPct, setBracketStopPct] = useState("5");
+  const [bracketTakePct, setBracketTakePct] = useState("10");
   const [trailPct, setTrailPct] = useState("3");
   // null이면 현재가 대비 트리거 위치로 자동 추론, 사용자가 고르면 고정
   const [directionOverride, setDirectionOverride] = useState<TriggerDirection | null>(null);
@@ -139,9 +143,17 @@ export default function OrderForm({
             type,
             qty: Number(qty),
             ...(type === "LIMIT" ? { price: Number(price) } : {}),
+            ...(bracketActive
+              ? { bracket: { stopBps: bracketStopBps, takeBps: bracketTakeBps } }
+              : {}),
           },
         });
-        setMessage({ ok: true, text: "주문이 접수되었습니다" });
+        setMessage({
+          ok: true,
+          text: bracketActive
+            ? `주문 접수 · 체결되면 손절 −${bracketStopPct}% / 익절 +${bracketTakePct}%를 자동 등록합니다`
+            : "주문이 접수되었습니다",
+        });
       }
       setQty("");
       resetSizing();
@@ -163,7 +175,9 @@ export default function OrderForm({
   // 서버가 격자 밖 지정가를 거부하므로 미리 알리고 버튼을 잠근다.
   const offTick = limitPrice != null && tickSize != null && !isOnTick(limitPrice, tickSize);
   const nearestTick =
-    offTick && tickSize != null ? Math.max(tickSize, Math.round(limitPrice! / tickSize) * tickSize) : null;
+    offTick && tickSize != null
+      ? Math.max(tickSize, Math.round(limitPrice! / tickSize) * tickSize)
+      : null;
 
   const parsedTrigger = Number(triggerPrice);
   const validTrigger = Number.isSafeInteger(parsedTrigger) && parsedTrigger > 0;
@@ -174,6 +188,15 @@ export default function OrderForm({
       : side === "SELL"
         ? "AT_OR_BELOW"
         : "AT_OR_ABOVE");
+  // 브래킷: 매수 + 일반 주문에서만. 0.1%~50% / 0.1%~100%.
+  const bracketStopBps = Math.round((Number(bracketStopPct) || 0) * 100);
+  const bracketTakeBps = Math.round((Number(bracketTakePct) || 0) * 100);
+  const bracketValid =
+    bracketStopBps >= TRAIL_BPS_MIN &&
+    bracketStopBps <= TRAIL_BPS_MAX &&
+    bracketTakeBps >= TRAIL_BPS_MIN &&
+    bracketTakeBps <= 10_000;
+  const bracketActive = side === "BUY" && type !== "STOP" && bracketOn;
   // 트레일링: 0.1%~50%, 서버와 같은 bps 단위로 반올림한다.
   const trailBps = Math.round((Number(trailPct) || 0) * 100);
   const validTrail = trailBps >= TRAIL_BPS_MIN && trailBps <= TRAIL_BPS_MAX;
@@ -393,7 +416,9 @@ export default function OrderForm({
             <label className="label" htmlFor={`order-price-${symbol}`}>
               가격
               {tickSize != null && (
-                <span className="ml-1.5 font-normal text-ink-faint">호가 단위 {fmt.format(tickSize)}원</span>
+                <span className="ml-1.5 font-normal text-ink-faint">
+                  호가 단위 {fmt.format(tickSize)}원
+                </span>
               )}
             </label>
             <input
@@ -465,6 +490,49 @@ export default function OrderForm({
             ))}
           </div>
         </div>
+
+        {side === "BUY" && type !== "STOP" && (
+          <div className="well px-3 py-2.5 text-xs">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={bracketOn}
+                onChange={(e) => setBracketOn(e.target.checked)}
+                className="accent-sky"
+              />
+              <span className="font-medium">체결 후 손절/익절 자동 등록</span>
+              <span className="text-ink-faint">(OCO)</span>
+            </label>
+            {bracketOn && (
+              <div className="num mt-2 grid grid-cols-2 gap-2">
+                <label className="flex items-center gap-1.5">
+                  <span className="text-down">손절 −</span>
+                  <input
+                    className="field w-16 py-1 text-xs"
+                    inputMode="decimal"
+                    value={bracketStopPct}
+                    onChange={(e) => setBracketStopPct(e.target.value.replace(/[^0-9.]/g, ""))}
+                  />
+                  <span className="text-ink-faint">%</span>
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <span className="text-up">익절 +</span>
+                  <input
+                    className="field w-16 py-1 text-xs"
+                    inputMode="decimal"
+                    value={bracketTakePct}
+                    onChange={(e) => setBracketTakePct(e.target.value.replace(/[^0-9.]/g, ""))}
+                  />
+                  <span className="text-ink-faint">%</span>
+                </label>
+                <p className="col-span-2 text-[11px] text-ink-faint">
+                  체결 평균가 기준으로 계산합니다. 부분 체결이면 체결된 수량만 보호하고, 등록 전에
+                  이미 선을 넘었으면 즉시 시장가로 정리합니다.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Balance readout */}
         <div className="well num space-y-1 px-3 py-2.5 text-xs">
@@ -569,6 +637,7 @@ export default function OrderForm({
             busy ||
             !validQty ||
             (type === "LIMIT" && (limitPrice == null || offTick)) ||
+            (bracketActive && !bracketValid) ||
             (type === "STOP" && stopMode === "FIXED" && (!validTrigger || triggerAlreadyMet)) ||
             (type === "STOP" && stopMode === "TRAIL" && !validTrail)
           }

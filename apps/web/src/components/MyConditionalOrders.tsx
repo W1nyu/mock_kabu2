@@ -1,6 +1,10 @@
 "use client";
 
-import { describeCondition, type ConditionalOrderDto } from "@mock-kabu/shared";
+import {
+  describeCondition,
+  type BracketIntentDto,
+  type ConditionalOrderDto,
+} from "@mock-kabu/shared";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmt, getUser } from "@/lib/api";
 import { formatKstTime } from "@/lib/time";
@@ -38,13 +42,28 @@ export default function MyConditionalOrders({
   refreshKey?: number;
 }) {
   const [rows, setRows] = useState<ConditionalOrderDto[]>([]);
+  const [pendingBrackets, setPendingBrackets] = useState<BracketIntentDto[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     api<ConditionalOrderDto[]>(`/orders/conditional?symbol=${symbol}&limit=50`)
       .then(setRows)
       .catch(() => {});
+    api<BracketIntentDto[]>(`/orders/bracket?symbol=${symbol}&limit=20`)
+      .then((intents) =>
+        setPendingBrackets(intents.filter((intent) => intent.status === "PENDING")),
+      )
+      .catch(() => {});
   }, [symbol]);
+
+  async function cancelBracket(id: string) {
+    try {
+      await api(`/orders/bracket/${id}`, { method: "DELETE" });
+    } catch {
+      // 그 사이 체결돼 이미 등록됐을 수 있다.
+    }
+    refresh();
+  }
 
   useEffect(() => {
     setRows([]);
@@ -56,6 +75,11 @@ export default function MyConditionalOrders({
     const user = getUser();
     const unsub = user
       ? subscribe([`account:${user.accountId}`], ({ data }) => {
+          if (data?.type === "bracket" && data?.symbol === symbol && data?.status === "ARMED") {
+            setNotice(
+              `체결 ${fmt.format(data.qty)}주 · ${String(data.note ?? "손절/익절 자동 등록")}`,
+            );
+          }
           if (data?.type === "conditional" && data?.symbol === symbol && data?.label) {
             setNotice(
               data.status === "TRIGGERED"
@@ -85,7 +109,7 @@ export default function MyConditionalOrders({
   const waiting = rows.filter((r) => r.status === "WAITING");
   const history = rows.filter((r) => r.status !== "WAITING").slice(0, HISTORY_LIMIT);
 
-  if (rows.length === 0 && !notice) return null;
+  if (rows.length === 0 && pendingBrackets.length === 0 && !notice) return null;
 
   return (
     <div className="glass flex flex-col overflow-hidden">
@@ -97,6 +121,27 @@ export default function MyConditionalOrders({
         <p className="border-b border-hairline-soft px-4 py-2 text-xs text-sky">{notice}</p>
       )}
       <ul className="num max-h-72 flex-1 overflow-y-auto text-xs">
+        {pendingBrackets.map((intent) => (
+          <li
+            key={intent.id}
+            className="flex items-center gap-2 border-b border-hairline-soft bg-sky/4 px-4 py-2"
+            title="매수 주문이 체결되면 체결 평균가 기준으로 손절/익절 OCO를 등록합니다"
+          >
+            <span className="w-8 shrink-0 font-semibold text-sky">대기</span>
+            <span className="shrink-0 text-ink-muted">체결 후 자동 보호</span>
+            <span className="ml-auto whitespace-nowrap">
+              <span className="text-down">손절 −{(intent.stopBps / 100).toFixed(1)}%</span>
+              <span className="text-ink-faint"> · </span>
+              <span className="text-up">익절 +{(intent.takeBps / 100).toFixed(1)}%</span>
+            </span>
+            <button
+              onClick={() => cancelBracket(intent.id)}
+              className="btn btn-ghost btn-sm shrink-0"
+            >
+              취소
+            </button>
+          </li>
+        ))}
         {waiting.map((r) => (
           <li
             key={r.id}
@@ -128,7 +173,7 @@ export default function MyConditionalOrders({
             </button>
           </li>
         ))}
-        {waiting.length === 0 && (
+        {waiting.length === 0 && pendingBrackets.length === 0 && (
           <li className="px-4 py-3 text-center text-ink-faint">대기 중인 예약 주문 없음</li>
         )}
         {history.map((r) => {

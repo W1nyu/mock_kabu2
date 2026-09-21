@@ -184,6 +184,31 @@ model ConditionalOrder {
   @@schema("order")
 }
 
+/// 매수 주문에 붙인 "체결 후 손절/익절 자동 등록" 의도. 주문이 종결되면 API가 체결 평균가 기준으로
+/// OCO 조건부 주문을 만들고(ARMED), 체결이 없으면 CANCELED로 닫는다.
+model BracketIntent {
+  id           String   @id @default(uuid())
+  accountId    String   @map("account_id")
+  orderId      String   @unique @map("order_id")
+  symbol       String
+  /// 손절 거리(bps, 체결 평균가 아래)
+  stopBps      Int      @map("stop_bps")
+  /// 익절 거리(bps, 체결 평균가 위)
+  takeBps      Int      @map("take_bps")
+  status       String   @default("PENDING") // PENDING | ARMED | CANCELED
+  armedQty     Int      @default(0) @map("armed_qty")
+  avgFillPrice Int?     @map("avg_fill_price")
+  /// 등록된 OCO 그룹 또는 즉시 실행된 주문 ID 등 결과 설명
+  note         String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([accountId, createdAt])
+  @@map("bracket_intents")
+  @@schema("order")
+}
+
 /// Transactional Outbox — orders와 동일 트랜잭션으로 커밋, relayer가 발행
 model Outbox {
   eventId     String    @id @map("event_id")
