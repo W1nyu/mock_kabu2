@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, fmt, getToken, won } from "@/lib/api";
+import { drawdownOf, type Drawdown } from "@/lib/drawdown";
 
 export interface RealizedStats {
   fills: number;
@@ -18,27 +19,6 @@ export interface RealizedStats {
 interface EquityPoint {
   ts: number;
   equity: number;
-}
-
-interface Drawdown {
-  /** 최고 자산 대비 최대 낙폭 비율 (0~1) */
-  maxDrawdown: number;
-  peak: number;
-  /** 현재 자산의 최고점 대비 낙폭 (0~1) */
-  current: number;
-}
-
-/** 자산 추이 전체 구간에서 최고점 대비 최대 낙폭(MDD)과 현재 낙폭을 구한다. */
-function drawdownOf(points: EquityPoint[]): Drawdown | null {
-  if (points.length < 2) return null;
-  let peak = points[0].equity;
-  let maxDrawdown = 0;
-  for (const p of points) {
-    if (p.equity > peak) peak = p.equity;
-    if (peak > 0) maxDrawdown = Math.max(maxDrawdown, (peak - p.equity) / peak);
-  }
-  const last = points[points.length - 1].equity;
-  return { maxDrawdown, peak, current: peak > 0 ? Math.max(0, (peak - last) / peak) : 0 };
 }
 
 /** 매도 체결 단위 성과 요약 — 승률·평균 손익·손익비·최고/최저 + 자산 추이의 최대 낙폭. */
