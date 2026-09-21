@@ -6,6 +6,7 @@ import {
   Get,
   Header,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -50,6 +51,12 @@ export class OrderController {
   @Delete(":id")
   cancel(@CurrentUser() user: JwtUser, @Param("id") id: string) {
     return this.orders.cancel(user.accountId, id);
+  }
+
+  /** 지정가 정정(취소 후 남은 수량 재접수). body: { price?, qty? } — qty는 새 남은 수량. */
+  @Patch(":id")
+  amend(@CurrentUser() user: JwtUser, @Param("id") id: string, @Body() body: { price?: number; qty?: number }) {
+    return this.orders.amend(user.accountId, id, body);
   }
 
   /**

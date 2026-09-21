@@ -161,6 +161,66 @@ export class OrderService {
     return { ok: true };
   }
 
+  /**
+   * 정정 = 취소 + 재접수. 매칭 엔진이 단일 writer라 원자적 교체는 없다: 먼저 취소를 요청하고
+   * 주문이 실제로 종결된 것을 확인한 뒤에야 남은 수량으로 새 지정가를 낸다. 확인 전에 체결돼
+   * 버리면 새 주문을 내지 않고 그 사실을 돌려준다(이중 홀드·이중 체결 방지).
+   */
+  async amend(accountId: string, orderId: string, changes: { price?: number; qty?: number }) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException("주문을 찾을 수 없습니다");
+    if (order.accountId !== accountId) throw new ForbiddenException("본인 주문만 정정할 수 있습니다");
+    if (!LIVE_ORDER_STATUSES.includes(order.status)) {
+      throw new UnprocessableEntityException(`이미 종결된 주문입니다 (${order.status})`);
+    }
+    if (order.type !== "LIMIT" || order.price == null) {
+      throw new BadRequestException("지정가 주문만 정정할 수 있습니다");
+    }
+
+    const remaining = order.qty - order.filledQty;
+    const price = changes.price != null ? Number(changes.price) : order.price;
+    const qty = changes.qty != null ? Number(changes.qty) : remaining;
+    if (!Number.isInteger(price) || price <= 0) throw new BadRequestException("정정 가격은 양의 정수");
+    if (!Number.isInteger(qty) || qty <= 0) throw new BadRequestException("정정 수량은 양의 정수");
+    const tickSize = tickSizeOf(order.symbol);
+    if (tickSize != null && !isOnTick(price, tickSize)) {
+      throw new BadRequestException(`${order.symbol}의 호가 단위는 ${tickSize.toLocaleString("ko-KR")}원입니다`);
+    }
+    if (price === order.price && qty === remaining) {
+      throw new BadRequestException("바뀐 내용이 없습니다");
+    }
+
+    await this.cancel(accountId, orderId);
+    const closed = await this.waitUntilClosed(orderId, 4_000);
+    if (!closed) {
+      throw new UnprocessableEntityException("취소 확인이 지연돼 새 주문을 내지 않았습니다. 잠시 후 다시 시도하세요");
+    }
+    const unfilled = closed.qty - closed.filledQty;
+    if (closed.status === "FILLED" || unfilled <= 0) {
+      return { amended: false, reason: "취소 전에 전량 체결됐습니다", canceled: closed, order: null };
+    }
+    // 취소 확인 사이에 일부가 체결됐으면 정정 수량은 그 남은 양을 넘을 수 없다.
+    const nextQty = Math.min(qty, unfilled);
+    const placed = await this.place(accountId, {
+      symbol: order.symbol,
+      side: order.side as OrderSide,
+      type: "LIMIT",
+      price,
+      qty: nextQty,
+    });
+    return { amended: true, reason: null, canceled: closed, order: placed };
+  }
+
+  private async waitUntilClosed(orderId: string, timeoutMs: number) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const row = await this.prisma.order.findUnique({ where: { id: orderId } });
+      if (row && !LIVE_ORDER_STATUSES.includes(row.status)) return row;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return null;
+  }
+
   async myOrders(accountId: string, limit = 50, filter: MyOrdersFilter = {}) {
     const symbol = filter.symbol?.trim() || undefined;
     return this.prisma.order.findMany({

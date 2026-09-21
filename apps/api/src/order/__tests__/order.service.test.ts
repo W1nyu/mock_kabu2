@@ -49,3 +49,55 @@ describe("OrderService.place tick-size validation", () => {
     expect(findUnique).not.toHaveBeenCalled();
   });
 });
+
+describe("OrderService.amend", () => {
+  function liveOrder(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "order-1",
+      accountId: "account-1",
+      symbol: "TANU",
+      side: "BUY",
+      type: "LIMIT",
+      price: 7_000,
+      qty: 10,
+      filledQty: 2,
+      status: "PARTIAL",
+      ...overrides,
+    };
+  }
+
+  it("does not place a replacement when the order fills before the cancel lands", async () => {
+    const states = [liveOrder(), liveOrder({ status: "FILLED", filledQty: 10 })];
+    const prisma = { order: { findUnique: vi.fn().mockImplementation(() => Promise.resolve(states.shift() ?? liveOrder({ status: "FILLED", filledQty: 10 }))) } };
+    const service = new OrderService(prisma as never, {} as never, {} as never, {} as never);
+    const cancel = vi.spyOn(service, "cancel").mockResolvedValue({ ok: true });
+    const place = vi.spyOn(service, "place").mockResolvedValue({ id: "new" } as never);
+
+    const result = await service.amend("account-1", "order-1", { price: 7_010 });
+
+    expect(cancel).toHaveBeenCalledWith("account-1", "order-1");
+    expect(place).not.toHaveBeenCalled();
+    expect(result.amended).toBe(false);
+  });
+
+  it("re-places at most the quantity still unfilled after the cancel", async () => {
+    const states = [liveOrder(), liveOrder({ status: "CANCELED", filledQty: 5 })];
+    const prisma = { order: { findUnique: vi.fn().mockImplementation(() => Promise.resolve(states.shift() ?? liveOrder({ status: "CANCELED", filledQty: 5 }))) } };
+    const service = new OrderService(prisma as never, {} as never, {} as never, {} as never);
+    vi.spyOn(service, "cancel").mockResolvedValue({ ok: true });
+    const place = vi.spyOn(service, "place").mockResolvedValue({ id: "new" } as never);
+
+    const result = await service.amend("account-1", "order-1", { price: 7_010, qty: 8 });
+
+    // 요청은 8주지만 취소 확인 시점의 미체결은 5주뿐이다.
+    expect(place).toHaveBeenCalledWith("account-1", { symbol: "TANU", side: "BUY", type: "LIMIT", price: 7_010, qty: 5 });
+    expect(result.amended).toBe(true);
+  });
+
+  it("rejects an amend that changes nothing or breaks the tick grid", async () => {
+    const prisma = { order: { findUnique: vi.fn().mockResolvedValue(liveOrder()) } };
+    const service = new OrderService(prisma as never, {} as never, {} as never, {} as never);
+    await expect(service.amend("account-1", "order-1", { price: 7_000, qty: 8 })).rejects.toThrow(/바뀐 내용/);
+    await expect(service.amend("account-1", "order-1", { price: 7_005 })).rejects.toThrow(/호가 단위/);
+  });
+});
