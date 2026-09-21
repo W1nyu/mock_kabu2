@@ -45,6 +45,16 @@ async function call(method, path, body, { auth = true, expectStatus } = {}) {
   return json;
 }
 
+async function callWithHeaders(method, path, body, extraHeaders) {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...extraHeaders },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`${method} ${path} → ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  return res.json();
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitFor(name, probe, { timeoutMs = 15_000, intervalMs = 500 } = {}) {
@@ -84,6 +94,14 @@ async function main() {
   // 2) 호가 단위 위반은 400
   await call("POST", "/orders", { symbol, side: "BUY", type: "LIMIT", price: holding.lastPrice + 5, qty: 1 }, { expectStatus: 400 });
   check("off-tick limit price is rejected", true);
+
+  // 2b) 멱등 키: 같은 키의 재시도는 같은 주문을 돌려준다
+  const idemKey = `smoke-${suffix}-idem`;
+  const idemHeaders = { "idempotency-key": idemKey };
+  const first = await callWithHeaders("POST", "/orders", { symbol, side: "BUY", type: "LIMIT", price: Math.max(tick, Math.floor(holding.lastPrice / 2 / tick) * tick), qty: 1 }, idemHeaders);
+  const replay = await callWithHeaders("POST", "/orders", { symbol, side: "BUY", type: "LIMIT", price: Math.max(tick, Math.floor(holding.lastPrice / 2 / tick) * tick), qty: 1 }, idemHeaders);
+  check("idempotency key replays the same order", first.id === replay.id && replay.idempotentReplay === true, { first: first.id, replay: replay.id });
+  await call("DELETE", `/orders/${first.id}`);
 
   // 3) 시장가 매도 5주 → 실현손익 행
   await call("POST", "/orders", { symbol, side: "SELL", type: "MARKET", qty: 5 });
