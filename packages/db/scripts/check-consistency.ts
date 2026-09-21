@@ -4,6 +4,8 @@
  *  2) 음수 잔액 / 음수 홀드 / 잔액 초과 홀드 0건
  *  3) 보유 수량 음수 / 보유 초과 홀드(초과 매도 흔적) 0건
  *  4) 심볼별 총 주식 수 보존 리포트
+ *  5) 실현손익 행은 매도자의 실제 체결과 1:1 (고아·불일치 0건)
+ *  6) 조건부 주문: 발동 행은 접수 주문 ID 또는 실패 사유를 갖고, 대기 행이 현재가를 오래 넘겨 있지 않음
  */
 import { PrismaClient } from "@prisma/client";
 
@@ -148,6 +150,49 @@ async function main() {
       AND l.created_at < CURRENT_TIMESTAMP - INTERVAL '60 seconds'
   `;
   check("cached last price matches latest trade (60s grace)", staleLastPrices.length === 0, staleLastPrices);
+
+  // 5) 실현손익 ↔ 체결 원장. 각 행은 같은 tradeId의 매도자·수량·가격과 일치해야 한다.
+  const badRealized = await prisma.$queryRaw<{ trade_id: string; reason: string }[]>`
+    SELECT r.trade_id,
+      CASE
+        WHEN t.id IS NULL THEN 'trade missing'
+        WHEN t.seller_account_id <> r.account_id THEN 'seller mismatch'
+        WHEN t.symbol <> r.symbol OR t.qty <> r.qty OR t.price <> r.price THEN 'fill mismatch'
+        WHEN r.realized <> (r.price::bigint * r.qty) - r.cost_basis THEN 'arithmetic mismatch'
+        WHEN r.cost_basis < 0 THEN 'negative basis'
+        ELSE 'ok'
+      END AS reason
+    FROM account.realized_pnl r
+    LEFT JOIN matching.trades t ON t.id = r.trade_id
+    WHERE t.id IS NULL
+      OR t.seller_account_id <> r.account_id
+      OR t.symbol <> r.symbol OR t.qty <> r.qty OR t.price <> r.price
+      OR r.realized <> (r.price::bigint * r.qty) - r.cost_basis
+      OR r.cost_basis < 0
+  `;
+  check("realized_pnl rows match their sell fills", badRealized.length === 0, badRealized);
+
+  // 6) 조건부 주문 상태. TRIGGERED는 접수 주문이 있어야 하고(FAILED는 사유), WAITING 행이
+  //    현재가를 2분 넘게 만족한 채 남아 있으면 감시자가 멈춘 것이다 (트레일링은 트리거가 움직이므로 제외).
+  const badConditional = await prisma.$queryRaw<{ id: string; status: string; reason: string }[]>`
+    SELECT c.id, c.status,
+      CASE
+        WHEN c.status = 'TRIGGERED' AND c.triggered_order_id IS NULL THEN 'triggered without order'
+        WHEN c.status = 'FAILED' AND c.fail_reason IS NULL THEN 'failed without reason'
+        ELSE 'stale waiting'
+      END AS reason
+    FROM "order".conditional_orders c
+    JOIN market.symbols s ON s.symbol = c.symbol
+    WHERE (c.status = 'TRIGGERED' AND c.triggered_order_id IS NULL AND c.updated_at < CURRENT_TIMESTAMP - INTERVAL '60 seconds')
+      OR (c.status = 'FAILED' AND c.fail_reason IS NULL)
+      OR (
+        c.status = 'WAITING' AND c.trail_bps IS NULL
+        AND c.updated_at < CURRENT_TIMESTAMP - INTERVAL '2 minutes'
+        AND ((c.direction = 'AT_OR_ABOVE' AND s.last_price >= c.trigger_price)
+          OR (c.direction = 'AT_OR_BELOW' AND s.last_price <= c.trigger_price))
+      )
+  `;
+  check("conditional orders: triggered rows have an order, no stale waiting rows", badConditional.length === 0, badConditional);
 
   const totals = await prisma.$queryRaw<{ symbol: string; total: bigint }[]>`
     SELECT symbol, SUM(qty) AS total FROM account.holdings GROUP BY symbol ORDER BY symbol

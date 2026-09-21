@@ -1,5 +1,6 @@
 "use client";
 
+import type { ConditionalOrderDto } from "@mock-kabu/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmt, getUser, won } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
@@ -39,6 +40,8 @@ export default function MyPosition({
   const [protectQty, setProtectQty] = useState("");
   const [protectBusy, setProtectBusy] = useState(false);
   const [protectError, setProtectError] = useState<string | null>(null);
+  /** 이 종목에 걸려 있는 대기 중 매도 예약 — 포지션이 어떤 보호를 받고 있는지 한 줄로 보여준다 */
+  const [guards, setGuards] = useState<ConditionalOrderDto[]>([]);
   const [realized, setRealized] = useState<number | null>(null);
   const [livePrice, setLivePrice] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -56,6 +59,9 @@ export default function MyPosition({
         setRealized(row && row.qty > 0 ? row.realized : null);
       })
       .catch(() => {});
+    api<ConditionalOrderDto[]>(`/orders/conditional?symbol=${symbol}&status=WAITING&limit=20`)
+      .then((rows) => setGuards(rows.filter((row) => row.side === "SELL")))
+      .catch(() => {});
   }, [symbol]);
 
   useEffect(() => {
@@ -66,6 +72,7 @@ export default function MyPosition({
     setMessage(null);
     setProtecting(false);
     setProtectError(null);
+    setGuards([]);
     refresh();
     const t = setInterval(refresh, 5000);
     const user = getUser();
@@ -150,6 +157,7 @@ export default function MyPosition({
         `손절 ${fmt.format(Number(stopPrice))} / 익절 ${fmt.format(Number(takePrice))} 예약 등록 (${fmt.format(Number(protectQty))}주)`,
       );
       setProtecting(false);
+      refresh();
       onProtected?.();
     } catch (err) {
       setProtectError(err instanceof Error ? err.message : "예약 실패");
@@ -186,6 +194,13 @@ export default function MyPosition({
             {(pnlRate * 100).toFixed(2)}%)
           </span>
         </Item>
+        {guards.length > 0 && (
+          <Item label="보호">
+            <span className="text-ink-muted" title="이 종목에 대기 중인 매도 예약 주문">
+              {guardSummary(guards)}
+            </span>
+          </Item>
+        )}
         {realized != null && (
           <Item label="실현손익">
             <span
@@ -273,6 +288,24 @@ export default function MyPosition({
       )}
     </div>
   );
+}
+
+/** "손절 18,900 · 익절 19,000 · 트레일링 3%"처럼 대기 중 매도 예약을 한 줄로 요약한다. */
+function guardSummary(rows: ConditionalOrderDto[]): string {
+  const parts: string[] = [];
+  const trailing = rows.filter((r) => r.trailBps != null);
+  const stops = rows.filter((r) => r.trailBps == null && r.direction === "AT_OR_BELOW");
+  const takes = rows.filter((r) => r.trailBps == null && r.direction === "AT_OR_ABOVE");
+  if (stops.length > 0)
+    parts.push(`손절 ${fmt.format(Math.max(...stops.map((r) => r.triggerPrice)))}`);
+  if (takes.length > 0)
+    parts.push(`익절 ${fmt.format(Math.min(...takes.map((r) => r.triggerPrice)))}`);
+  for (const r of trailing) {
+    parts.push(
+      `트레일링 ${(r.trailBps! / 100).toFixed(r.trailBps! % 100 === 0 ? 0 : 1)}% (현재 ${fmt.format(r.triggerPrice)})`,
+    );
+  }
+  return parts.join(" · ");
 }
 
 function pctVsAvg(target: number, avgCost: number): string | undefined {
