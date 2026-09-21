@@ -80,6 +80,35 @@ const CONDITIONAL_STATUS_TONE: Record<ConditionalOrderDto["status"], string> = {
 
 const TAB_STORAGE_KEY = "orders:tab";
 
+/** 체결 내역을 CSV로 내려받는다. Excel 한글 깨짐 방지를 위해 UTF-8 BOM을 붙인다. */
+function downloadFillsCsv(fills: FillRow[]) {
+  const header = ["시각(KST)", "종목", "구분", "체결가", "수량", "체결금액", "실현손익", "차감원가", "테이커"];
+  const escape = (value: string | number | null) =>
+    value == null ? "" : /[",\n]/.test(String(value)) ? `"${String(value).replace(/"/g, '""')}"` : String(value);
+  const lines = fills.map((f) =>
+    [
+      new Date(f.ts).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false }),
+      f.symbol,
+      SIDE_LABEL[f.side],
+      f.price,
+      f.qty,
+      f.amount,
+      f.realized,
+      f.costBasis,
+      f.taker ? "테이커" : "메이커",
+    ]
+      .map(escape)
+      .join(","),
+  );
+  const blob = new Blob(["\uFEFF" + [header.join(","), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `fills-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function OrdersPage() {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("orders");
@@ -146,6 +175,11 @@ export default function OrdersPage() {
           <h1 className="text-2xl font-semibold tracking-tight">{current.title}</h1>
           <p className="mt-1 text-sm text-ink-muted">{current.hint}</p>
         </div>
+        {tab === "fills" && fills.length > 0 && (
+          <button type="button" onClick={() => downloadFillsCsv(fills)} className="btn btn-ghost btn-sm">
+            CSV 내려받기
+          </button>
+        )}
         <div className="well flex gap-0.5 p-0.5" role="tablist" aria-label="내역 종류">
           {TABS.map((t) => (
             <button

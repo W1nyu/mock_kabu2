@@ -59,6 +59,9 @@ const SPARK_INTERVAL = "5m";
 const SPARK_POINTS = 72;
 const SPARK_REFRESH_MS = 5 * 60 * 1000;
 
+type SortKey = "symbol" | "price" | "change" | "turnover";
+const SORT_STORAGE_KEY = "dashboard:symbol-sort";
+
 function finiteNumber(value: unknown): number | null {
   if (value == null || value === "") return null;
   const number = typeof value === "number" ? value : Number(value);
@@ -96,6 +99,36 @@ export default function DashboardPage() {
   const [turnovers, setTurnovers] = useState<Record<string, number>>({});
   const [news, setNews] = useState<NewsItemDto[]>([]);
   const [sparks, setSparks] = useState<Record<string, number[]>>({});
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "symbol", dir: "asc" });
+
+  // 정렬 선택은 브라우저에 남긴다 — 마운트 후 읽어 hydration mismatch를 피한다.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SORT_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { key: SortKey; dir: "asc" | "desc" };
+      if (["symbol", "price", "change", "turnover"].includes(parsed.key) && (parsed.dir === "asc" || parsed.dir === "desc")) {
+        setSort(parsed);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  function toggleSort(key: SortKey) {
+    setSort((current) => {
+      const next =
+        current.key === key
+          ? { key, dir: current.dir === "asc" ? ("desc" as const) : ("asc" as const) }
+          : { key, dir: key === "symbol" ? ("asc" as const) : ("desc" as const) };
+      try {
+        window.localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }
   const turnoverWatermarksRef = useRef(new Map<string, number>());
   const pendingTurnoverTicksRef = useRef(new Map<string, Map<string, TradeTick>>());
 
@@ -232,15 +265,29 @@ export default function DashboardPage() {
     });
   }, [symbols]);
 
-  const liveSymbols = useMemo(
-    () =>
-      symbols.map((symbol) => ({
-        ...symbol,
-        lastPrice: livePrices[symbol.symbol] ?? symbol.lastPrice,
-        turnover: turnovers[symbol.symbol],
-      })),
-    [livePrices, symbols, turnovers],
-  );
+  const liveSymbols = useMemo(() => {
+    const rows = symbols.map((symbol) => ({
+      ...symbol,
+      lastPrice: livePrices[symbol.symbol] ?? symbol.lastPrice,
+      turnover: turnovers[symbol.symbol],
+    }));
+    const sign = sort.dir === "asc" ? 1 : -1;
+    const valueOf = (row: (typeof rows)[number]) => {
+      switch (sort.key) {
+        case "price":
+          return row.lastPrice;
+        case "change":
+          return row.initialPrice > 0 ? (row.lastPrice - row.initialPrice) / row.initialPrice : 0;
+        case "turnover":
+          return row.turnover ?? 0;
+        default:
+          return 0;
+      }
+    };
+    return rows.sort((a, b) =>
+      sort.key === "symbol" ? sign * a.symbol.localeCompare(b.symbol) : sign * (valueOf(a) - valueOf(b)),
+    );
+  }, [livePrices, symbols, turnovers, sort]);
   const liveHoldings = useMemo(
     () =>
       holdings.map((holding) => {
@@ -358,15 +405,20 @@ export default function DashboardPage() {
           <table className="tbl tbl-hover">
             <thead>
               <tr>
-                <th>종목</th>
+                <SortableTh label="종목" sortKey="symbol" sort={sort} onSort={toggleSort} />
                 <th className="text-right" title="모의 시장 시작 기준가">
                   기준가(시가)
                 </th>
-                <th className="text-right">현재가</th>
-                <th className="text-right">등락률</th>
-                <th className="text-right" title="KST 당일 누적 체결 금액을 만 원 단위로 표시">
-                  거래대금 (만 원)
-                </th>
+                <SortableTh label="현재가" sortKey="price" sort={sort} onSort={toggleSort} align="right" />
+                <SortableTh label="등락률" sortKey="change" sort={sort} onSort={toggleSort} align="right" />
+                <SortableTh
+                  label="거래대금 (만 원)"
+                  sortKey="turnover"
+                  sort={sort}
+                  onSort={toggleSort}
+                  align="right"
+                  title="KST 당일 누적 체결 금액을 만 원 단위로 표시"
+                />
                 <th className="text-right" title="최근 6시간 5분봉 종가 흐름">
                   6시간 흐름
                 </th>
@@ -499,6 +551,38 @@ export default function DashboardPage() {
         )}
       </section>
     </div>
+  );
+}
+
+function SortableTh({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  align,
+  title,
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: { key: SortKey; dir: "asc" | "desc" };
+  onSort: (key: SortKey) => void;
+  align?: "right";
+  title?: string;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th className={align === "right" ? "text-right" : undefined} title={title} aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-ink ${active ? "text-ink" : ""}`}
+      >
+        {label}
+        <span className={`text-[10px] ${active ? "text-sky" : "text-ink-faint"}`} aria-hidden>
+          {active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
+        </span>
+      </button>
+    </th>
   );
 }
 
