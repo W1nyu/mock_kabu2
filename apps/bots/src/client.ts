@@ -59,6 +59,23 @@ export class ApiClient {
     return this.request("POST", "/orders", order) as Promise<{ id: string }>;
   }
 
+  listConditional(status?: string) {
+    const query = status ? `?status=${status}&limit=100` : "?limit=100";
+    return this.request("GET", `/orders/conditional${query}`) as Promise<unknown[]>;
+  }
+
+  /** 조건부(예약) 주문. 고정 트리거는 direction+triggerPrice, 트레일링은 trailBps만 준다. */
+  placeConditional(order: {
+    symbol: string;
+    side: OrderSide;
+    qty: number;
+    direction?: "AT_OR_ABOVE" | "AT_OR_BELOW";
+    triggerPrice?: number;
+    trailBps?: number;
+  }) {
+    return this.request("POST", "/orders/conditional", order) as Promise<{ id: string; status: string }>;
+  }
+
   cancelOrder(orderId: string) {
     return this.request("DELETE", `/orders/${orderId}`);
   }

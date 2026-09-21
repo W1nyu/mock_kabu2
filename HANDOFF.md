@@ -47,7 +47,11 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — API 하드닝 (최신 작업)
+## 2026-09-22 — 봇 보호 스탑 (최신 작업)
+
+- `apps/bots/src/main.ts` `ProtectiveStops`: 소액개미(bot6·7)는 시장가 매수 뒤 60% 확률로 기준가 1.5~4% 아래 고정 손절을, 모멘텀(bot10)은 매수 뒤 70% 확률로 2~3% 트레일링을 API `POST /orders/conditional`로 건다(`ApiClient.placeConditional/listConditional`). 봇당 대기 상한 12건(1분마다 재계수), 거절은 조용히 무시. 수량이 1~5주라 시장을 흔들지 않으면서 하락 국면에 스탑 연쇄 매도가 섞인다. 조건부 감시자 부하는 종목당 수십 건 수준.
+
+## 2026-09-22 — API 하드닝
 
 - **주문 상한**: shared `MAX_ORDER_QTY`(1천만 주)·`MAX_ORDER_PRICE`(10억 원). DB price/qty가 Int32라 상한 없이는 이상 주문이 호가창을 왜곡한다. `OrderService.place`에서 400.
 - **주문 멱등성**: `POST /orders`에 `Idempotency-Key` 헤더(1~128자)를 주면 `placeIdempotent()`가 Redis `SET NX EX 86400`로 키를 선점하고, 같은 키의 재시도에는 기존 주문을 `idempotentReplay:true`와 함께 돌려준다(접수 실패 시 키 삭제, 동시 재시도는 최대 2초 대기). 웹 주문폼은 제출마다 `newIdempotencyKey()`를 보낸다(더블 클릭·재시도 보호). 키 `KEYS.orderIdempotency`.

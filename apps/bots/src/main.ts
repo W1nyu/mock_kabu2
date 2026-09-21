@@ -30,6 +30,14 @@ const MIN_CANDLE_HISTORY_FOR_RANGE = 64;
 // enough that the private reference adopts the new clearing price before the
 // old liquidity wall has time to pull the market back.
 const MARKET_OBSERVATION_INTERVAL_MS = 500;
+/**
+ * 보호 스탑: 소액개미는 시장가 매수 뒤 일정 확률로 고정 손절을, 모멘텀은 트레일링 손절을 건다.
+ * 하락 국면에서 스탑이 연쇄로 터지는 "스탑 헌팅" 흐름이 생기되, 수량이 1~5주라 시장을 뒤흔들지는 않는다.
+ * 계정당 대기 50건(API 한도)을 넘지 않도록 봇마다 잔여 슬롯을 센다.
+ */
+const RETAIL_STOP_PROBABILITY = 0.6;
+const MOMENTUM_TRAIL_PROBABILITY = 0.7;
+const PROTECTIVE_STOPS_PER_BOT = 12;
 const MARKET_OBSERVATION_BATCH_SIZE = 40;
 
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
@@ -236,8 +244,54 @@ async function runRandomFlowTrader(
   }
 }
 
+/**
+ * 매수 뒤에 거는 보호 스탑. 등록 실패(한도·이미 만족·거절)는 흐름에 영향이 없으니 조용히 넘긴다.
+ * 슬롯은 대략적인 상한이며, 발동/취소로 비는 만큼 다시 채우지는 않는다(주기적으로 재계수).
+ */
+class ProtectiveStops {
+  private slots = PROTECTIVE_STOPS_PER_BOT;
+  private lastRecountAt = 0;
+
+  constructor(private readonly client: ApiClient) {}
+
+  private async recount(): Promise<void> {
+    if (Date.now() - this.lastRecountAt < 60_000) return;
+    this.lastRecountAt = Date.now();
+    try {
+      const waiting = (await this.client.listConditional("WAITING")) as { id: string }[];
+      this.slots = Math.max(0, PROTECTIVE_STOPS_PER_BOT - waiting.length);
+    } catch {
+      // 재계수 실패는 다음 기회에.
+    }
+  }
+
+  async fixedStop(def: SymbolDef, qty: number, referencePrice: number, dropRatio: number): Promise<void> {
+    await this.recount();
+    if (this.slots <= 0) return;
+    const triggerPrice = toTick(referencePrice * (1 - dropRatio), def);
+    try {
+      await this.client.placeConditional({ symbol: def.symbol, side: "SELL", qty, direction: "AT_OR_BELOW", triggerPrice });
+      this.slots -= 1;
+    } catch (error) {
+      if (!isRejection(error)) throw error;
+    }
+  }
+
+  async trailingStop(def: SymbolDef, qty: number, trailBps: number): Promise<void> {
+    await this.recount();
+    if (this.slots <= 0) return;
+    try {
+      await this.client.placeConditional({ symbol: def.symbol, side: "SELL", qty, trailBps });
+      this.slots -= 1;
+    } catch (error) {
+      if (!isRejection(error)) throw error;
+    }
+  }
+}
+
 /** Small retail flow: mostly tiny, occasionally marketable orders. */
 async function runRetailTrader(client: ApiClient, ref: MarketModel, activity: VolumeActivity, name: string) {
+  const stops = new ProtectiveStops(client);
   while (true) {
     const def = SYMBOLS[randInt(0, SYMBOLS.length - 1)];
     const sample = eventAdjustedSample(ref, def.symbol, activity.sample(def.symbol));
@@ -257,6 +311,10 @@ async function runRetailTrader(client: ApiClient, ref: MarketModel, activity: Vo
       if (useMarketOrder) {
         const { qty } = await liveMarketQty(client, def, side, ref.get(def.symbol), sample, 1, 5, 0.05);
         await client.placeOrder({ symbol: def.symbol, side, type: "MARKET", qty });
+        // 개미는 산 뒤에 1.5~4% 아래 손절을 걸어 두곤 한다.
+        if (side === "BUY" && Math.random() < RETAIL_STOP_PROBABILITY) {
+          await stops.fixedStop(def, qty, ref.get(def.symbol), rand(0.015, 0.04));
+        }
       } else {
         const drift = side === "BUY" ? rand(0.997, 1.001) : rand(0.999, 1.003);
         const price = toTick(ref.get(def.symbol) * drift, def);
@@ -345,6 +403,7 @@ async function runNoiseTrader(client: ApiClient, ref: MarketModel, activity: Vol
 
 /** A small trend follower based on recent durable trades. */
 async function runMomentumTrader(client: ApiClient, ref: MarketModel, activity: VolumeActivity, name: string) {
+  const stops = new ProtectiveStops(client);
   while (true) {
     const def = SYMBOLS[randInt(0, SYMBOLS.length - 1)];
     const sample = eventAdjustedSample(ref, def.symbol, activity.sample(def.symbol));
@@ -363,6 +422,10 @@ async function runMomentumTrader(client: ApiClient, ref: MarketModel, activity: 
             type: "MARKET",
             qty,
           });
+          // 추세 추종자는 고점 대비 2~3% 되돌림에 빠져나오는 트레일링을 선호한다.
+          if (side === "BUY" && Math.random() < MOMENTUM_TRAIL_PROBABILITY) {
+            await stops.trailingStop(def, qty, randInt(200, 300));
+          }
         }
       }
     } catch (error) {
