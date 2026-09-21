@@ -37,4 +37,6 @@ export interface ReadinessReport {
   };
   /** Worker state is informative and does not gate API traffic readiness. */
   workers: Record<string, WorkerHealth>;
+  /** In-process background jobs (conditional-order watcher, equity snapshots). Informative only. */
+  background?: Record<string, Record<string, unknown>>;
 }

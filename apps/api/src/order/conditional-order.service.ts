@@ -6,6 +6,7 @@ import {
   NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
+  Optional,
 } from "@nestjs/common";
 import type { PrismaClient } from "@mock-kabu/db";
 import {
@@ -25,6 +26,7 @@ import {
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
 import { randomUUID } from "node:crypto";
+import { BackgroundStatusRegistry } from "../core/background-status";
 import { PRISMA, REDIS_SUB } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
 import { OrderService } from "./order.service";
@@ -88,9 +90,13 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
   /** symbol → id → 대기 주문. 한 프로세스가 같은 행을 두 번 발동시키지 않도록 발동 전에 먼저 지운다. */
   private readonly waiting = new Map<string, Map<string, WaitingRow>>();
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private lastTickAt: number | null = null;
+  private triggeredCount = 0;
+  private failedCount = 0;
   private readonly onMessage = (_pattern: string, channel: string, message: string) => {
     const symbol = this.symbolFromTradeChannel(channel);
     if (!symbol) return;
+    this.lastTickAt = Date.now();
     try {
       const tick = JSON.parse(message) as { price?: unknown };
       if (typeof tick.price === "number" && Number.isFinite(tick.price)) this.onTick(symbol, tick.price);
@@ -104,9 +110,17 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     @Inject(REDIS_SUB) private sub: Redis,
     private orders: OrderService,
     private realtime: RealtimeGateway,
+    @Optional() private background?: BackgroundStatusRegistry,
   ) {}
 
   async onModuleInit() {
+    this.background?.register("conditionalOrders", () => ({
+      status: "up",
+      waiting: [...this.waiting.values()].reduce((sum, rows) => sum + rows.size, 0),
+      lastTickAt: this.lastTickAt ? new Date(this.lastTickAt).toISOString() : null,
+      triggered: this.triggeredCount,
+      failed: this.failedCount,
+    }));
     await this.reloadIndex();
     this.sub.on("pmessage", this.onMessage);
     // 게이트웨이도 같은 패턴을 구독하지만 Redis는 클라이언트별로 중복 없이 관리한다.
@@ -121,6 +135,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy() {
+    this.background?.unregister("conditionalOrders");
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     this.sub.off("pmessage", this.onMessage);
   }
@@ -361,6 +376,8 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
         where: { id: row.id },
         data: triggeredOrderId ? { triggeredOrderId } : { status: "FAILED", failReason },
       });
+      if (triggeredOrderId) this.triggeredCount += 1;
+      else this.failedCount += 1;
       this.realtime.notifyAccount(row.accountId, {
         type: "conditional",
         id: row.id,

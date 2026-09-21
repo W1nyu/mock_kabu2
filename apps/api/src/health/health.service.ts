@@ -2,6 +2,7 @@ import { Inject, Injectable, Optional } from "@nestjs/common";
 import { KEYS, WORKERS } from "@mock-kabu/shared";
 import type { PrismaClient } from "@mock-kabu/db";
 import type Redis from "ioredis";
+import { BackgroundStatusRegistry } from "../core/background-status";
 import { HEALTH_WORKER_PROBE, PRISMA, REDIS } from "../core/tokens";
 import type {
   DependencyHealth,
@@ -17,6 +18,7 @@ export class HealthService {
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     @Inject(REDIS) private readonly redis: Redis,
     @Optional() @Inject(HEALTH_WORKER_PROBE) private readonly workerProbe?: HealthWorkerProbe,
+    @Optional() private readonly background?: BackgroundStatusRegistry,
   ) {}
 
   liveness(): LivenessReport {
@@ -37,6 +39,7 @@ export class HealthService {
       timestamp: new Date().toISOString(),
       dependencies: { database, redis },
       workers,
+      ...(this.background ? { background: this.background.snapshot() } : {}),
     };
   }
 

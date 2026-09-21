@@ -1,5 +1,6 @@
-import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from "@nestjs/common";
 import type { PrismaClient } from "@mock-kabu/db";
+import { BackgroundStatusRegistry } from "../core/background-status";
 import { PRISMA } from "../core/tokens";
 
 const SNAPSHOT_INTERVAL_MS = 60_000;
@@ -37,10 +38,28 @@ export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private compactTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
+  private lastSnapshotAt: number | null = null;
+  private lastInserted = 0;
+  private lastError: string | null = null;
 
-  constructor(@Inject(PRISMA) private prisma: PrismaClient) {}
+  constructor(
+    @Inject(PRISMA) private prisma: PrismaClient,
+    @Optional() private background?: BackgroundStatusRegistry,
+  ) {}
 
   onModuleInit() {
+    this.background?.register("equitySnapshots", () => ({
+      // 2분 넘게 스냅샷이 없으면 스케줄러가 멈춘 것이다.
+      status:
+        this.lastSnapshotAt == null
+          ? "starting"
+          : Date.now() - this.lastSnapshotAt > 2 * SNAPSHOT_INTERVAL_MS
+            ? "degraded"
+            : "up",
+      lastSnapshotAt: this.lastSnapshotAt ? new Date(this.lastSnapshotAt).toISOString() : null,
+      lastInserted: this.lastInserted,
+      lastError: this.lastError,
+    }));
     // 즉시 한 번 찍고, 그 뒤로는 매 분 경계에 맞춰 기록한다.
     void this.snapshot();
     this.scheduleNext();
@@ -49,6 +68,7 @@ export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy() {
+    this.background?.unregister("equitySnapshots");
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     if (this.compactTimer) clearInterval(this.compactTimer);
@@ -107,8 +127,12 @@ export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
         ) v ON v.account_id = a.id
         ON CONFLICT (account_id, ts) DO NOTHING
       `;
+      this.lastSnapshotAt = Date.now();
+      this.lastInserted = inserted;
+      this.lastError = null;
       return inserted;
     } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
       console.error("[equity] snapshot failed", error);
       return 0;
     }

@@ -2,6 +2,7 @@ import { Global, Module } from "@nestjs/common";
 import { getPrisma } from "@mock-kabu/db";
 import { createBalanceMutator } from "@mock-kabu/concurrency";
 import Redis from "ioredis";
+import { BackgroundStatusRegistry } from "./background-status";
 import { CoreLifecycleService } from "./core-lifecycle.service";
 import { readApiRuntimeConfig, type ApiRuntimeConfig } from "./runtime-config";
 import { API_RUNTIME_CONFIG, BALANCE_MUTATOR, PRISMA, REDIS, REDIS_SUB } from "./tokens";
@@ -32,7 +33,8 @@ const runtimeConfig = readApiRuntimeConfig();
       },
     },
     CoreLifecycleService,
+    BackgroundStatusRegistry,
   ],
-  exports: [API_RUNTIME_CONFIG, PRISMA, REDIS, REDIS_SUB, BALANCE_MUTATOR],
+  exports: [API_RUNTIME_CONFIG, PRISMA, REDIS, REDIS_SUB, BALANCE_MUTATOR, BackgroundStatusRegistry],
 })
 export class CoreModule {}
