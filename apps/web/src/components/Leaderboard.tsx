@@ -11,6 +11,8 @@ interface LeaderRow {
   deposits: number;
   pnl: number;
   returnRate: number | null;
+  indexRate: number | null;
+  alpha: number | null;
   realized: number;
   me: boolean;
 }
@@ -64,6 +66,9 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
               <th className="text-right" title="(총 자산 − 순입금) ÷ 순입금">
                 수익률
               </th>
+              <th className="text-right" title="가입 이후 시장 지수 등락 대비 초과수익 (수익률 − 지수 등락률)">
+                지수 대비
+              </th>
               <th className="text-right" title="매도 체결에서 확정된 손익 합계">
                 실현손익
               </th>
@@ -96,6 +101,14 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
                   </td>
                   <td
                     className={`num text-right ${
+                      row.alpha == null ? "text-ink-faint" : row.alpha > 0 ? "text-up" : row.alpha < 0 ? "text-down" : "text-ink-muted"
+                    }`}
+                    title={row.indexRate != null ? `가입 이후 지수 ${row.indexRate > 0 ? "+" : ""}${(row.indexRate * 100).toFixed(2)}%` : undefined}
+                  >
+                    {row.alpha == null ? "—" : `${row.alpha > 0 ? "+" : ""}${(row.alpha * 100).toFixed(2)}%p`}
+                  </td>
+                  <td
+                    className={`num text-right ${
                       row.realized > 0 ? "text-up" : row.realized < 0 ? "text-down" : "text-ink-faint"
                     }`}
                   >
@@ -107,7 +120,7 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
             })}
             {(!board || board.rows.length === 0) && (
               <tr>
-                <td colSpan={5} className="py-10 text-center text-sm text-ink-faint">
+                <td colSpan={6} className="py-10 text-center text-sm text-ink-faint">
                   {board ? "아직 투자자가 없습니다" : "랭킹을 불러오는 중…"}
                 </td>
               </tr>

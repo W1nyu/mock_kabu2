@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import type { BalanceMutator } from "@mock-kabu/concurrency";
-import type { PrismaClient } from "@mock-kabu/db";
+import { Prisma, type PrismaClient } from "@mock-kabu/db";
 import { SYMBOLS } from "@mock-kabu/shared";
 import { koreaDayStart } from "../common/market-time";
 import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
@@ -213,6 +213,7 @@ export class AccountService {
         deposits: bigint;
         realized: bigint;
         joined_at: Date;
+        index_ratio: number | null;
       }[]
     >`
       SELECT
@@ -221,7 +222,18 @@ export class AccountService {
         a.balance + COALESCE(v.stock_value, 0) AS equity,
         COALESCE(d.deposits, 0) AS deposits,
         COALESCE(r.realized, 0) AS realized,
-        u.created_at AS joined_at
+        u.created_at AS joined_at,
+        -- 가입 시점 대비 시장 지수 배율: 종목별 현재가 / 가입 직전 1분봉 종가(없으면 기준가)의 평균
+        (
+          SELECT AVG(s.last_price::double precision / COALESCE(c.close, s.initial_price))
+          FROM market.symbols s
+          LEFT JOIN LATERAL (
+            SELECT close FROM market.candles c
+            WHERE c.symbol = s.symbol AND c.interval = '1m' AND c.ts <= u.created_at
+            ORDER BY c.ts DESC LIMIT 1
+          ) c ON true
+          WHERE s.symbol IN (${Prisma.join(SYMBOLS.map((symbol) => symbol.symbol))})
+        ) AS index_ratio
       FROM account.accounts a
       JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false
       LEFT JOIN (
@@ -247,6 +259,8 @@ export class AccountService {
         const equity = Number(row.equity);
         const deposits = Number(row.deposits);
         const pnl = equity - deposits;
+        const returnRate = deposits > 0 ? pnl / deposits : null;
+        const indexRate = row.index_ratio != null && Number.isFinite(row.index_ratio) ? row.index_ratio - 1 : null;
         return {
           accountId: row.account_id,
           nickname: row.nickname,
@@ -254,7 +268,10 @@ export class AccountService {
           deposits,
           pnl,
           // 순입금이 0 이하(이체로 전부 내보낸 계정)는 수익률을 정의하지 않고 맨 뒤로 보낸다.
-          returnRate: deposits > 0 ? pnl / deposits : null,
+          returnRate,
+          /** 가입 이후 시장 지수 등락률과 그 대비 초과수익(알파) */
+          indexRate,
+          alpha: returnRate != null && indexRate != null ? returnRate - indexRate : null,
           realized: Number(row.realized),
           joinedAt: row.joined_at.toISOString(),
           me: row.account_id === viewerAccountId,

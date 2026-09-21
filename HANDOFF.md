@@ -81,6 +81,7 @@
 ## 2026-09-22 — 매매 성과·투자자 랭킹·종목 추세선
 
 - **매매 성과**: `GET /account/realized`가 `stats {fills, wins, losses, winRate, avgWin, avgLoss, profitFactor, best, worst}`를 추가로 돌려준다(실현손익 테이블 집계, 손익 0 체결은 승/패 제외). 웹 `PerformanceCard.tsx`가 대시보드 자산 추이 오른쪽(lg 3열 중 1열)에 표시.
+- **랭킹 지수 대비(알파)**: `getLeaderboard`가 LATERAL 서브쿼리로 가입 직전 1분봉 종가(없으면 기준가) 대비 현재가 배율의 종목 평균(`index_ratio`)을 구해 `indexRate = ratio − 1`, `alpha = returnRate − indexRate`를 준다. 웹 표에 "지수 대비 +x.xx%p" 열(툴팁에 가입 이후 지수 등락). 현금만 든 계정은 하락장에서 알파가 양수로 나온다 — 의도(현금 보유가 시장을 이긴 것).
 - **투자자 랭킹**: `GET /account/leaderboard?limit=` — 사용자(non-bot) 계정을 수익률 `(총자산 − 순입금) / 순입금` 순으로. 순입금 = `SIGNUP_BONUS/SEED/TRANSFER_IN/TRANSFER_OUT` 원장 합, 총자산 = 현금 + Σ보유×`last_price`(실시간 평가). 순입금 ≤ 0은 수익률 null로 맨 뒤. 응답 `{total, rows}`이며 내 행(`me:true`)은 상위 밖이어도 마지막에 붙는다. 웹 `Leaderboard.tsx`가 대시보드 뉴스 아래·보유 자산 위에 표시(30초 폴링). **Nav 메뉴는 LEGACY MENU LOCK 때문에 추가하지 않았다** — 별도 페이지가 필요하면 제품 결정 후 추가.
 - **종목 추세선**: 대시보드 종목 표에 `Sparkline.tsx`(인라인 SVG) 열 "6시간 흐름" — 5분봉 종가 72개, 실시간 가격이 마지막 점을 대체, 5분마다 재조회.
 - 웹 코드 포맷 주의: 저장소에 prettier 설정이 없어 기본(80열)으로 돌리면 기존 100열 스타일 파일이 통째로 바뀐다. 포맷이 필요하면 `npx prettier --print-width 100`을 쓰거나 패치 범위만 손보기.
