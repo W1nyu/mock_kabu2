@@ -2,7 +2,7 @@
 
 이 저장소에서 작업하는 모든 AI 에이전트(Claude Code, Codex, Gemini CLI 등)를 위한 안내.
 
-**먼저 읽을 것:** [HANDOFF.md](HANDOFF.md) — 최근 작업 상태·의도·다음 후보 작업. 프로젝트 개요·실행법은 [README.md](README.md).
+**먼저 읽을 것:** [HANDOFF.md](HANDOFF.md) — 최근 작업 상태·의도·다음 후보 작업. 프로젝트 개요·실행법은 [README.md](README.md), 엔드포인트는 [docs/api.md](docs/api.md).
 
 ## 프로젝트 구조
 
