@@ -13,6 +13,16 @@ const STATUS_LABEL: Record<ConditionalOrderDto["status"], string> = {
   FAILED: "실패",
 };
 
+/** 트레일링이면 추적 거리를 함께 적는다 — 트리거 가격이 계속 움직이므로 무엇을 따르는지 보여야 한다. */
+function conditionLabel(r: ConditionalOrderDto): string {
+  if (r.trailBps != null) {
+    return `${r.side === "SELL" ? "트레일링 손절" : "트레일링 매수"} ${(r.trailBps / 100).toFixed(
+      r.trailBps % 100 === 0 ? 0 : 1,
+    )}%`;
+  }
+  return describeCondition(r.direction, r.side);
+}
+
 /** 최근 이력은 몇 건만 보여 대기 목록이 밀리지 않게 한다. */
 const HISTORY_LIMIT = 5;
 
@@ -92,18 +102,25 @@ export default function MyConditionalOrders({
             key={r.id}
             className="flex items-center gap-2 border-b border-hairline-soft px-4 py-2 last:border-b-0"
           >
-            <span className={`w-8 shrink-0 font-semibold ${r.side === "BUY" ? "text-up" : "text-down"}`}>
+            <span
+              className={`w-8 shrink-0 font-semibold ${r.side === "BUY" ? "text-up" : "text-down"}`}
+            >
               {r.side === "BUY" ? "매수" : "매도"}
             </span>
-            <span className="shrink-0 text-ink-muted">{describeCondition(r.direction, r.side)}</span>
+            <span className="shrink-0 text-ink-muted">{conditionLabel(r)}</span>
             {r.ocoGroupId && (
               <span className="chip" title="OCO — 짝 주문이 발동하면 자동 취소됩니다">
                 OCO
               </span>
             )}
-            <span className="ml-auto whitespace-nowrap">
+            <span
+              className="ml-auto whitespace-nowrap"
+              title={r.watermark != null ? `추적 기준 ${fmt.format(r.watermark)}원` : undefined}
+            >
               {fmt.format(r.triggerPrice)}
-              <span className="text-ink-faint">{r.direction === "AT_OR_ABOVE" ? " 이상" : " 이하"}</span>
+              <span className="text-ink-faint">
+                {r.direction === "AT_OR_ABOVE" ? " 이상" : " 이하"}
+              </span>
             </span>
             <span className="w-12 shrink-0 text-right text-ink-faint">{fmt.format(r.qty)}주</span>
             <button onClick={() => cancel(r.id)} className="btn btn-ghost btn-sm shrink-0">
@@ -116,7 +133,11 @@ export default function MyConditionalOrders({
         )}
         {history.map((r) => {
           const tone =
-            r.status === "TRIGGERED" ? "text-ok" : r.status === "FAILED" ? "text-warn" : "text-ink-faint";
+            r.status === "TRIGGERED"
+              ? "text-ok"
+              : r.status === "FAILED"
+                ? "text-warn"
+                : "text-ink-faint";
           return (
             <li
               key={r.id}

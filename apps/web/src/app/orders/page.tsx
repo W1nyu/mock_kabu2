@@ -324,7 +324,11 @@ function ConditionalTable({
             <td className="font-semibold">{r.symbol}</td>
             <td>
               <span className={`font-medium ${r.side === "BUY" ? "text-up" : "text-down"}`}>
-                {describeCondition(r.direction, r.side)}
+                {r.trailBps != null
+                  ? `${r.side === "SELL" ? "트레일링 손절" : "트레일링 매수"} ${(r.trailBps / 100).toFixed(
+                      r.trailBps % 100 === 0 ? 0 : 1,
+                    )}%`
+                  : describeCondition(r.direction, r.side)}
               </span>
               {r.ocoGroupId && (
                 <span className="chip ml-1.5" title="OCO — 짝 주문이 발동하면 자동 취소">

@@ -12,8 +12,12 @@ import {
   CHANNELS,
   REDIS_CHANNEL_PATTERNS,
   SYMBOLS,
+  TRAIL_BPS_MAX,
+  TRAIL_BPS_MIN,
+  advancesWatermark,
   conditionMet,
   describeCondition,
+  trailingTrigger,
   type ConditionalOrderDto,
   type OrderSide,
   type OrderType,
@@ -28,11 +32,15 @@ import { OrderService } from "./order.service";
 export interface PlaceConditionalOrderDto {
   symbol: string;
   side: OrderSide;
-  direction: TriggerDirection;
-  triggerPrice: number;
+  /** 트레일링이면 생략 가능 — 매도는 AT_OR_BELOW, 매수는 AT_OR_ABOVE로 고정된다 */
+  direction?: TriggerDirection;
+  /** 트레일링이면 생략 — 현재가 기준 watermark에서 계산된다 */
+  triggerPrice?: number;
   qty: number;
   orderType?: OrderType;
   limitPrice?: number;
+  /** 트레일링 스탑 거리(bps, 10~5000). 있으면 트리거가 고점/저점을 따라 움직인다 */
+  trailBps?: number;
 }
 
 export interface PlaceOcoDto {
@@ -56,6 +64,8 @@ interface WaitingRow {
   orderType: OrderType;
   limitPrice: number | null;
   ocoGroupId: string | null;
+  trailBps: number | null;
+  watermark: number | null;
 }
 
 const OCO_SIBLING_NOTE = "OCO 짝 주문 발동으로 자동 취소";
@@ -116,24 +126,42 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
   }
 
   async place(accountId: string, dto: PlaceConditionalOrderDto): Promise<ConditionalOrderDto> {
-    const { symbol, side, direction } = dto;
-    const triggerPrice = Number(dto.triggerPrice);
+    const { symbol, side } = dto;
     const qty = Number(dto.qty);
     const orderType: OrderType = dto.orderType ?? "MARKET";
     const limitPrice = dto.limitPrice != null ? Number(dto.limitPrice) : null;
+    const trailBps = dto.trailBps != null ? Number(dto.trailBps) : null;
 
     this.assertSymbolSideQty(symbol, side, qty);
-    if (direction !== "AT_OR_ABOVE" && direction !== "AT_OR_BELOW") {
-      throw new BadRequestException("direction은 AT_OR_ABOVE/AT_OR_BELOW");
-    }
-    if (!Number.isInteger(triggerPrice) || triggerPrice <= 0) throw new BadRequestException("트리거 가격은 양의 정수");
     if (orderType !== "MARKET" && orderType !== "LIMIT") throw new BadRequestException("orderType은 MARKET/LIMIT");
     if (orderType === "LIMIT" && (!Number.isInteger(limitPrice) || limitPrice! <= 0)) {
       throw new BadRequestException("지정가는 양의 정수");
     }
+    if (trailBps != null && (!Number.isInteger(trailBps) || trailBps < TRAIL_BPS_MIN || trailBps > TRAIL_BPS_MAX)) {
+      throw new BadRequestException(`트레일링 거리는 ${TRAIL_BPS_MIN / 100}%~${TRAIL_BPS_MAX / 100}% 사이여야 합니다`);
+    }
 
     const lastPrice = await this.lastPriceOf(symbol);
-    this.assertNotAlreadyMet(direction, triggerPrice, lastPrice);
+    let direction: TriggerDirection;
+    let triggerPrice: number;
+    let watermark: number | null = null;
+    if (trailBps != null) {
+      // 트레일링은 등록 시점 현재가를 기준 극값으로 삼는다. 방향은 매도=아래, 매수=위로 정해진다.
+      direction = side === "SELL" ? "AT_OR_BELOW" : "AT_OR_ABOVE";
+      watermark = lastPrice;
+      triggerPrice = trailingTrigger(side, watermark, trailBps);
+      if (conditionMet(direction, triggerPrice, lastPrice)) {
+        throw new BadRequestException("트레일링 거리가 너무 좁아 등록 즉시 발동합니다");
+      }
+    } else {
+      direction = dto.direction as TriggerDirection;
+      triggerPrice = Number(dto.triggerPrice);
+      if (direction !== "AT_OR_ABOVE" && direction !== "AT_OR_BELOW") {
+        throw new BadRequestException("direction은 AT_OR_ABOVE/AT_OR_BELOW");
+      }
+      if (!Number.isInteger(triggerPrice) || triggerPrice <= 0) throw new BadRequestException("트리거 가격은 양의 정수");
+      this.assertNotAlreadyMet(direction, triggerPrice, lastPrice);
+    }
     await this.assertWaitingCapacity(accountId, 1);
 
     const row = await this.prisma.conditionalOrder.create({
@@ -146,6 +174,8 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
         qty,
         orderType,
         limitPrice: orderType === "LIMIT" ? limitPrice : null,
+        trailBps,
+        watermark,
       },
     });
     this.index(row);
@@ -273,10 +303,31 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     const rows = this.waiting.get(symbol);
     if (!rows || rows.size === 0) return;
     for (const row of [...rows.values()]) {
+      // 트레일링: 새 극값이면 먼저 기준을 옮긴다. 옮긴 뒤의 트리거는 현재가에서 더 멀어지므로
+      // 같은 tick에 발동할 일은 없다.
+      if (row.trailBps != null && row.watermark != null && advancesWatermark(row.side, row.watermark, price)) {
+        row.watermark = price;
+        row.triggerPrice = trailingTrigger(row.side, price, row.trailBps);
+        this.persistTrail(row);
+        continue;
+      }
       if (!conditionMet(row.direction, row.triggerPrice, price)) continue;
       rows.delete(row.id);
       void this.trigger(row, price);
     }
+  }
+
+  /**
+   * 옮겨진 기준을 DB에도 남긴다(재시작·목록 표시용). 아직 WAITING인 행만 갱신하므로 발동·취소와
+   * 경합해도 상태를 되돌리지 않는다. 실패해도 메모리 값이 우선이라 발동 판정에는 영향이 없다.
+   */
+  private persistTrail(row: WaitingRow): void {
+    void this.prisma.conditionalOrder
+      .updateMany({
+        where: { id: row.id, status: "WAITING" },
+        data: { triggerPrice: row.triggerPrice, watermark: row.watermark },
+      })
+      .catch((error) => console.error(`[conditional] trailing update failed for ${row.id}`, error));
   }
 
   private async trigger(row: WaitingRow, price: number): Promise<void> {
@@ -387,6 +438,8 @@ function toWaiting(row: {
   orderType: string;
   limitPrice: number | null;
   ocoGroupId: string | null;
+  trailBps: number | null;
+  watermark: number | null;
 }): WaitingRow {
   return {
     id: row.id,
@@ -399,6 +452,8 @@ function toWaiting(row: {
     orderType: row.orderType as OrderType,
     limitPrice: row.limitPrice,
     ocoGroupId: row.ocoGroupId,
+    trailBps: row.trailBps,
+    watermark: row.watermark,
   };
 }
 
@@ -412,6 +467,8 @@ function toDto(row: {
   orderType: string;
   limitPrice: number | null;
   ocoGroupId: string | null;
+  trailBps: number | null;
+  watermark: number | null;
   status: string;
   triggeredOrderId: string | null;
   triggerTradePrice: number | null;
@@ -429,6 +486,8 @@ function toDto(row: {
     orderType: row.orderType as OrderType,
     limitPrice: row.limitPrice,
     ocoGroupId: row.ocoGroupId,
+    trailBps: row.trailBps,
+    watermark: row.watermark,
     status: row.status as ConditionalOrderDto["status"],
     triggeredOrderId: row.triggeredOrderId,
     triggerTradePrice: row.triggerTradePrice,

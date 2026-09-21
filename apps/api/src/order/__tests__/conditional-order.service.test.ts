@@ -16,6 +16,8 @@ function waitingRow(overrides: Partial<Record<string, unknown>> = {}) {
     orderType: "MARKET",
     limitPrice: null,
     ocoGroupId: null,
+    trailBps: null,
+    watermark: null,
     status: "WAITING",
     triggeredOrderId: null,
     triggerTradePrice: null,
@@ -217,5 +219,35 @@ describe("ConditionalOrderService placement validation", () => {
     await expect(
       service.placeOco("acct-1", { symbol: "KABU", side: "SELL", qty: 3, lowerPrice: 900, upperPrice: 1_100 }),
     ).rejects.toThrow(/50건/);
+  });
+});
+
+describe("ConditionalOrderService trailing stops", () => {
+  it("ratchets the trigger up with new highs and fires on the pullback", async () => {
+    const trailing = waitingRow({
+      id: "trail",
+      direction: "AT_OR_BELOW",
+      triggerPrice: 970,
+      trailBps: 300,
+      watermark: 1_000,
+    });
+    const { service, prisma, orders } = build({ rows: [trailing] });
+    await (service as any).reloadIndex();
+
+    service.onTick("KABU", 1_100); // 새 고점 → 트리거 1,067
+    await flush();
+    expect(orders.place).not.toHaveBeenCalled();
+    expect(prisma.conditionalOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: "trail", status: "WAITING" },
+      data: { triggerPrice: 1_067, watermark: 1_100 },
+    });
+
+    service.onTick("KABU", 1_070); // 고점 대비 -2.7% — 아직
+    await flush();
+    expect(orders.place).not.toHaveBeenCalled();
+
+    service.onTick("KABU", 1_067); // -3% 도달
+    await flush();
+    expect(orders.place).toHaveBeenCalledTimes(1);
   });
 });

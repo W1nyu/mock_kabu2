@@ -165,6 +165,10 @@ model ConditionalOrder {
   limitPrice   Int?     @map("limit_price")
   /// OCO(One-Cancels-Other) 짝. 같은 그룹의 한 행이 발동하면 나머지 WAITING 행은 자동 취소
   ocoGroupId   String?  @map("oco_group_id")
+  /// 트레일링 스탑 거리(basis points). null이면 고정 트리거. 있으면 trigger_price가 watermark를 따라 움직인다
+  trailBps     Int?     @map("trail_bps")
+  /// 트레일링 기준 극값 — 매도는 등록 후 고점, 매수는 저점
+  watermark    Int?
   status       String   @default("WAITING") // WAITING | TRIGGERED | CANCELED | FAILED
   triggeredOrderId  String?   @map("triggered_order_id")
   triggerTradePrice Int?      @map("trigger_trade_price")

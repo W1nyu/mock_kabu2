@@ -16,6 +16,10 @@ export interface ConditionalOrderDto {
   limitPrice: number | null;
   /** OCO 짝 그룹. 같은 그룹의 한 행이 발동하면 나머지는 자동 취소 */
   ocoGroupId: string | null;
+  /** 트레일링 거리(bps). null이면 고정 트리거 */
+  trailBps: number | null;
+  /** 트레일링 기준 극값(매도 고점/매수 저점). 고정 트리거면 null */
+  watermark: number | null;
   status: ConditionalOrderStatus;
   /** 발동 시 접수된 실제 주문 ID (접수 실패 시 null) */
   triggeredOrderId: string | null;
@@ -49,4 +53,27 @@ export function inferTriggerDirection(
 export function describeCondition(direction: TriggerDirection, side: OrderSide): string {
   if (side === "SELL") return direction === "AT_OR_BELOW" ? "손절 매도" : "익절 매도";
   return direction === "AT_OR_ABOVE" ? "돌파 매수" : "눌림 매수";
+}
+
+/** 트레일링 스탑 거리 한계 (basis points). 0.1% ~ 50%. */
+export const TRAIL_BPS_MIN = 10;
+export const TRAIL_BPS_MAX = 5_000;
+
+/**
+ * 트레일링 스탑의 현재 트리거 가격. 매도는 고점(watermark)에서 bps만큼 아래(내림),
+ * 매수는 저점에서 bps만큼 위(올림). 정수 가격만 쓰는 시장이라 항상 정수를 돌려준다.
+ */
+export function trailingTrigger(side: OrderSide, watermark: number, trailBps: number): number {
+  const ratio = trailBps / 10_000;
+  return side === "SELL"
+    ? Math.max(1, Math.floor(watermark * (1 - ratio)))
+    : Math.max(1, Math.ceil(watermark * (1 + ratio)));
+}
+
+/**
+ * 새 체결가가 추적 기준(고점/저점)을 갱신하는지. 매도 트레일링은 더 높은 가격만,
+ * 매수 트레일링은 더 낮은 가격만 기준을 옮긴다.
+ */
+export function advancesWatermark(side: OrderSide, watermark: number, price: number): boolean {
+  return side === "SELL" ? price > watermark : price < watermark;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { conditionMet, describeCondition, inferTriggerDirection } from "@mock-kabu/shared";
+import { advancesWatermark, conditionMet, describeCondition, inferTriggerDirection, trailingTrigger } from "@mock-kabu/shared";
 
 describe("conditional order trigger rules", () => {
   test("AT_OR_ABOVE fires at the boundary and above, never below", () => {
@@ -27,5 +27,25 @@ describe("conditional order trigger rules", () => {
     expect(describeCondition("AT_OR_ABOVE", "SELL")).toBe("익절 매도");
     expect(describeCondition("AT_OR_ABOVE", "BUY")).toBe("돌파 매수");
     expect(describeCondition("AT_OR_BELOW", "BUY")).toBe("눌림 매수");
+  });
+});
+
+describe("trailing stop rules", () => {
+  test("sell trigger trails the high-water mark downward, floored to an integer", () => {
+    expect(trailingTrigger("SELL", 10_000, 300)).toBe(9_700);
+    expect(trailingTrigger("SELL", 10_001, 300)).toBe(9_700); // 9700.97 → 내림
+  });
+
+  test("buy trigger trails the low-water mark upward, ceiled to an integer", () => {
+    expect(trailingTrigger("BUY", 10_000, 250)).toBe(10_250);
+    expect(trailingTrigger("BUY", 9_999, 250)).toBe(10_249); // 10248.975 → 올림
+  });
+
+  test("only a new extreme moves the watermark", () => {
+    expect(advancesWatermark("SELL", 10_000, 10_001)).toBe(true);
+    expect(advancesWatermark("SELL", 10_000, 10_000)).toBe(false);
+    expect(advancesWatermark("SELL", 10_000, 9_000)).toBe(false);
+    expect(advancesWatermark("BUY", 10_000, 9_999)).toBe(true);
+    expect(advancesWatermark("BUY", 10_000, 11_000)).toBe(false);
   });
 });
