@@ -402,7 +402,14 @@ class SettlementWorker {
       return true;
     });
 
-    if (settled) this.publishAccountUpdates([event.buyerAccountId, event.sellerAccountId]);
+    if (settled) {
+      // 체결 내용을 함께 실어 UI가 별도 조회 없이 알림을 띄울 수 있게 한다. 자기 체결이면 한 번만.
+      const fill = { symbol: event.symbol, price: event.price, qty: event.qty, tradeId: event.tradeId };
+      this.publishAccountUpdates([event.buyerAccountId], { type: "trade", side: "BUY", ...fill });
+      if (event.sellerAccountId !== event.buyerAccountId) {
+        this.publishAccountUpdates([event.sellerAccountId], { type: "trade", side: "SELL", ...fill });
+      }
+    }
     // Candles are rebuilt from durable trades, so a redelivery remains safe.
     await this.updateMarket(event);
   }
@@ -448,9 +455,12 @@ class SettlementWorker {
     this.publishAccountUpdates([event.accountId]);
   }
 
-  private publishAccountUpdates(accountIds: string[]): void {
+  private publishAccountUpdates(
+    accountIds: string[],
+    payload: Record<string, unknown> = { type: "account_update" },
+  ): void {
     for (const accountId of new Set(accountIds)) {
-      this.publisher.publish(CHANNELS.account(accountId), JSON.stringify({ type: "account_update" })).catch((error) => {
+      this.publisher.publish(CHANNELS.account(accountId), JSON.stringify(payload)).catch((error) => {
         // Pub/Sub invalidates UI caches only. Stream/database durability has
         // already completed, so a transient notification failure must not
         // replay financial state changes.

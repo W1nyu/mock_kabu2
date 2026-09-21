@@ -47,7 +47,12 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 자산 추이 스냅샷 + 대시보드 차트 (최신 작업)
+## 2026-09-22 — 체결/예약 발동 토스트 알림 (최신 작업)
+
+- **정산 push 확장**: `apps/settlement/src/main.ts`가 `account:{id}` 채널에 체결 정보를 실어 보낸다 — 매수자에 `{type:"trade", side:"BUY", symbol, price, qty, tradeId}`, 매도자에 `side:"SELL"`(자기 체결이면 한 번). 기존 `account_update`는 `order.closed`에서만 계속 쓰인다. 어떤 payload든 "내 계좌가 바뀌었다"는 신호이므로 기존 구독자(대시보드·주문폼 등)는 그대로 동작한다.
+- **`apps/web/src/components/Toaster.tsx`**(layout에 전역 마운트): 로그인 상태면 `account:{id}`를 구독해 우하단 토스트. 체결은 종목·방향별 1.5초 창에서 합산(`N건 · 평균가`) — 봇 계정으로 로그인해도 폭주하지 않는다. 예약 주문 `TRIGGERED`/`FAILED`도 표시. 최대 4개, 6초 뒤 자동 소멸, `tradeId` 중복 무시. pathname 변화 때 재구독(로그인/로그아웃 대응).
+
+## 2026-09-22 — 자산 추이 스냅샷 + 대시보드 차트
 
 - **DB**: migration `20260922110000_add_equity_snapshots` → `account.equity_snapshots` (`account_id`, 분 단위 `ts`, `cash`, `stock_value`, `equity`; `(account_id, ts)` unique).
 - **기록** `apps/api/src/account/equity-snapshot.service.ts`: 부팅 직후 1회 + 매 분 경계(+250ms)에 **한 SQL**로 모든 **사용자(non-bot) 계정**을 기록(현금 + Σ보유수량×`market.symbols.last_price`). `ON CONFLICT DO NOTHING`이라 API 복제본이 여러 개여도 중복 없음. 봇 계정은 제외(유동성 풀이라 의미 없음). 보존 정책은 아직 없음(사용자 4명 기준 하루 약 6k행) — 커지면 1분 행을 N일 후 10분 버킷으로 압축하는 정리 작업을 추가할 것.
