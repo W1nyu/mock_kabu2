@@ -47,7 +47,11 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 브래킷 주문: 매수 체결 후 손절/익절 자동 등록 (최신 작업)
+## 2026-09-22 — 스모크 스크립트 (최신 작업)
+
+- `pnpm smoke` (`scripts/smoke.mjs`, 의존성 없음): 기동 중인 API에 임시 사용자(`smoke-*@smoke.local`)를 만들어 시장가 매수→체결→호가 단위 400→매도→실현손익/체결 내역→조건부(이미 만족 400·대기·취소)→OCO 짝 취소→트레일링→브래킷 ARMED→자산/일별/랭킹/헬스 background까지 18개 체크. 봇이 돌고 있어야 시장가가 체결된다. 끝나면 남은 보유를 청산하지만 계정 자체는 남는다(랭킹에 보임 — 필요하면 DB에서 지울 것).
+
+## 2026-09-22 — 브래킷 주문: 매수 체결 후 손절/익절 자동 등록
 
 - **DB**: migration `20260922140000_add_bracket_intents` → `order.bracket_intents` (`order_id` unique, `stop_bps` 10~5000, `take_bps` 10~10000, `status` PENDING/ARMED/CANCELED, `armed_qty`, `avg_fill_price`, `note`).
 - **API**: `POST /orders`에 선택 필드 `bracket: {stopBps, takeBps}` — 매수에만 허용(매도면 400, 주문 전에 검증). 주문이 커밋된 뒤 `BracketService.attach()`가 의도를 저장하고 응답에 `bracket`을 실어 준다. `GET /orders/bracket?symbol=`, `DELETE /orders/bracket/:id`(PENDING만).

@@ -162,7 +162,8 @@ pnpm check:consistency
 
 ```bash
 pnpm test                 # 오더북 매칭 + 락 전략 단위 테스트
-pnpm check:consistency    # 원장 합계=잔액, 음수 잔액/보유 0건, 홀드 불변식 검사
+pnpm check:consistency    # 원장 합계=잔액, 음수 잔액/보유 0건, 홀드 불변식, 실현손익·조건부 주문 검사
+pnpm smoke                # 기동 중인 스택에 임시 계정으로 주문→체결→실현손익→조건부/OCO/트레일링/브래킷 E2E
 ```
 
 ## 프로젝트 구조

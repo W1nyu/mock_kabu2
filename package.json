@@ -13,7 +13,8 @@
     "db:migrate": "pnpm --filter @mock-kabu/db migrate:deploy",
     "db:seed": "pnpm --filter @mock-kabu/db seed",
     "check:consistency": "pnpm --filter @mock-kabu/db check:consistency",
-    "recover:settlement": "pnpm --filter @mock-kabu/db recover:settlement"
+    "recover:settlement": "pnpm --filter @mock-kabu/db recover:settlement",
+    "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
     "turbo": "^2.5.0",

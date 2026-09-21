@@ -21,6 +21,7 @@ pnpm infra:up             # mock_kabu2 전용 PostgreSQL + Redis (선행 필수)
 pnpm dev                  # 전체 기동 (turbo)
 pnpm test                 # 단위 테스트 (vitest)
 pnpm check:consistency    # DB 정합성 검사
+pnpm smoke                # 기동 중인 스택 E2E 스모크 (임시 계정, scripts/smoke.mjs)
 cd apps/web && npx tsc --noEmit   # 웹 타입체크
 ```
 
