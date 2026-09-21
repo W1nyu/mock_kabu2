@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, fmt } from "@/lib/api";
+import { api, fmt, getToken, getUser } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 
 interface Level {
@@ -35,6 +35,54 @@ interface TradeTick {
 }
 
 type DepthChange = "increase" | "decrease";
+
+interface LiveOrderRow {
+  side: "BUY" | "SELL";
+  type: string;
+  price: number | null;
+  qty: number;
+  filledQty: number;
+}
+
+/** 호가 단계별 내 미체결 잔량. 키는 "ask:{price}" / "bid:{price}". */
+type MyDepth = Record<string, number>;
+
+/**
+ * 내 지정가 미체결을 호가창 위에 표시하기 위해 읽는다. 계정 push가 주 경로, 15초 폴백.
+ * 로그인하지 않았으면 아무것도 하지 않는다.
+ */
+function useMyDepth(symbol: string): MyDepth {
+  const [depth, setDepth] = useState<MyDepth>({});
+  useEffect(() => {
+    if (!getToken()) return;
+    let active = true;
+    setDepth({});
+    const load = () => {
+      api<LiveOrderRow[]>(`/orders?symbol=${symbol}&status=live&limit=200`)
+        .then((rows) => {
+          if (!active) return;
+          const next: MyDepth = {};
+          for (const row of rows) {
+            if (row.price == null) continue;
+            const key = `${row.side === "BUY" ? "bid" : "ask"}:${row.price}`;
+            next[key] = (next[key] ?? 0) + Math.max(0, row.qty - row.filledQty);
+          }
+          setDepth(next);
+        })
+        .catch(() => {});
+    };
+    load();
+    const user = getUser();
+    const unsub = user ? subscribe([`account:${user.accountId}`], () => load()) : () => {};
+    const t = window.setInterval(load, 15_000);
+    return () => {
+      active = false;
+      unsub();
+      window.clearInterval(t);
+    };
+  }, [symbol]);
+  return depth;
+}
 
 // A market maker safely replaces a ladder rung-by-rung. Those intermediate
 // snapshots are real, but rendering every one makes the depth panel cascade
@@ -89,6 +137,7 @@ export default function Orderbook({
   const lastOrderbookSeqRef = useRef(0);
   const pendingTicksRef = useRef(new Map<string, TradeTick>());
   const summaryWatermarkRef = useRef<number | null>(null);
+  const myDepth = useMyDepth(symbol);
 
   useEffect(() => {
     let disposed = false;
@@ -234,6 +283,7 @@ export default function Orderbook({
                 side="ask"
                 maxQty={maxQty}
                 change={depthChanges[`ask:${l.price}`]}
+                mine={myDepth[`ask:${l.price}`]}
                 onClick={onPriceClick}
               />
             ) : (
@@ -258,6 +308,7 @@ export default function Orderbook({
                 side="bid"
                 maxQty={maxQty}
                 change={depthChanges[`bid:${l.price}`]}
+                mine={myDepth[`bid:${l.price}`]}
                 onClick={onPriceClick}
               />
             ) : (
@@ -269,6 +320,11 @@ export default function Orderbook({
 
       <p className="border-t border-hairline-soft px-4 py-2 text-[11px] text-ink-faint">
         가격을 클릭하면 주문 폼에 입력됩니다
+        {Object.keys(myDepth).length > 0 && (
+          <span className="ml-2 text-sky" title="내 미체결 지정가가 있는 호가 단계">
+            ● 내 주문
+          </span>
+        )}
       </p>
     </div>
   );
@@ -283,12 +339,15 @@ function Row({
   side,
   maxQty,
   change,
+  mine,
   onClick,
 }: {
   level: Level;
   side: "ask" | "bid";
   maxQty: number;
   change?: DepthChange;
+  /** 이 단계에 걸린 내 미체결 잔량 */
+  mine?: number;
   onClick?: (price: number) => void;
 }) {
   const width = Math.max(2, (level.qty / maxQty) * 100);
@@ -298,8 +357,14 @@ function Row({
         change === "decrease" ? "bg-warn/12" : change === "increase" ? "bg-ok/10" : ""
       }`}
       onClick={() => onClick?.(level.price)}
-      title="클릭하면 주문 가격에 입력됩니다"
+      title={mine ? `내 미체결 ${fmt.format(mine)}주 · 클릭하면 주문 가격에 입력됩니다` : "클릭하면 주문 가격에 입력됩니다"}
     >
+      {mine != null && mine > 0 && (
+        <span
+          className="absolute top-1/2 left-1 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-sky shadow-[0_0_6px_rgba(56,189,248,0.8)]"
+          aria-label={`내 미체결 ${mine}주`}
+        />
+      )}
       <span
         className={`absolute inset-y-px right-0 rounded-l-[3px] ${side === "ask" ? "bg-down/14" : "bg-up/14"}`}
         style={{ width: `${width}%` }}
