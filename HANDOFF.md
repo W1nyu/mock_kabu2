@@ -47,7 +47,15 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 조건부(예약) 주문 (최신 작업)
+## 2026-09-22 — 자산 추이 스냅샷 + 대시보드 차트 (최신 작업)
+
+- **DB**: migration `20260922110000_add_equity_snapshots` → `account.equity_snapshots` (`account_id`, 분 단위 `ts`, `cash`, `stock_value`, `equity`; `(account_id, ts)` unique).
+- **기록** `apps/api/src/account/equity-snapshot.service.ts`: 부팅 직후 1회 + 매 분 경계(+250ms)에 **한 SQL**로 모든 **사용자(non-bot) 계정**을 기록(현금 + Σ보유수량×`market.symbols.last_price`). `ON CONFLICT DO NOTHING`이라 API 복제본이 여러 개여도 중복 없음. 봇 계정은 제외(유동성 풀이라 의미 없음). 보존 정책은 아직 없음(사용자 4명 기준 하루 약 6k행) — 커지면 1분 행을 N일 후 10분 버킷으로 압축하는 정리 작업을 추가할 것.
+- **API**: `GET /account/equity?range=1d|1w|all` → `[{ts, cash, stockValue, equity}]`. 버킷 폭 1분/10분/1시간, 버킷당 **마지막** 스냅샷(종가 방식) — `DISTINCT ON (bucket) … ORDER BY bucket, ts DESC`.
+- **웹** `apps/web/src/components/EquityChart.tsx`: 대시보드 hero 아래 면적 차트(lightweight-charts `AreaSeries`). 첫 점 대비 증감으로 색(상승 빨강/하락 파랑/보합 sky), 헤더에 hover 시점(또는 현재)의 자산·증감·현금/주식 내역, 1일/1주/전체 토글은 `localStorage("dashboard:equity-range")`(마운트 후 읽음). 60초 폴링. 스냅샷 2개 미만이면 안내 문구.
+- 주의: 스냅샷은 `last_price` 기준이라 대시보드 hero의 실시간 총자산과 최대 1분 차이가 난다(의도). 차트 제거는 CandleChart와 같은 "숨기고 다음 프레임에 remove" 패턴.
+
+## 2026-09-22 — 조건부(예약) 주문
 
 - **DB**: migration `20260922100000_add_conditional_orders` → `order.conditional_orders` (`direction` AT_OR_ABOVE/AT_OR_BELOW, `trigger_price`, `order_type` MARKET/LIMIT, `status` WAITING/TRIGGERED/CANCELED/FAILED, 발동 체결가·접수 주문 ID·실패 사유). **대기 중에는 아무것도 홀드하지 않는다.**
 - **감시자** `apps/api/src/order/conditional-order.service.ts`: 부팅 시 WAITING 행을 메모리 인덱스(symbol→id)로 적재하고 `trades:*` Pub/Sub을 구독(REDIS_SUB 공유; Redis가 클라이언트별 패턴 중복을 제거). 체결가가 조건을 만족하면 인덱스에서 먼저 빼고 `updateMany(WAITING→TRIGGERED)`로 **정확히 한 번** claim한 뒤 `OrderService.place()`로 일반 주문 접수. 접수 거부(잔액/수량 부족 등)는 `FAILED`+사유. 부팅 직후와 10초마다 인덱스를 재적재하고 `market.symbols.last_price`로도 검사해 내려가 있던 동안 지나친 조건을 잡는다. 계정당 대기 50건 제한. 현재가가 이미 조건을 만족하면 400으로 거부(일반 주문 안내).

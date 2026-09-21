@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, getToken, getUser, won } from "@/lib/api";
+import EquityChart from "@/components/EquityChart";
 import { NewsList } from "@/components/NewsFeed";
 import { mergeNews, parseNewsItem } from "@/lib/news";
 import { subscribe } from "@/lib/socket";
@@ -295,6 +296,9 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+
+      {/* ── Equity curve ───────────────────────────────────────── */}
+      <EquityChart />
 
       {/* ── Market ─────────────────────────────────────────────── */}
       <section className="glass overflow-hidden">

@@ -1,0 +1,109 @@
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import type { PrismaClient } from "@mock-kabu/db";
+import { PRISMA } from "../core/tokens";
+
+const SNAPSHOT_INTERVAL_MS = 60_000;
+
+export type EquityRange = "1d" | "1w" | "all";
+
+export interface EquityPoint {
+  ts: number;
+  cash: number;
+  stockValue: number;
+  equity: number;
+}
+
+/** 조회 구간별 버킷 폭(초). 1일은 원본 1분, 그 이상은 굵게 묶어 포인트 수를 제한한다. */
+const BUCKET_SECONDS: Record<EquityRange, number> = { "1d": 60, "1w": 600, all: 3_600 };
+const RANGE_MS: Record<EquityRange, number | null> = {
+  "1d": 24 * 60 * 60 * 1000,
+  "1w": 7 * 24 * 60 * 60 * 1000,
+  all: null,
+};
+
+/**
+ * 사용자 계정의 분 단위 자산 스냅샷. 봇 계정은 유동성 풀이라 추이가 의미 없어 제외한다.
+ * 한 SQL로 모든 사용자 계정을 한 번에 기록하고, (account_id, ts) 유니크로 다중 인스턴스
+ * 중복 기록을 무시한다.
+ */
+@Injectable()
+export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = false;
+
+  constructor(@Inject(PRISMA) private prisma: PrismaClient) {}
+
+  onModuleInit() {
+    // 즉시 한 번 찍고, 그 뒤로는 매 분 경계에 맞춰 기록한다.
+    void this.snapshot();
+    this.scheduleNext();
+  }
+
+  onModuleDestroy() {
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+  }
+
+  private scheduleNext() {
+    if (this.stopped) return;
+    const now = Date.now();
+    const delay = SNAPSHOT_INTERVAL_MS - (now % SNAPSHOT_INTERVAL_MS) + 250;
+    this.timer = setTimeout(() => {
+      void this.snapshot().finally(() => this.scheduleNext());
+    }, delay);
+  }
+
+  async snapshot(now = new Date()): Promise<number> {
+    const ts = new Date(Math.floor(now.getTime() / SNAPSHOT_INTERVAL_MS) * SNAPSHOT_INTERVAL_MS);
+    try {
+      const inserted = await this.prisma.$executeRaw`
+        INSERT INTO account.equity_snapshots (account_id, ts, cash, stock_value, equity)
+        SELECT
+          a.id,
+          ${ts},
+          a.balance,
+          COALESCE(v.stock_value, 0),
+          a.balance + COALESCE(v.stock_value, 0)
+        FROM account.accounts a
+        JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false
+        LEFT JOIN (
+          SELECT h.account_id, SUM(h.qty::bigint * s.last_price) AS stock_value
+          FROM account.holdings h
+          JOIN market.symbols s ON s.symbol = h.symbol
+          GROUP BY h.account_id
+        ) v ON v.account_id = a.id
+        ON CONFLICT (account_id, ts) DO NOTHING
+      `;
+      return inserted;
+    } catch (error) {
+      console.error("[equity] snapshot failed", error);
+      return 0;
+    }
+  }
+
+  async series(accountId: string, range: EquityRange): Promise<EquityPoint[]> {
+    const bucket = BUCKET_SECONDS[range];
+    const rangeMs = RANGE_MS[range];
+    const since = rangeMs == null ? new Date(0) : new Date(Date.now() - rangeMs);
+    // 버킷마다 마지막 스냅샷을 대표값으로 쓴다 (종가 방식).
+    const rows = await this.prisma.$queryRaw<
+      { ts: Date; cash: bigint; stock_value: bigint; equity: bigint }[]
+    >`
+      SELECT DISTINCT ON (bucket) ts, cash, stock_value, equity
+      FROM (
+        SELECT
+          to_timestamp(floor(extract(epoch FROM ts) / ${bucket}) * ${bucket}) AS bucket,
+          ts, cash, stock_value, equity
+        FROM account.equity_snapshots
+        WHERE account_id = ${accountId} AND ts >= ${since}
+      ) s
+      ORDER BY bucket ASC, ts DESC
+    `;
+    return rows.map((row) => ({
+      ts: row.ts.getTime(),
+      cash: Number(row.cash),
+      stockValue: Number(row.stock_value),
+      equity: Number(row.equity),
+    }));
+  }
+}

@@ -2,11 +2,15 @@ import { Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { JwtUser } from "../auth/auth.service";
 import { AccountService } from "./account.service";
+import { EquitySnapshotService, type EquityRange } from "./equity-snapshot.service";
 
 @Controller("account")
 @UseGuards(JwtAuthGuard)
 export class AccountController {
-  constructor(private account: AccountService) {}
+  constructor(
+    private account: AccountService,
+    private equity: EquitySnapshotService,
+  ) {}
 
   @Get()
   getAccount(@CurrentUser() user: JwtUser) {
@@ -30,6 +34,13 @@ export class AccountController {
     @Query("symbol") symbol?: string,
   ) {
     return this.account.getTrades(user.accountId, limit ? Number(limit) : undefined, symbol || undefined);
+  }
+
+  /** 자산 추이. range=1d(1분)·1w(10분)·all(1시간) 버킷의 마지막 스냅샷. */
+  @Get("equity")
+  getEquity(@CurrentUser() user: JwtUser, @Query("range") range?: string) {
+    const normalized: EquityRange = range === "1w" || range === "all" ? range : "1d";
+    return this.equity.series(user.accountId, normalized);
   }
 
   @Get("ledger")

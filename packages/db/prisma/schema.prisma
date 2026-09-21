@@ -99,6 +99,22 @@ model RealizedPnl {
   @@schema("account")
 }
 
+/// 계좌 자산 스냅샷(1분 단위, 사용자 계정만). API가 매 분 현금+보유평가액을 기록해
+/// 대시보드 자산 추이 차트를 그린다. (account_id, ts) 유니크로 다중 인스턴스 중복을 막는다.
+model EquitySnapshot {
+  id         BigInt   @id @default(autoincrement())
+  accountId  String   @map("account_id")
+  /// 분 단위로 내린 시각
+  ts         DateTime
+  cash       BigInt
+  stockValue BigInt   @map("stock_value")
+  equity     BigInt
+
+  @@unique([accountId, ts])
+  @@map("equity_snapshots")
+  @@schema("account")
+}
+
 /// 이벤트 중복 소비 방지 (정산 멱등성)
 model ProcessedEvent {
   eventId     String   @id @map("event_id")
