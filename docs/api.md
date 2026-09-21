@@ -13,7 +13,7 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 
 | 메서드 | 경로 | 인증 | 설명 |
 |---|---|---|---|
-| POST | `/auth/signup` | – | `{email, password(4+), nickname}` → `{token, user}`. 가입 보너스 1,000만 원 |
+| POST | `/auth/signup` | – | `{email, password(4+), nickname}` → `{token, user}`. 가입 보너스 1,000만 원. IP당 10분 5회 초과 시 **429** |
 | POST | `/auth/login` | – | `{email, password}` → `{token, user}`. IP+이메일당 60초 10회 초과 시 **429** |
 | GET | `/auth/me` | ✓ | 토큰의 사용자 정보 `{userId, accountId, email, nickname}` |
 | PATCH | `/auth/me` | ✓ | `{nickname}`(1~20자) → 새 `{token, user}` (닉네임이 토큰에 들어 있음) |

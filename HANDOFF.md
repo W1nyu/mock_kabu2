@@ -68,7 +68,7 @@
 
 - **주문 상한**: shared `MAX_ORDER_QTY`(1천만 주)·`MAX_ORDER_PRICE`(10억 원). DB price/qty가 Int32라 상한 없이는 이상 주문이 호가창을 왜곡한다. `OrderService.place`에서 400.
 - **주문 멱등성**: `POST /orders`에 `Idempotency-Key` 헤더(1~128자)를 주면 `placeIdempotent()`가 Redis `SET NX EX 86400`로 키를 선점하고, 같은 키의 재시도에는 기존 주문을 `idempotentReplay:true`와 함께 돌려준다(접수 실패 시 키 삭제, 동시 재시도는 최대 2초 대기). 웹 주문폼은 제출마다 `newIdempotencyKey()`를 보낸다(더블 클릭·재시도 보호). 키 `KEYS.orderIdempotency`.
-- **로그인 무차별 대입 완화**: `LoginRateLimitGuard`(`POST /auth/login`)가 IP+이메일당 60초 창 10회 초과 시 429. Redis `INCR/EXPIRE`(`KEYS.loginAttempts`)라 복제본 간 공유, Redis 장애 시 허용(가용성 우선). 봇 20계정은 이메일이 달라 영향 없음.
+- **속도 제한**: `login-rate-limit.guard.ts`의 `enforceRateLimit(redis, rule, request)` 공통 함수 위에 `LoginRateLimitGuard`(IP+이메일, 60초 10회)와 `SignupRateLimitGuard`(IP, 10분 5회). 테스트 `auth/__tests__/rate-limit.test.ts`. 로그인 가드는 Redis `INCR/EXPIRE`(`KEYS.loginAttempts`)라 복제본 간 공유, Redis 장애 시 허용(가용성 우선). 봇 20계정은 이메일이 달라 영향 없음.
 
 ## 2026-09-22 — 계정 설정
 

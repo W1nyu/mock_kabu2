@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Patch, Post, UseGuards } from "@nestjs/common";
 import { AuthService, type JwtUser } from "./auth.service";
-import { LoginRateLimitGuard } from "./login-rate-limit.guard";
+import { LoginRateLimitGuard, SignupRateLimitGuard } from "./login-rate-limit.guard";
 import { CurrentUser, JwtAuthGuard } from "./jwt-auth.guard";
 
 @Controller("auth")
@@ -8,6 +8,7 @@ export class AuthController {
   constructor(private auth: AuthService) {}
 
   @Post("signup")
+  @UseGuards(SignupRateLimitGuard)
   signup(@Body() body: { email: string; password: string; nickname: string }) {
     return this.auth.signup(body.email, body.password, body.nickname);
   }
