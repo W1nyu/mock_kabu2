@@ -47,7 +47,16 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 실현손익 추적 (최신 작업)
+## 2026-09-22 — 조건부(예약) 주문 (최신 작업)
+
+- **DB**: migration `20260922100000_add_conditional_orders` → `order.conditional_orders` (`direction` AT_OR_ABOVE/AT_OR_BELOW, `trigger_price`, `order_type` MARKET/LIMIT, `status` WAITING/TRIGGERED/CANCELED/FAILED, 발동 체결가·접수 주문 ID·실패 사유). **대기 중에는 아무것도 홀드하지 않는다.**
+- **감시자** `apps/api/src/order/conditional-order.service.ts`: 부팅 시 WAITING 행을 메모리 인덱스(symbol→id)로 적재하고 `trades:*` Pub/Sub을 구독(REDIS_SUB 공유; Redis가 클라이언트별 패턴 중복을 제거). 체결가가 조건을 만족하면 인덱스에서 먼저 빼고 `updateMany(WAITING→TRIGGERED)`로 **정확히 한 번** claim한 뒤 `OrderService.place()`로 일반 주문 접수. 접수 거부(잔액/수량 부족 등)는 `FAILED`+사유. 부팅 직후와 10초마다 인덱스를 재적재하고 `market.symbols.last_price`로도 검사해 내려가 있던 동안 지나친 조건을 잡는다. 계정당 대기 50건 제한. 현재가가 이미 조건을 만족하면 400으로 거부(일반 주문 안내).
+- **API**: `POST /orders/conditional {symbol, side, direction, triggerPrice, qty, orderType?, limitPrice?}`, `GET /orders/conditional?symbol=&status=&limit=`, `DELETE /orders/conditional/:id`(WAITING만). 발동/실패 시 `account:{id}` 채널에 `{type:"conditional", status, label, orderId, failReason…}` push.
+- **공통 규칙** `packages/shared/src/conditional.ts`: `conditionMet`(경계 포함), `inferTriggerDirection`(현재가 대비 위치로 이상/이하 추론), `describeCondition`(손절/익절/돌파/눌림 라벨). 테스트: `apps/api/src/order/__tests__/conditional.test.ts`, `conditional-order.service.test.ts`(claim 1회·다른 인스턴스 선점·FAILED 기록·LIMIT 전달).
+- **웹**: `OrderForm` 주문 유형에 **조건부** 추가(트리거 가격·이상/이하 토글, 방향은 자동 추론 후 수동 고정 가능, 이미 만족 시 경고+버튼 비활성, 호가 클릭은 트리거 칸에 입력). `MyConditionalOrders.tsx`가 거래 페이지 미체결 주문 아래에 대기 목록(취소)과 최근 이력 5건(발동 체결가·실패 사유 title)을 보여주며, push 알림 문구를 상단에 띄운다. 행이 없으면 렌더하지 않는다.
+- 런타임 검증(2026-09-22): TANU 현재가 ±10원에 손절/익절 예약 → 봇 체결로 수 초 내 둘 다 TRIGGERED, 접수된 시장가 주문 FILLED 확인. 이미 만족 조건 400, 취소 경합 처리 확인. UI에서 등록·취소·이력 표시 확인, 콘솔 에러 없음.
+
+## 2026-09-22 — 실현손익 추적
 
 - **DB**: migration `20260922090000_add_realized_pnl` → `account.realized_pnl` (계정·종목·`trade_id` unique·수량·가격·차감 원가·실현손익·체결시각). 정산 컨슈머(`apps/settlement/src/main.ts` `settleTrade`)가 매도자 `costBasis` 비례 차감과 **같은 트랜잭션**에 한 행을 남긴다. `trade_id` unique가 재전달을 한 번 더 막는다. 불변식: 누적 `realized` + 남은 `costBasis` = 총 매입원가.
 - **공통 계산**: `packages/shared/src/settlement.ts` `realizedPnlForSale()` — 컨슈머와 복구 플래너(`packages/db/scripts/settlement-recovery-plan.ts`, `plan.realizedPnl`)가 같은 BigInt 내림 규칙을 쓴다. 테스트: `apps/api/src/account/__tests__/settlement-state.test.ts`, `packages/db/scripts/__tests__/settlement-recovery-plan.node-test.ts`.

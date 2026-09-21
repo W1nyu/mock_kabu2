@@ -1,6 +1,11 @@
 "use client";
 
-import { MARKET_BUY_HOLD_FACTOR } from "@mock-kabu/shared";
+import {
+  MARKET_BUY_HOLD_FACTOR,
+  describeCondition,
+  inferTriggerDirection,
+  type TriggerDirection,
+} from "@mock-kabu/shared";
 import { useEffect, useState } from "react";
 import { api, fmt, getUser, won } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
@@ -29,8 +34,11 @@ export default function OrderForm({
   onPlaced?: () => void;
 }) {
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
-  const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT");
+  const [type, setType] = useState<"LIMIT" | "MARKET" | "STOP">("LIMIT");
   const [price, setPrice] = useState("");
+  const [triggerPrice, setTriggerPrice] = useState("");
+  // null이면 현재가 대비 트리거 위치로 자동 추론, 사용자가 고르면 고정
+  const [directionOverride, setDirectionOverride] = useState<TriggerDirection | null>(null);
   const [qty, setQty] = useState("");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,10 +50,13 @@ export default function OrderForm({
 
   useEffect(() => {
     if (priceHint != null) {
-      setPrice(String(priceHint));
+      // 호가 클릭은 현재 모드의 가격 칸으로 들어간다.
+      if (type === "STOP") setTriggerPrice(String(priceHint));
+      else setPrice(String(priceHint));
       setActivePct(null);
       setSizingNote(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [priceHint]);
 
   function refreshLimits() {
@@ -80,17 +91,37 @@ export default function OrderForm({
     setBusy(true);
     setMessage(null);
     try {
-      await api("/orders", {
-        method: "POST",
-        body: {
-          symbol,
-          side,
-          type,
-          qty: Number(qty),
-          ...(type === "LIMIT" ? { price: Number(price) } : {}),
-        },
-      });
-      setMessage({ ok: true, text: "주문이 접수되었습니다" });
+      if (type === "STOP") {
+        await api("/orders/conditional", {
+          method: "POST",
+          body: {
+            symbol,
+            side,
+            direction: triggerDirection,
+            triggerPrice: Number(triggerPrice),
+            qty: Number(qty),
+            orderType: "MARKET",
+          },
+        });
+        setMessage({
+          ok: true,
+          text: `예약 주문 등록: ${fmt.format(Number(triggerPrice))}원 ${
+            triggerDirection === "AT_OR_ABOVE" ? "이상" : "이하"
+          }이면 ${fmt.format(Number(qty))}주 시장가 ${side === "BUY" ? "매수" : "매도"}`,
+        });
+      } else {
+        await api("/orders", {
+          method: "POST",
+          body: {
+            symbol,
+            side,
+            type,
+            qty: Number(qty),
+            ...(type === "LIMIT" ? { price: Number(price) } : {}),
+          },
+        });
+        setMessage({ ok: true, text: "주문이 접수되었습니다" });
+      }
       setQty("");
       resetSizing();
       refreshLimits();
@@ -108,7 +139,25 @@ export default function OrderForm({
   const limitPrice =
     Number.isSafeInteger(parsedLimitPrice) && parsedLimitPrice > 0 ? parsedLimitPrice : null;
 
+  const parsedTrigger = Number(triggerPrice);
+  const validTrigger = Number.isSafeInteger(parsedTrigger) && parsedTrigger > 0;
+  const triggerDirection: TriggerDirection =
+    directionOverride ??
+    (validTrigger && lastPrice != null
+      ? inferTriggerDirection(parsedTrigger, lastPrice, side)
+      : side === "SELL"
+        ? "AT_OR_BELOW"
+        : "AT_OR_ABOVE");
+  // 현재가가 이미 조건을 만족하면 서버가 거부하므로 미리 알려준다.
+  const triggerAlreadyMet =
+    type === "STOP" && validTrigger && lastPrice != null
+      ? triggerDirection === "AT_OR_ABOVE"
+        ? lastPrice >= parsedTrigger
+        : lastPrice <= parsedTrigger
+      : false;
+
   // % 버튼의 매수 기준가 — 시장가는 ceil(최근가*110%)*수량이 홀드되므로(order.service) 같은 기준이어야 거부되지 않음
+  // 조건부는 발동 시 시장가로 접수되므로 시장가와 같은 기준을 쓴다.
   const buyRefPrice =
     type === "LIMIT"
       ? limitPrice
@@ -187,8 +236,8 @@ export default function OrderForm({
         </div>
 
         {/* Order type */}
-        <div className="well grid grid-cols-2 gap-1 p-1">
-          {(["LIMIT", "MARKET"] as const).map((t) => (
+        <div className="well grid grid-cols-3 gap-1 p-1">
+          {(["LIMIT", "MARKET", "STOP"] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -203,10 +252,53 @@ export default function OrderForm({
                   : "text-ink-muted hover:bg-white/6 hover:text-ink"
               }`}
             >
-              {t === "LIMIT" ? "지정가" : "시장가"}
+              {t === "LIMIT" ? "지정가" : t === "MARKET" ? "시장가" : "조건부"}
             </button>
           ))}
         </div>
+
+        {type === "STOP" && (
+          <div className="space-y-3">
+            <div>
+              <label className="label" htmlFor={`order-trigger-${symbol}`}>
+                트리거 가격
+              </label>
+              <input
+                id={`order-trigger-${symbol}`}
+                className="field num"
+                inputMode="numeric"
+                value={triggerPrice}
+                onChange={(e) => {
+                  setTriggerPrice(e.target.value.replace(/[^0-9]/g, ""));
+                  setDirectionOverride(null);
+                }}
+                placeholder="호가를 클릭해도 입력됩니다"
+              />
+            </div>
+            <div className="well grid grid-cols-2 gap-1 p-1" role="group" aria-label="발동 조건">
+              {(["AT_OR_BELOW", "AT_OR_ABOVE"] as const).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setDirectionOverride(d)}
+                  aria-pressed={triggerDirection === d}
+                  className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
+                    triggerDirection === d
+                      ? "bg-white/10 text-ink"
+                      : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                  }`}
+                >
+                  {d === "AT_OR_BELOW" ? "이하가 되면" : "이상이 되면"}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-ink-faint">
+              {describeCondition(triggerDirection, side)} · 조건 충족 시{" "}
+              <span className="text-ink-muted">시장가</span>로 접수됩니다. 대기 중에는 현금·수량을
+              홀드하지 않습니다.
+            </p>
+          </div>
+        )}
 
         {type === "LIMIT" && (
           <div>
@@ -250,7 +342,7 @@ export default function OrderForm({
             <span>{side === "BUY" ? "주문 가능 현금 기준" : "매도 가능 수량 기준"}</span>
             {side === "BUY" && buyRefPrice != null && (
               <span className="num">
-                {type === "MARKET" ? "최근가 110%" : "지정가"} {won(buyRefPrice)}
+                {type === "LIMIT" ? "지정가" : "최근가 110%"} {won(buyRefPrice)}
               </span>
             )}
           </div>
@@ -327,7 +419,7 @@ export default function OrderForm({
           {estimate != null && (
             <p className="flex items-baseline justify-between gap-2 border-t border-hairline-soft pt-1.5">
               <span className="text-ink-muted">
-                {side === "BUY" && type === "MARKET" ? "예상 최대 홀드" : "예상 주문금액"}
+                {side === "BUY" && type !== "LIMIT" ? "예상 최대 홀드" : "예상 주문금액"}
               </span>
               <span className="font-semibold text-sky">{won(estimate)}</span>
             </p>
@@ -338,6 +430,11 @@ export default function OrderForm({
         <div className="space-y-1 text-xs">
           {type === "MARKET" && side === "BUY" && (
             <p className="text-ink-faint">시장가 매수는 최근가의 110%까지 증거금이 홀드됩니다</p>
+          )}
+          {triggerAlreadyMet && (
+            <p className="text-warn">
+              현재가가 이미 조건을 만족합니다. 바로 체결하려면 시장가 주문을 이용하세요.
+            </p>
           )}
           {sizingNote && <p className="text-warn">{sizingNote}</p>}
           {exceedsAvailableCash && (
@@ -363,10 +460,19 @@ export default function OrderForm({
         )}
 
         <button
-          disabled={busy || !validQty || (type === "LIMIT" && limitPrice == null)}
+          disabled={
+            busy ||
+            !validQty ||
+            (type === "LIMIT" && limitPrice == null) ||
+            (type === "STOP" && (!validTrigger || triggerAlreadyMet))
+          }
           className={`btn btn-block ${side === "BUY" ? "btn-buy" : "btn-sell"}`}
         >
-          {busy ? "접수 중…" : `${side === "BUY" ? "매수" : "매도"} 주문`}
+          {busy
+            ? "접수 중…"
+            : type === "STOP"
+              ? `${side === "BUY" ? "매수" : "매도"} 예약`
+              : `${side === "BUY" ? "매수" : "매도"} 주문`}
         </button>
       </div>
     </form>

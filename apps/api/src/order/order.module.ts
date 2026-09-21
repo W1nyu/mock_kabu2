@@ -1,12 +1,14 @@
 import { Module } from "@nestjs/common";
 import { GatewayModule } from "../gateway/gateway.module";
+import { ConditionalOrderController } from "./conditional-order.controller";
+import { ConditionalOrderService } from "./conditional-order.service";
 import { OrderController } from "./order.controller";
 import { OrderService } from "./order.service";
 import { OutboxRelayer } from "./outbox.relayer";
 
 @Module({
   imports: [GatewayModule],
-  controllers: [OrderController],
-  providers: [OrderService, OutboxRelayer],
+  controllers: [OrderController, ConditionalOrderController],
+  providers: [OrderService, OutboxRelayer, ConditionalOrderService],
 })
 export class OrderModule {}

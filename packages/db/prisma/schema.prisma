@@ -133,6 +133,34 @@ model Order {
   @@schema("order")
 }
 
+/// 조건부(예약) 주문. 대기 중에는 현금/보유를 홀드하지 않고, 체결가가 조건을 만족하는
+/// 순간 API가 WAITING→TRIGGERED로 claim한 뒤 일반 주문을 접수한다 (접수 실패 시 FAILED).
+model ConditionalOrder {
+  id           String   @id @default(uuid())
+  accountId    String   @map("account_id")
+  symbol       String
+  side         String // BUY | SELL
+  /// AT_OR_ABOVE | AT_OR_BELOW — 현재가가 trigger_price 이상/이하가 되면 발동
+  direction    String
+  triggerPrice Int      @map("trigger_price")
+  qty          Int
+  /// 발동 시 접수할 주문 유형 (MARKET | LIMIT)
+  orderType    String   @map("order_type")
+  limitPrice   Int?     @map("limit_price")
+  status       String   @default("WAITING") // WAITING | TRIGGERED | CANCELED | FAILED
+  triggeredOrderId  String?   @map("triggered_order_id")
+  triggerTradePrice Int?      @map("trigger_trade_price")
+  failReason   String?  @map("fail_reason")
+  triggeredAt  DateTime? @map("triggered_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([symbol, status])
+  @@index([accountId, createdAt])
+  @@map("conditional_orders")
+  @@schema("order")
+}
+
 /// Transactional Outbox — orders와 동일 트랜잭션으로 커밋, relayer가 발행
 model Outbox {
   eventId     String    @id @map("event_id")

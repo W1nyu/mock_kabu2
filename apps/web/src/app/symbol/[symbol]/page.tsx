@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 import CandleChart from "@/components/CandleChart";
+import MyConditionalOrders from "@/components/MyConditionalOrders";
 import MyOpenOrders from "@/components/MyOpenOrders";
 import MyPosition from "@/components/MyPosition";
 import OrderForm from "@/components/OrderForm";
@@ -93,7 +94,10 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
           lastPrice={currentLivePrice ?? currentInfo?.lastPrice ?? null}
           onPlaced={() => setOrderRefreshKey((value) => value + 1)}
         />
-        <MyOpenOrders symbol={symbol} refreshKey={orderRefreshKey} />
+        <div className="space-y-4">
+          <MyOpenOrders symbol={symbol} refreshKey={orderRefreshKey} />
+          <MyConditionalOrders symbol={symbol} refreshKey={orderRefreshKey} />
+        </div>
         <TradesFeed symbol={symbol} />
       </div>
 
