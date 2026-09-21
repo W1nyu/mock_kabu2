@@ -28,7 +28,7 @@ docker-compose: PostgreSQL 16 + Redis 7
 - **멱등성**: 모든 이벤트에 `event_id`, 정산은 `processed_events` 테이블로 중복 소비 무시 (at-least-once)
 - **DB 안전망**: `CHECK(balance >= 0)` 등 제약 + append-only `ledger_entries` 원장
 
-전체 엔드포인트와 계정 채널 push 페이로드는 [REST API 레퍼런스](docs/api.md)에 정리돼 있습니다.
+전체 엔드포인트와 계정 채널 push 페이로드는 [REST API 레퍼런스](docs/api.md)에, 최근 변경은 [CHANGELOG.md](CHANGELOG.md)에 정리돼 있습니다.
 
 ## 저비용 VPS 배포
 
