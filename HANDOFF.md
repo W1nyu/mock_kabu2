@@ -88,6 +88,7 @@
 ## 2026-09-22 — 체결/예약 발동 토스트 알림
 
 - **정산 push 확장**: `apps/settlement/src/main.ts`가 `account:{id}` 채널에 체결 정보를 실어 보낸다 — 매수자에 `{type:"trade", side:"BUY", symbol, price, qty, tradeId}`, 매도자에 `side:"SELL"`(자기 체결이면 한 번). 기존 `account_update`는 `order.closed`에서만 계속 쓰인다. 어떤 payload든 "내 계좌가 바뀌었다"는 신호이므로 기존 구독자(대시보드·주문폼 등)는 그대로 동작한다.
+- **알림함**: `lib/notifications.ts`가 계정별 `localStorage("mock-kabu2:notifications:{accountId}")`에 최대 50건을 남기고(읽음 시각 별도 키), Nav의 `NotificationBell.tsx`가 안 읽은 수 배지·드롭다운(종목 링크, 모두 지우기)을 그린다. Toaster가 토스트를 띄울 때 같은 항목을 알림함에도 넣는다(브래킷 ARMED 포함). 드롭다운은 glass의 반투명 배경 위로 페이지 텍스트가 비쳐서 inline `rgba(9,10,15,.97)`로 덮었다.
 - **`apps/web/src/components/Toaster.tsx`**(layout에 전역 마운트): 로그인 상태면 `account:{id}`를 구독해 우하단 토스트. 체결은 종목·방향별 1.5초 창에서 합산(`N건 · 평균가`) — 봇 계정으로 로그인해도 폭주하지 않는다. 예약 주문 `TRIGGERED`/`FAILED`도 표시. 최대 4개, 6초 뒤 자동 소멸, `tradeId` 중복 무시. pathname 변화 때 재구독(로그인/로그아웃 대응).
 
 ## 2026-09-22 — 자산 추이 스냅샷 + 대시보드 차트

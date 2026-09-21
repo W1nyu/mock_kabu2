@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { fmt, getUser } from "@/lib/api";
+import { pushNotification } from "@/lib/notifications";
 import { subscribe } from "@/lib/socket";
 
 interface Toast {
@@ -10,6 +11,7 @@ interface Toast {
   tone: "up" | "down" | "info" | "warn";
   title: string;
   detail?: string;
+  href?: string;
 }
 
 const MAX_VISIBLE = 4;
@@ -43,6 +45,8 @@ export default function Toaster() {
     const pending = pendingRef.current;
 
     const push = (toast: Toast) => {
+      // 토스트는 사라지지만 알림함에는 남는다.
+      pushNotification(user.accountId, { ...toast, ts: Date.now() });
       setToasts((current) => [...current.slice(-(MAX_VISIBLE - 1)), toast]);
       window.setTimeout(() => {
         setToasts((current) => current.filter((t) => t.id !== toast.id));
@@ -56,6 +60,7 @@ export default function Toaster() {
       const avg = fill.qty > 0 ? Math.round(fill.amount / fill.qty) : 0;
       push({
         id: `fill:${key}:${Date.now()}`,
+        href: `/symbol/${fill.symbol}`,
         tone: fill.side === "BUY" ? "up" : "down",
         title: `${fill.symbol} ${fill.side === "BUY" ? "매수" : "매도"} 체결 ${fmt.format(fill.qty)}주`,
         detail:
@@ -101,10 +106,21 @@ export default function Toaster() {
         }
         return;
       }
+      if (data.type === "bracket" && data.status === "ARMED") {
+        push({
+          id: `bracket:${data.id}`,
+          href: `/symbol/${data.symbol}`,
+          tone: "info",
+          title: `${data.symbol} 손절/익절 자동 등록`,
+          detail: `체결 ${fmt.format(Number(data.qty))}주 · 평균 ${fmt.format(Number(data.avgFillPrice))}원 · ${String(data.note ?? "")}`,
+        });
+        return;
+      }
       if (data.type === "conditional" && typeof data.label === "string") {
         if (data.status === "TRIGGERED") {
           push({
             id: `cond:${data.id}`,
+            href: `/symbol/${data.symbol}`,
             tone: "info",
             title: `${data.symbol} ${data.label} 발동`,
             detail: `${fmt.format(Number(data.triggerPrice))}원 도달 · ${fmt.format(Number(data.qty))}주 시장가 접수`,
@@ -112,6 +128,7 @@ export default function Toaster() {
         } else if (data.status === "FAILED") {
           push({
             id: `cond:${data.id}`,
+            href: `/symbol/${data.symbol}`,
             tone: "warn",
             title: `${data.symbol} ${data.label} 발동했지만 접수 실패`,
             detail: String(data.failReason ?? "사유 없음"),

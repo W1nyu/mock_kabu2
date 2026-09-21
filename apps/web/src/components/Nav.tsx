@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { clearSession, getUser, onSessionChange, type SessionUser } from "@/lib/api";
+import NotificationBell from "./NotificationBell";
 
 /**
  * Primary customer navigation is deliberately limited to these four flows.
@@ -69,6 +70,7 @@ export default function Nav() {
         <div className="ml-auto flex items-center gap-2">
           {user ? (
             <>
+              <NotificationBell accountId={user.accountId} />
               {/* 사용자 칩은 계정 설정으로 가는 유일한 입구다 — 기본 메뉴 목록은 늘리지 않는다. */}
               <Link
                 href="/settings"
