@@ -8,6 +8,7 @@ import {
   HistogramSeries,
   LineSeries,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type MouseEventParams,
   TickMarkType,
@@ -21,6 +22,7 @@ import {
   DEFAULT_CANDLE_INTERVAL,
 } from "@mock-kabu/shared";
 import { api } from "@/lib/api";
+import { usePositionLines } from "@/lib/usePositionLines";
 import { formatKstHm, formatKstMonthDay, formatKstTime } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 
@@ -185,6 +187,26 @@ export default function CandleChart({ symbol }: { symbol: string }) {
   const [hoveredCandle, setHoveredCandle] = useState<HoveredCandle | null>(null);
   const indicatorsRef = useRef(indicators);
   indicatorsRef.current = indicators;
+  // 내 평단가·예약 트리거 가격선. 차트가 재생성돼도(심볼/봉 간격 전환) 다시 그린다.
+  const positionLines = usePositionLines(symbol);
+  const priceLinesRef = useRef<IPriceLine[]>([]);
+  const [chartEpoch, setChartEpoch] = useState(0);
+
+  useEffect(() => {
+    const s = seriesRef.current;
+    if (!s) return;
+    for (const line of priceLinesRef.current) s.candle.removePriceLine(line);
+    priceLinesRef.current = positionLines.map((line) =>
+      s.candle.createPriceLine({
+        price: line.price,
+        color: line.color,
+        lineWidth: 1,
+        lineStyle: line.style,
+        axisLabelVisible: true,
+        title: line.title,
+      }),
+    );
+  }, [positionLines, chartEpoch]);
 
   useEffect(() => {
     setIndicators(loadIndicatorState());
@@ -267,6 +289,9 @@ export default function CandleChart({ symbol }: { symbol: string }) {
     const vwma100 = chart.addSeries(LineSeries, { ...lineOpts, color: "#cbd5e1" });
 
     chartRef.current = chart;
+    priceLinesRef.current = [];
+    // 시리즈가 새로 만들어졌으니 가격선 effect를 다시 돌린다.
+    setChartEpoch((value) => value + 1);
     seriesRef.current = { candle, volume, sma50, sma200, vwma100 };
 
     // 현재 토글 상태 반영 (심볼 전환으로 차트가 재생성돼도 유지)
