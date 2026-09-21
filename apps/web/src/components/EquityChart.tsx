@@ -5,6 +5,7 @@ import {
   AreaSeries,
   ColorType,
   createChart,
+  LineSeries,
   type MouseEventParams,
   TickMarkType,
   type UTCTimestamp,
@@ -54,6 +55,8 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState<Range>("1d");
   const [points, setPoints] = useState<EquityPoint[] | null>(null);
+  const [index, setIndex] = useState<{ ts: number; value: number }[]>([]);
+  const [showIndex, setShowIndex] = useState(true);
   const [hover, setHover] = useState<EquityPoint | null>(null);
 
   // localStorage는 마운트 후에만 읽는다 — 초기값에서 읽으면 hydration mismatch.
@@ -73,6 +76,11 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
       api<EquityPoint[]>(`/account/equity?range=${range}`)
         .then((rows) => {
           if (active) setPoints(rows);
+        })
+        .catch(() => {});
+      api<{ ts: number; value: number }[]>(`/market/index?range=${range}`, { auth: false })
+        .then((rows) => {
+          if (active) setIndex(rows);
         })
         .catch(() => {});
     };
@@ -128,7 +136,11 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
       priceLineVisible: false,
       lastValueVisible: true,
       crosshairMarkerRadius: 4,
-      priceFormat: { type: "custom", minMove: 1, formatter: (p: number) => priceFormatter.format(p) },
+      priceFormat: {
+        type: "custom",
+        minMove: 1,
+        formatter: (p: number) => priceFormatter.format(p),
+      },
     });
     // 같은 시각이 중복되면 setData가 거부하므로 정렬·중복 제거한다.
     const byTime = new Map<number, EquityPoint>();
@@ -137,6 +149,41 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
       .sort((a, b) => a[0] - b[0])
       .map(([time, p]) => ({ time: time as UTCTimestamp, value: p.equity }));
     area.setData(data);
+
+    // 시장 지수를 내 첫 자산에 맞춰 정규화한 비교선 — 지수가 같은 비율로 움직였다면 내 자산이 어디 있었을지.
+    if (showIndex && index.length >= 2 && data.length >= 1) {
+      const startTime = data[0].time as number;
+      const base = index.find((p) => Math.floor(p.ts / 1000) >= startTime) ?? index[0];
+      if (base && base.value > 0) {
+        const indexLine = chart.addSeries(LineSeries, {
+          color: "rgba(148, 163, 184, 0.7)",
+          lineWidth: 1,
+          lineStyle: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          priceFormat: {
+            type: "custom",
+            minMove: 1,
+            formatter: (p: number) => priceFormatter.format(p),
+          },
+        });
+        const seen = new Set<number>();
+        indexLine.setData(
+          index
+            .map((p) => ({
+              time: Math.floor(p.ts / 1000) as UTCTimestamp,
+              value: (p.value / base.value) * first,
+            }))
+            .filter(
+              (p) =>
+                (p.time as number) >= startTime &&
+                !seen.has(p.time as number) &&
+                seen.add(p.time as number),
+            ),
+        );
+      }
+    }
     chart.timeScale().fitContent();
 
     const onMove = (param: MouseEventParams) => {
@@ -154,7 +201,7 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
       chart.chartElement().style.display = "none";
       window.requestAnimationFrame(() => chart.remove());
     };
-  }, [points, range]);
+  }, [points, range, index, showIndex]);
 
   function selectRange(next: Range) {
     setRange(next);
@@ -170,9 +217,21 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
   const last = points?.[points.length - 1];
   const shown = hover ?? last ?? null;
   const change = shown && first ? shown.equity - first.equity : null;
-  const changeRate = change != null && first && first.equity > 0 ? (change / first.equity) * 100 : null;
-  const changeTone = change == null || change === 0 ? "text-ink-muted" : change > 0 ? "text-up" : "text-down";
+  const changeRate =
+    change != null && first && first.equity > 0 ? (change / first.equity) * 100 : null;
+  const changeTone =
+    change == null || change === 0 ? "text-ink-muted" : change > 0 ? "text-up" : "text-down";
   const hasData = (points?.length ?? 0) >= 2;
+  // 같은 구간의 지수 등락 — 내 수익률과 나란히 읽는다.
+  const indexStart =
+    first && index.length >= 2
+      ? (index.find((p) => Math.floor(p.ts / 1000) >= Math.floor(first.ts / 1000)) ?? index[0])
+      : null;
+  const indexEnd = index.length >= 1 ? index[index.length - 1] : null;
+  const indexRate =
+    indexStart && indexEnd && indexStart.value > 0
+      ? ((indexEnd.value - indexStart.value) / indexStart.value) * 100
+      : null;
 
   return (
     <section className="glass overflow-hidden">
@@ -190,29 +249,53 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
                 </span>
               )}
               <span className="ml-2 text-ink-faint">
-                {hover ? formatKstTime(hover.ts).slice(0, 5) : "현재"} · 현금 {won(shown.cash)} · 주식{" "}
-                {won(shown.stockValue)}
+                {hover ? formatKstTime(hover.ts).slice(0, 5) : "현재"} · 현금 {won(shown.cash)} ·
+                주식 {won(shown.stockValue)}
               </span>
             </span>
           )}
         </div>
-        <div className="well flex gap-0.5 p-0.5" role="group" aria-label="조회 구간">
-          {RANGES.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => selectRange(r.id)}
-              aria-pressed={range === r.id}
-              title={r.hint}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
-                range === r.id
-                  ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
-                  : "text-ink-muted hover:bg-white/6 hover:text-ink"
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowIndex((v) => !v)}
+            aria-pressed={showIndex}
+            title="5종목 동일가중 지수를 내 시작 자산에 맞춰 겹쳐 그립니다"
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+              showIndex
+                ? "border-hairline bg-surface-2/70 text-ink"
+                : "border-hairline-soft text-ink-faint hover:text-ink-muted"
+            }`}
+          >
+            <span className="inline-block h-0 w-3 border-t border-dashed border-ink-muted" />
+            시장 지수
+            {indexRate != null && (
+              <span
+                className={`num ${indexRate > 0 ? "text-up" : indexRate < 0 ? "text-down" : "text-ink-muted"}`}
+              >
+                {indexRate > 0 ? "+" : ""}
+                {indexRate.toFixed(2)}%
+              </span>
+            )}
+          </button>
+          <div className="well flex gap-0.5 p-0.5" role="group" aria-label="조회 구간">
+            {RANGES.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => selectRange(r.id)}
+                aria-pressed={range === r.id}
+                title={r.hint}
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                  range === r.id
+                    ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
+                    : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <div className="relative p-2">

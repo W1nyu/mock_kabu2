@@ -28,6 +28,7 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/market/orderbook/:symbol` | 호가 스냅샷 `{bids, asks, lastPrice, seq}` (각 10단) |
 | GET | `/market/candles/:symbol?interval=1m|5m|15m|1h|4h|1d&limit=` | 봉. 1분만 저장, 나머지는 조회 시 집계 |
 | GET | `/market/trades/:symbol?limit=` | 최근 체결 |
+| GET | `/market/index?range=1d|1w|all` | 모의 시장 지수 `[{ts, value}]` — 5종목 동일가중, 기준가 대비 ×1000 |
 | GET | `/market/news?symbol=&limit=` | 가상 뉴스(호재/악재·강도는 응답에서 제외) |
 
 ## 주문 `/orders` (인증)

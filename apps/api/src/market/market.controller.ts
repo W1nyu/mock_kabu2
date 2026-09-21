@@ -76,6 +76,59 @@ export class MarketController {
     };
   }
 
+  /**
+   * 모의 시장 지수 — 5종목 동일가중, 각 종목 종가/기준가(initial_price)의 평균 × 1000.
+   * 1분 봉을 구간에 맞는 버킷으로 묶고, 버킷 안에 봉이 없는 종목은 직전 값을 이어 쓴다.
+   * 자산 추이와 나란히 놓고 "시장을 이겼는지" 볼 때 쓴다.
+   */
+  @Get("index")
+  async marketIndex(@Query("range") range = "1d") {
+    const bucketSeconds = range === "all" ? 3_600 : range === "1w" ? 600 : 60;
+    const rangeMs = range === "all" ? null : range === "1w" ? 7 * 24 * 3_600_000 : 24 * 3_600_000;
+    const since = rangeMs == null ? new Date(0) : new Date(Date.now() - rangeMs);
+    const symbols = await this.prisma.marketSymbol.findMany({ where: { symbol: { in: [...ACTIVE_SYMBOLS] } } });
+    const rows = await this.prisma.$queryRaw<{ bucket: Date; symbol: string; close: number }[]>`
+      SELECT DISTINCT ON (bucket, symbol) bucket, symbol, close
+      FROM (
+        SELECT
+          to_timestamp(floor(extract(epoch FROM ts) / ${bucketSeconds}) * ${bucketSeconds}) AS bucket,
+          symbol, ts, close
+        FROM market.candles
+        WHERE interval = ${BASE_CANDLE_INTERVAL} AND ts >= ${since}
+      ) c
+      ORDER BY bucket ASC, symbol ASC, ts DESC
+    `;
+    const initial = new Map(symbols.map((s) => [s.symbol, s.initialPrice]));
+    const last = new Map<string, number>();
+    const buckets = new Map<number, Map<string, number>>();
+    for (const row of rows) {
+      const ts = row.bucket.getTime();
+      let bucket = buckets.get(ts);
+      if (!bucket) {
+        bucket = new Map();
+        buckets.set(ts, bucket);
+      }
+      bucket.set(row.symbol, row.close);
+    }
+    const points: { ts: number; value: number }[] = [];
+    for (const ts of [...buckets.keys()].sort((a, b) => a - b)) {
+      const bucket = buckets.get(ts)!;
+      for (const [symbol, close] of bucket) last.set(symbol, close);
+      // 아직 한 번도 거래되지 않은 종목은 기준가(=1.0)로 본다.
+      let sum = 0;
+      let count = 0;
+      for (const [symbol, base] of initial) {
+        const close = last.get(symbol) ?? base;
+        if (base > 0) {
+          sum += close / base;
+          count += 1;
+        }
+      }
+      if (count > 0) points.push({ ts, value: Math.round((sum / count) * 1000 * 100) / 100 });
+    }
+    return points;
+  }
+
   @Get("orderbook/:symbol")
   async orderbook(@Param("symbol") symbol: string) {
     this.assertActiveSymbol(symbol);
