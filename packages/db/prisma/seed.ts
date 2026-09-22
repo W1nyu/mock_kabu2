@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { SYMBOLS } from "@mock-kabu/shared";
+import { ADMIN_NICKNAME, SYMBOLS } from "@mock-kabu/shared";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -16,7 +16,6 @@ function requiredSeedSecret(name: string, developmentDefault: string): string {
 
 export const BOT_PASSWORD = requiredSeedSecret("BOT_PASSWORD", "botpassword");
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL?.trim() || "admin@admin";
-const ADMIN_NICKNAME = "admin";
 const ADMIN_PASSWORD = requiredSeedSecret("ADMIN_PASSWORD", "admin");
 const ADMIN_INITIAL_CASH = 10_000_000_000_000_000n;
 const BOT_INITIAL_CASH = 1_000_000_000n; // 봇당 10억

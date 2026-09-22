@@ -8,7 +8,7 @@ import {
 } from "@nestjs/common";
 import type { BalanceMutator } from "@mock-kabu/concurrency";
 import { Prisma, type PrismaClient } from "@mock-kabu/db";
-import { SYMBOLS } from "@mock-kabu/shared";
+import { ADMIN_NICKNAME, SYMBOLS } from "@mock-kabu/shared";
 import { koreaDayStart } from "../common/market-time";
 import { MemoCache } from "../core/memo-cache";
 import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
@@ -277,8 +277,9 @@ export class AccountService {
           AND l.reason IN ('SIGNUP_BONUS', 'SEED', 'TRANSFER_IN', 'TRANSFER_OUT')
           AND l.created_at > COALESCE(b.ts, ${since})
       ) f ON ${period !== "all"}
-      -- 봇과 스모크 테스트(pnpm smoke)가 만든 임시 계정은 순위에서 뺀다.
-      JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false AND u.nickname NOT LIKE 'smoke-%'
+      -- 봇·관리자(시드 계정, 자금 무한)·스모크 테스트(pnpm smoke) 임시 계정은 순위에서 뺀다.
+      JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false
+        AND u.nickname <> ${ADMIN_NICKNAME} AND u.nickname NOT LIKE 'smoke-%'
       LEFT JOIN (
         SELECT h.account_id, SUM(h.qty::bigint * s.last_price) AS stock_value
         FROM account.holdings h

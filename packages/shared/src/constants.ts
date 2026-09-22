@@ -1,5 +1,7 @@
 /** 가입 시 지급되는 가상 현금 보너스 (정수 통화 단위) */
 export const SIGNUP_BONUS = 10_000_000;
+/** 시드가 만드는 관리자 계정의 닉네임. 닉네임은 유일하므로 이 이름이 곧 시스템 계정 식별자다(랭킹 제외). */
+export const ADMIN_NICKNAME = "admin";
 
 export interface SymbolDef {
   symbol: string;
