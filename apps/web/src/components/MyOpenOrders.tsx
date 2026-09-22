@@ -3,6 +3,7 @@
 import { isOnTick, tickSizeOf } from "@mock-kabu/shared";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmt, getUser } from "@/lib/api";
+import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { subscribe } from "@/lib/socket";
 
 interface OrderRow {
@@ -49,12 +50,14 @@ export default function MyOpenOrders({
 
   useEffect(() => {
     const user = getUser();
-    const unsub = user ? subscribe([`account:${user.accountId}`], () => refresh()) : () => {};
+    const refreshSoon = debounce(refresh, ACCOUNT_REFRESH_DEBOUNCE_MS);
+    const unsub = user ? subscribe([`account:${user.accountId}`], () => refreshSoon()) : () => {};
     // Account pushes and the order form's direct refresh are the normal path.
     // Keep a light fallback for a reconnect that missed both.
     const t = setInterval(refresh, 15_000);
     return () => {
       unsub();
+      refreshSoon.cancel();
       clearInterval(t);
     };
   }, [refresh]);

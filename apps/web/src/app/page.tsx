@@ -14,6 +14,7 @@ import { NewsList } from "@/components/NewsFeed";
 import Sparkline from "@/components/Sparkline";
 import { mergeNews, parseNewsItem } from "@/lib/news";
 import { subscribe } from "@/lib/socket";
+import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 
 interface AccountInfo {
   balance: number;
@@ -173,8 +174,9 @@ export default function DashboardPage() {
     refreshAccount();
     refreshSymbols();
     const user = getUser();
+    const refreshAccountSoon = debounce(refreshAccount, ACCOUNT_REFRESH_DEBOUNCE_MS);
     const unsub = user
-      ? subscribe([`account:${user.accountId}`], () => refreshAccount())
+      ? subscribe([`account:${user.accountId}`], () => refreshAccountSoon())
       : () => {};
     // WebSocket push가 주 경로이며, 재연결 사이에 놓친 이벤트는 느린 폴백으로 보정한다.
     const fallback = window.setInterval(() => {
@@ -183,6 +185,7 @@ export default function DashboardPage() {
     }, 15_000);
     return () => {
       window.clearInterval(fallback);
+      refreshAccountSoon.cancel();
       unsub();
     };
   }, [refreshAccount, refreshSymbols, router]);

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmt, getToken, getUser, won } from "@/lib/api";
 import { toCsv } from "@/lib/csv";
+import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { formatKstTime, MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 
@@ -152,11 +153,13 @@ export default function OrdersPage() {
     }
     load();
     const user = getUser();
-    const unsub = user ? subscribe([`account:${user.accountId}`], () => load()) : () => {};
+    const reload = debounce(load, ACCOUNT_REFRESH_DEBOUNCE_MS);
+    const unsub = user ? subscribe([`account:${user.accountId}`], () => reload()) : () => {};
     // Realtime account notifications normally update this immediately.
     const t = setInterval(load, 15_000);
     return () => {
       unsub();
+      reload.cancel();
       clearInterval(t);
     };
   }, [load, router]);

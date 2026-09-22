@@ -3,6 +3,7 @@
 import type { ConditionalOrderDto } from "@mock-kabu/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmt, getUser, won } from "@/lib/api";
+import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { guardSummary } from "@/lib/guards";
 import { subscribe } from "@/lib/socket";
 
@@ -77,8 +78,9 @@ export default function MyPosition({
     refresh();
     const t = setInterval(refresh, 5000);
     const user = getUser();
+    const refreshSoon = debounce(refresh, ACCOUNT_REFRESH_DEBOUNCE_MS);
     const unsubAccount = user
-      ? subscribe([`account:${user.accountId}`], () => refresh())
+      ? subscribe([`account:${user.accountId}`], () => refreshSoon())
       : () => {};
     const unsubTrades = subscribe([`trades:${symbol}`], ({ data }) => {
       if (Number.isFinite(data?.price)) setLivePrice(data.price);

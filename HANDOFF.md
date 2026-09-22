@@ -47,7 +47,11 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 성능·자원 최적화 3차: 저장 공간 보존 (최신 작업)
+## 2026-09-22 — 성능·자원 최적화 4차: 웹 요청 폭주 완화 (최신 작업)
+
+- `apps/web/src/lib/debounce.ts`(`debounce`, `ACCOUNT_REFRESH_DEBOUNCE_MS=400`): 계정 채널 push를 받는 9곳(대시보드 계좌 갱신, 주문/체결/예약 페이지, 미체결·예약·포지션·주문폼·호가 내 주문·차트 가격선·체결 마커)이 push마다 즉시 REST를 부르던 것을 마지막 push 뒤 400ms에 한 번으로 묶었다. 시장가 한 건이 5단을 관통하면 push 5번 × 컴포넌트 7개 = 35요청이 7요청으로. 15초 폴백은 그대로. 테스트 `lib/__tests__/debounce.test.ts`.
+
+## 2026-09-22 — 성능·자원 최적화 3차: 저장 공간 보존
 
 - **진단**: 로컬 DB 4,665MB 중 `order.outbox` 1.4GB(2.9M행), `matching.outbox_events` 1.1GB, `processed_order_events` 428MB, `closed_order_markers` 406MB, `orders` 845MB(봇 종결 주문 1.07M). 발행된 outbox와 옛 claim이 전체의 85%.
 - **프로세스 자체 정리** `packages/shared/src/log-retention.ts` (`LOG_RETENTION`, `pruneBatch`, `pruneUntilDrained`: 5,000행 배치·최대 20회/스윕, 1분 주기): API `OutboxRelayer`가 발행 1시간 지난 `order.outbox`, 매칭 리더가 발행된 `matching.outbox_events` + 7일 지난 `processed_order_events`·`closed_order_markers`를 지운다. 테스트 `core/__tests__/log-retention.test.ts`.

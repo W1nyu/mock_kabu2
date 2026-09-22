@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, fmt, getToken, getUser } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
+import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 
 interface Level {
   price: number;
@@ -73,11 +74,13 @@ function useMyDepth(symbol: string): MyDepth {
     };
     load();
     const user = getUser();
-    const unsub = user ? subscribe([`account:${user.accountId}`], () => load()) : () => {};
+    const loadSoon = debounce(load, ACCOUNT_REFRESH_DEBOUNCE_MS);
+    const unsub = user ? subscribe([`account:${user.accountId}`], () => loadSoon()) : () => {};
     const t = window.setInterval(load, 15_000);
     return () => {
       active = false;
       unsub();
+      loadSoon.cancel();
       window.clearInterval(t);
     };
   }, [symbol]);

@@ -7,6 +7,7 @@ import {
 } from "@mock-kabu/shared";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmt, getUser } from "@/lib/api";
+import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { formatKstTime } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 
@@ -73,6 +74,7 @@ export default function MyConditionalOrders({
 
   useEffect(() => {
     const user = getUser();
+    const refreshSoon = debounce(refresh, ACCOUNT_REFRESH_DEBOUNCE_MS);
     const unsub = user
       ? subscribe([`account:${user.accountId}`], ({ data }) => {
           if (data?.type === "bracket" && data?.symbol === symbol && data?.status === "ARMED") {
@@ -87,12 +89,13 @@ export default function MyConditionalOrders({
                 : `${data.label} 발동했지만 접수 실패: ${data.failReason ?? "사유 없음"}`,
             );
           }
-          refresh();
+          refreshSoon();
         })
       : () => {};
     const t = setInterval(refresh, 15_000);
     return () => {
       unsub();
+      refreshSoon.cancel();
       clearInterval(t);
     };
   }, [refresh, symbol]);

@@ -14,6 +14,7 @@ import {
 import { useEffect, useState } from "react";
 import { api, fmt, getUser, newIdempotencyKey, won } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
+import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 
 interface AccountInfo {
   balance: number;
@@ -95,9 +96,11 @@ export default function OrderForm({
     // account:{id} push가 주 갱신 경로, 폴링은 push 유실 대비 fallback
     const t = setInterval(refreshLimits, 15000);
     const user = getUser();
-    const unsub = user ? subscribe([`account:${user.accountId}`], () => refreshLimits()) : () => {};
+    const refreshSoon = debounce(refreshLimits, ACCOUNT_REFRESH_DEBOUNCE_MS);
+    const unsub = user ? subscribe([`account:${user.accountId}`], () => refreshSoon()) : () => {};
     return () => {
       clearInterval(t);
+      refreshSoon.cancel();
       unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
