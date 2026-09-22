@@ -51,7 +51,7 @@
 
 - 호가창 클릭 → 가격만(방향 유지). `priceHint`에서 `side` 제거, `OrderForm`은 `setSide`를 더 이상 호출하지 않는다. `MyOpenOrders`도 `priceHint`를 받아 정정 행의 가격 칸을 채운다.
 - `CandleChart`의 `OVERLAYS`(내 체결 마커·평단/예약선) 토글 — `INDICATORS`와 같은 저장 키(`mock-kabu2:chart:indicators`)에 합쳐 저장. 평단선 제목은 `평단`.
-- `/index` 페이지 + `MarketIndexPanel`: 서버 `/market/index`(캐시 15~120초) 추이 + `trades:*` 구독으로 현재값 실시간 재계산(같은 정의: 현재가/시초가 평균 × 1,000). 종목별 기여 = (현재가/시초가 − 1) × 1,000 / 종목 수.
+- `/market-index` 페이지(`/index`는 Next 프리렌더 버그로 빌드 실패) + `MarketIndexPanel`: 서버 `/market/index`(캐시 15~120초) 추이 + `trades:*` 구독으로 현재값 실시간 재계산(같은 정의: 현재가/시초가 평균 × 1,000). 종목별 기여 = (현재가/시초가 − 1) × 1,000 / 종목 수.
 - 뉴스 간격 2배(`apps/bots/src/news/scheduler.ts` DEFAULT_*_GAP). 엔진 테스트는 2시간 시뮬레이션으로 바꿈.
 - **Caddy 경로 충돌**: `/orders`·`/admin`·`/replay`가 웹 페이지와 API 접두사를 공유한다. `@api` 매처에 `not header Sec-Fetch-Dest document`/`not header RSC 1`/`not header Accept text/html*`를 넣어 페이지 로드·RSC 내비게이션은 웹으로. 로컬 dev는 포트가 달라 재현되지 않으니 프로덕션 Caddyfile을 바꿀 때 이 규칙을 지울 것.
 
