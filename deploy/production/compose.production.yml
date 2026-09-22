@@ -207,6 +207,12 @@ services:
       BOT_PASSWORD: ${BOT_PASSWORD:?BOT_PASSWORD is required}
       LIQUIDITY_BOOTSTRAP_TOKEN: ${LIQUIDITY_BOOTSTRAP_TOKEN:?LIQUIDITY_BOOTSTRAP_TOKEN is required}
       LIQUIDITY_BOT_PASSWORD: ${LIQUIDITY_BOT_PASSWORD:?LIQUIDITY_BOT_PASSWORD is required}
+      # A single small VPS shares one or two vCPUs across seven containers. The
+      # market makers' 250ms ladder reconcile is the steady-state CPU floor for
+      # api+postgres; 500ms halves it while the book still refills within a
+      # second, and slowing the flow bots scales matching/settlement load with it.
+      BOT_QUOTE_RECONCILE_MS: ${BOT_QUOTE_RECONCILE_MS:-500}
+      BOT_FLOW_DELAY_SCALE: ${BOT_FLOW_DELAY_SCALE:-1.5}
       NODE_OPTIONS: --max-old-space-size=192
     depends_on:
       api:

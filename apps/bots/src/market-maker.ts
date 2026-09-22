@@ -9,6 +9,7 @@ import {
   type LiquidityQuote,
 } from "./liquidity";
 import type { MarketModel } from "./market-model";
+import { numericRuntimeEnv } from "./env";
 
 export type ManagedQuote = LiquidityQuote & {
   id: string;
@@ -48,7 +49,12 @@ export class MarketMakerStartupBlockedError extends Error {}
 // The reserve owns twelve levels per side, while the REST snapshot exposes
 // ten.  Reconcile substantially faster than the visible cushion can be
 // consumed so a single ordinary market order never leaves a side below eight.
-const QUOTE_RECONCILE_MS = 250;
+/**
+ * 호가 래더 재조정 주기. 250ms면 체결 직후에도 가시 호가가 8단 아래로 내려가지 않지만,
+ * 종목 5개 × 초당 4회의 `/orders/quote-state` 호출이 API·DB CPU의 상시 바닥이 된다.
+ * 작은 VPS에서는 `BOT_QUOTE_RECONCILE_MS=500~1000`으로 낮춰 부하를 절반 이하로 줄일 수 있다.
+ */
+const QUOTE_RECONCILE_MS = numericRuntimeEnv("BOT_QUOTE_RECONCILE_MS", 250, { min: 100 });
 /** Snapshot depth is a budget hint, not a trading dependency. */
 const PRESERVED_DEPTH_REFRESH_MS = 500;
 const STARTUP_CANCEL_TIMEOUT_MS = 5_000;

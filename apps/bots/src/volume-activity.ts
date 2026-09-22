@@ -1,3 +1,4 @@
+import { numericRuntimeEnv } from "./env";
 interface RandomSource {
   next(): number;
 }
@@ -162,11 +163,18 @@ export class VolumeActivity {
   }
 
   /** Makes busy periods quicker and quiet periods slower without tight loops. */
+  /**
+   * 흐름 봇의 다음 행동까지 대기. `BOT_FLOW_DELAY_SCALE`(기본 1)을 키우면 모든 흐름 봇이 그만큼
+   * 느려져 체결·정산·알림 전 구간의 부하가 비례해 준다 — 배포 자원에 맞춰 시장 활기를 조절하는 손잡이.
+   */
   delayFor(sample: VolumeActivitySample, minMs: number, maxMs: number, floorMs: number): number {
     const base = minMs + this.random.next() * Math.max(0, maxMs - minMs);
-    return clamp(Math.round(base / sample.intensity), floorMs, Math.round(maxMs * 2.4));
+    const scaled = clamp(Math.round(base / sample.intensity), floorMs, Math.round(maxMs * 2.4));
+    return Math.round(scaled * FLOW_DELAY_SCALE);
   }
 }
+
+const FLOW_DELAY_SCALE = numericRuntimeEnv("BOT_FLOW_DELAY_SCALE", 1, { min: 0.25 });
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);

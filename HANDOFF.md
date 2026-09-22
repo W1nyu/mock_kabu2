@@ -47,7 +47,12 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 성능·자원 최적화 1차 (최신 작업)
+## 2026-09-22 — 성능·자원 최적화 2차: 프로세스·봇 부하 (최신 작업)
+
+- **워커 컴파일**: settlement·matching-engine·bots에 `tsconfig.build.json`(noEmit false, 테스트 제외)과 `build: tsc -p tsconfig.build.json` / `start: node dist/main.js`. 프로덕션 엔트리포인트(`deploy/production/docker/app-entrypoint.sh`)가 `node apps/*/dist/main.js`를 실행 — tsx/esbuild 서비스가 각 192MB 컨테이너에 상주하지 않고 기동도 빠르다. `pnpm dev`는 여전히 tsx watch. 로컬에서 `node dist/main.js`로 settlement·matching 기동 확인(매칭의 첫 lease 시도가 Redis 연결 전이라 에러 로그 한 줄 뒤 재시도 성공 — 기존 동작).
+- **봇 부하 손잡이**: `BOT_QUOTE_RECONCILE_MS`(마켓메이커 래더 재조정, 기본 250, 최소 100)와 `BOT_FLOW_DELAY_SCALE`(흐름 봇 대기 배율, 기본 1, 최소 0.25). 프로덕션 compose는 500 / 1.5를 기본으로 넣어 api·postgres 상시 CPU를 대략 절반으로. `.env.production.example`에 설명.
+
+## 2026-09-22 — 성능·자원 최적화 1차
 
 배포(VPS 1대, 컨테이너별 192~384MB) 관점에서 CPU·메모리를 줄이는 작업. 런타임 확인은 스택이 내려가 있어 SQL 직접 실행·단위 테스트로만 했다.
 - **정산 캔들 집계를 DB 한 문장으로**: `updateMarket`이 그 분의 체결 행 전부를 Node로 끌어와 max/min/reduce 하던 것을 `INSERT … SELECT array_agg/MAX/MIN/SUM … ON CONFLICT DO UPDATE` 한 번으로 바꿨다. 재전달 멱등성(원장 재집계)은 그대로. 체결이 분당 수백 건일 때 왕복·전송·GC가 모두 줄어든다.

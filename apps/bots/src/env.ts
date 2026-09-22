@@ -9,6 +9,16 @@ if (existsSync(projectEnv)) {
 }
 
 /**
+ * 양의 숫자 환경변수. 없거나 잘못됐으면 기본값. 봇 부하 조절(폴링 주기·흐름 속도)에 쓴다.
+ */
+export function numericRuntimeEnv(name: string, fallback: number, { min = 0 }: { min?: number } = {}): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= min ? value : fallback;
+}
+
+/**
  * Local development remains zero-config, but a public deployment must never
  * silently fall back to credentials committed to the repository.
  */
