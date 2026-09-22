@@ -40,6 +40,66 @@ export class MarketController {
     });
   }
 
+  /**
+   * 전 종목 시세 + 당일 요약을 한 번에. 대시보드가 `/symbols` + 종목별 `/summary` 6번을 부르던 것을
+   * 요청 1번·쿼리 1번(GROUP BY symbol)으로 줄인다. 2초 캐시.
+   */
+  @Get("overview")
+  overview() {
+    return this.cache.getOrCompute("overview", SUMMARY_TTL_MS, () => this.computeOverview());
+  }
+
+  private async computeOverview() {
+    const sessionStart = koreaDayStart();
+    const [symbols, stats] = await Promise.all([
+      this.prisma.marketSymbol.findMany({ where: { symbol: { in: [...ACTIVE_SYMBOLS] } }, orderBy: { symbol: "asc" } }),
+      this.prisma.$queryRaw<
+        {
+          symbol: string;
+          high: number | null;
+          low: number | null;
+          volume: bigint;
+          turnover: bigint;
+          buy_volume: bigint;
+          sell_volume: bigint;
+          last_trade_ts: Date | null;
+        }[]
+      >`
+        SELECT
+          symbol,
+          MAX(price) AS high,
+          MIN(price) AS low,
+          COALESCE(SUM(qty), 0) AS volume,
+          COALESCE(SUM(price::bigint * qty), 0) AS turnover,
+          COALESCE(SUM(qty) FILTER (WHERE taker_side = 'BUY'), 0) AS buy_volume,
+          COALESCE(SUM(qty) FILTER (WHERE taker_side = 'SELL'), 0) AS sell_volume,
+          MAX(created_at) AS last_trade_ts
+        FROM matching.trades
+        WHERE created_at >= ${sessionStart}
+        GROUP BY symbol
+      `,
+    ]);
+    const bySymbol = new Map(stats.map((row) => [row.symbol, row]));
+    return symbols.map((marketSymbol) => {
+      const row = bySymbol.get(marketSymbol.symbol);
+      return {
+        symbol: marketSymbol.symbol,
+        name: marketSymbol.name,
+        tickSize: marketSymbol.tickSize,
+        initialPrice: marketSymbol.initialPrice,
+        referencePrice: marketSymbol.initialPrice,
+        lastPrice: marketSymbol.lastPrice,
+        high: row?.high ?? null,
+        low: row?.low ?? null,
+        volume: Number(row?.volume ?? 0n),
+        turnover: Number(row?.turnover ?? 0n),
+        buyVolume: Number(row?.buy_volume ?? 0n),
+        sellVolume: Number(row?.sell_volume ?? 0n),
+        lastTradeTs: row?.last_trade_ts?.getTime() ?? null,
+      };
+    });
+  }
+
   /** KST 당일 체결 기준 시세 요약. 캔들 개수 제한과 무관하게 하루 전체를 집계한다. */
   @Get("summary/:symbol")
   summary(@Param("symbol") symbol: string) {
@@ -66,7 +126,7 @@ export class MarketController {
           MAX(price) AS high,
           MIN(price) AS low,
           COALESCE(SUM(qty), 0) AS volume,
-          COALESCE(SUM(price * qty), 0) AS turnover,
+          COALESCE(SUM(price::bigint * qty), 0) AS turnover,
           COALESCE(SUM(qty) FILTER (WHERE taker_side = 'BUY'), 0) AS buy_volume,
           COALESCE(SUM(qty) FILTER (WHERE taker_side = 'SELL'), 0) AS sell_volume,
           MAX(created_at) AS last_trade_ts

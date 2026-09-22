@@ -139,15 +139,11 @@ export default function DashboardPage() {
   }, []);
 
   const refreshSymbols = useCallback(() => {
-    api<SymbolRow[]>("/market/symbols", { auth: false })
+    // 종목 목록과 당일 요약을 한 요청으로 받는다 (예전: /symbols + 종목별 /summary 5번).
+    api<(SymbolRow & MarketSummary)[]>("/market/overview", { auth: false })
       .then(async (rows) => {
-        setSymbols(rows);
-        const summaries = await Promise.all(
-          rows.map(async ({ symbol }) => ({
-            symbol,
-            summary: await api<MarketSummary>(`/market/summary/${symbol}`, { auth: false }),
-          })),
-        );
+        setSymbols(rows.map(({ symbol, name, lastPrice, initialPrice }) => ({ symbol, name, lastPrice, initialPrice })));
+        const summaries = rows.map((row) => ({ symbol: row.symbol, summary: row as MarketSummary }));
 
         const nextTurnovers: Record<string, number> = {};
         for (const { symbol, summary } of summaries) {

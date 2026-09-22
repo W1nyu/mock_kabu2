@@ -50,6 +50,7 @@
 ## 2026-09-22 — 성능·자원 최적화 2차: 프로세스·봇 부하 (최신 작업)
 
 - **워커 컴파일**: settlement·matching-engine·bots에 `tsconfig.build.json`(noEmit false, 테스트 제외)과 `build: tsc -p tsconfig.build.json` / `start: node dist/main.js`. 프로덕션 엔트리포인트(`deploy/production/docker/app-entrypoint.sh`)가 `node apps/*/dist/main.js`를 실행 — tsx/esbuild 서비스가 각 192MB 컨테이너에 상주하지 않고 기동도 빠르다. `pnpm dev`는 여전히 tsx watch. 로컬에서 `node dist/main.js`로 settlement·matching 기동 확인(매칭의 첫 lease 시도가 Redis 연결 전이라 에러 로그 한 줄 뒤 재시도 성공 — 기존 동작).
+- **`GET /market/overview`**: 종목 목록 + 당일 요약을 `GROUP BY symbol` 한 쿼리로(2초 캐시). 대시보드가 15초마다 보내던 6개 요청이 1개로. 요약 SQL의 `price*qty`는 int4 오버플로를 피해 `price::bigint*qty`로.
 - **봇 부하 손잡이**: `BOT_QUOTE_RECONCILE_MS`(마켓메이커 래더 재조정, 기본 250, 최소 100)와 `BOT_FLOW_DELAY_SCALE`(흐름 봇 대기 배율, 기본 1, 최소 0.25). 프로덕션 compose는 500 / 1.5를 기본으로 넣어 api·postgres 상시 CPU를 대략 절반으로. `.env.production.example`에 설명.
 
 ## 2026-09-22 — 성능·자원 최적화 1차

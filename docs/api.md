@@ -24,6 +24,7 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/market/symbols` | 활성 종목 `[{symbol, name, initialPrice, tickSize, lastPrice}]` |
+| GET | `/market/overview` | 전 종목 시세 + 당일 요약 한 번에 (`symbols` + `summary` 필드 합집합, 2초 캐시) — 대시보드용 |
 | GET | `/market/summary/:symbol` | KST 당일 요약 `{referencePrice, lastPrice, high, low, volume, turnover, buyVolume, sellVolume, lastTradeTs}` |
 | GET | `/market/orderbook/:symbol` | 호가 스냅샷 `{bids, asks, lastPrice, seq}` (각 10단) |
 | GET | `/market/candles/:symbol?interval=1m|5m|15m|1h|4h|1d&limit=` | 봉. 1분만 저장, 나머지는 조회 시 집계 |
