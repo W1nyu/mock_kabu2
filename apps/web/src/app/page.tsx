@@ -411,7 +411,7 @@ export default function DashboardPage() {
             <thead>
               <tr>
                 <SortableTh label="종목" sortKey="symbol" sort={sort} onSort={toggleSort} />
-                <th className="text-right" title="모의 시장 시작 기준가">
+                <th className="hidden text-right sm:table-cell" title="모의 시장 시작 기준가">
                   기준가(시가)
                 </th>
                 <SortableTh label="현재가" sortKey="price" sort={sort} onSort={toggleSort} align="right" />
@@ -424,7 +424,7 @@ export default function DashboardPage() {
                   align="right"
                   title="KST 당일 누적 체결 금액을 만 원 단위로 표시"
                 />
-                <th className="text-right" title="최근 6시간 5분봉 종가 흐름">
+                <th className="hidden text-right md:table-cell" title="최근 6시간 5분봉 종가 흐름">
                   6시간 흐름
                 </th>
                 <th />
@@ -450,7 +450,7 @@ export default function DashboardPage() {
                         </span>
                       </Link>
                     </td>
-                    <td className="num text-right text-ink-muted">{fmt.format(s.initialPrice)}원</td>
+                    <td className="num hidden text-right text-ink-muted sm:table-cell">{fmt.format(s.initialPrice)}원</td>
                     <td className={`num text-right font-semibold ${tone}`}>
                       {fmt.format(s.lastPrice)}원
                     </td>
@@ -459,7 +459,7 @@ export default function DashboardPage() {
                       {change.toFixed(2)}%
                     </td>
                     <td className="num text-right">{formatTurnoverManWon(s.turnover)}</td>
-                    <td className="text-right">
+                    <td className="hidden text-right md:table-cell">
                       <SparkCell values={sparks[s.symbol]} livePrice={s.lastPrice} />
                     </td>
                     <td className="text-right">

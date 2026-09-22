@@ -117,10 +117,10 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
               >
                 수익률
               </th>
-              <th className="text-right" title="가입 이후 시장 지수 등락 대비 초과수익 (수익률 − 지수 등락률)">
+              <th className="hidden text-right sm:table-cell" title="가입 이후 시장 지수 등락 대비 초과수익 (수익률 − 지수 등락률)">
                 지수 대비
               </th>
-              <th className="text-right" title="매도 체결에서 확정된 손익 합계">
+              <th className="hidden text-right sm:table-cell" title="매도 체결에서 확정된 손익 합계">
                 실현손익
               </th>
             </tr>
@@ -151,7 +151,7 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
                       : `${row.returnRate > 0 ? "+" : ""}${(row.returnRate * 100).toFixed(2)}%`}
                   </td>
                   <td
-                    className={`num text-right ${
+                    className={`num hidden text-right sm:table-cell ${
                       row.alpha == null ? "text-ink-faint" : row.alpha > 0 ? "text-up" : row.alpha < 0 ? "text-down" : "text-ink-muted"
                     }`}
                     title={row.indexRate != null ? `가입 이후 지수 ${row.indexRate > 0 ? "+" : ""}${(row.indexRate * 100).toFixed(2)}%` : undefined}
@@ -159,7 +159,7 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
                     {row.alpha == null ? "—" : `${row.alpha > 0 ? "+" : ""}${(row.alpha * 100).toFixed(2)}%p`}
                   </td>
                   <td
-                    className={`num text-right ${
+                    className={`num hidden text-right sm:table-cell ${
                       row.realized > 0 ? "text-up" : row.realized < 0 ? "text-down" : "text-ink-faint"
                     }`}
                   >
