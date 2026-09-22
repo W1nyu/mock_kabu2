@@ -5,7 +5,6 @@ import {
   AreaSeries,
   ColorType,
   createChart,
-  LineSeries,
   type MouseEventParams,
   TickMarkType,
   type UTCTimestamp,
@@ -55,8 +54,6 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState<Range>("1d");
   const [points, setPoints] = useState<EquityPoint[] | null>(null);
-  const [index, setIndex] = useState<{ ts: number; value: number }[]>([]);
-  const [showIndex, setShowIndex] = useState(true);
   const [hover, setHover] = useState<EquityPoint | null>(null);
 
   // localStorage는 마운트 후에만 읽는다 — 초기값에서 읽으면 hydration mismatch.
@@ -76,11 +73,6 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
       api<EquityPoint[]>(`/account/equity?range=${range}`)
         .then((rows) => {
           if (active) setPoints(rows);
-        })
-        .catch(() => {});
-      api<{ ts: number; value: number }[]>(`/market/index?range=${range}`, { auth: false })
-        .then((rows) => {
-          if (active) setIndex(rows);
         })
         .catch(() => {});
     };
@@ -150,40 +142,6 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
       .map(([time, p]) => ({ time: time as UTCTimestamp, value: p.equity }));
     area.setData(data);
 
-    // 시장 지수를 내 첫 자산에 맞춰 정규화한 비교선 — 지수가 같은 비율로 움직였다면 내 자산이 어디 있었을지.
-    if (showIndex && index.length >= 2 && data.length >= 1) {
-      const startTime = data[0].time as number;
-      const base = index.find((p) => Math.floor(p.ts / 1000) >= startTime) ?? index[0];
-      if (base && base.value > 0) {
-        const indexLine = chart.addSeries(LineSeries, {
-          color: "rgba(148, 163, 184, 0.7)",
-          lineWidth: 1,
-          lineStyle: 2,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-          priceFormat: {
-            type: "custom",
-            minMove: 1,
-            formatter: (p: number) => priceFormatter.format(p),
-          },
-        });
-        const seen = new Set<number>();
-        indexLine.setData(
-          index
-            .map((p) => ({
-              time: Math.floor(p.ts / 1000) as UTCTimestamp,
-              value: (p.value / base.value) * first,
-            }))
-            .filter(
-              (p) =>
-                (p.time as number) >= startTime &&
-                !seen.has(p.time as number) &&
-                seen.add(p.time as number),
-            ),
-        );
-      }
-    }
     chart.timeScale().fitContent();
 
     const onMove = (param: MouseEventParams) => {
@@ -201,7 +159,7 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
       chart.chartElement().style.display = "none";
       window.requestAnimationFrame(() => chart.remove());
     };
-  }, [points, range, index, showIndex]);
+  }, [points, range]);
 
   function selectRange(next: Range) {
     setRange(next);
@@ -222,17 +180,6 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
   const changeTone =
     change == null || change === 0 ? "text-ink-muted" : change > 0 ? "text-up" : "text-down";
   const hasData = (points?.length ?? 0) >= 2;
-  // 같은 구간의 지수 등락 — 내 수익률과 나란히 읽는다.
-  const indexStart =
-    first && index.length >= 2
-      ? (index.find((p) => Math.floor(p.ts / 1000) >= Math.floor(first.ts / 1000)) ?? index[0])
-      : null;
-  const indexEnd = index.length >= 1 ? index[index.length - 1] : null;
-  const indexRate =
-    indexStart && indexEnd && indexStart.value > 0
-      ? ((indexEnd.value - indexStart.value) / indexStart.value) * 100
-      : null;
-
   return (
     <section className="glass overflow-hidden">
       <div className="panel-head flex-wrap gap-y-2">
@@ -256,28 +203,6 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowIndex((v) => !v)}
-            aria-pressed={showIndex}
-            title="5종목 동일가중 지수를 내 시작 자산에 맞춰 겹쳐 그립니다"
-            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-              showIndex
-                ? "border-hairline bg-surface-2/70 text-ink"
-                : "border-hairline-soft text-ink-faint hover:text-ink-muted"
-            }`}
-          >
-            <span className="inline-block h-0 w-3 border-t border-dashed border-ink-muted" />
-            시장 지수
-            {indexRate != null && (
-              <span
-                className={`num ${indexRate > 0 ? "text-up" : indexRate < 0 ? "text-down" : "text-ink-muted"}`}
-              >
-                {indexRate > 0 ? "+" : ""}
-                {indexRate.toFixed(2)}%
-              </span>
-            )}
-          </button>
           <div className="well flex gap-0.5 p-0.5" role="group" aria-label="조회 구간">
             {RANGES.map((r) => (
               <button
