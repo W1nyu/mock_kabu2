@@ -346,7 +346,7 @@ export default function Orderbook({
         </div>
       )}
       <p className="border-t border-hairline-soft px-4 py-2 text-[11px] text-ink-faint">
-        가격을 클릭하면 주문 폼에 입력됩니다 (매도호가→매수, 매수호가→매도)
+        가격을 클릭하면 주문 폼(정정 중이면 정정 칸)에 입력됩니다 · 매수/매도는 바뀌지 않음
         {Object.keys(myDepth).length > 0 && (
           <span className="ml-2 text-sky" title="내 미체결 지정가가 있는 호가 단계">
             ● 내 주문
