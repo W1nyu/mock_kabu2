@@ -13,9 +13,9 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 
 | 메서드 | 경로 | 인증 | 설명 |
 |---|---|---|---|
-| POST | `/auth/signup` | – | `{email, password(4+), nickname}` → `{token, user}`. 가입 보너스 1,000만 원. IP당 10분 5회 초과 시 **429** |
-| POST | `/auth/login` | – | `{email, password}` → `{token, user}`. IP+이메일당 60초 10회 초과 시 **429** |
-| GET | `/auth/me` | ✓ | 토큰의 사용자 정보 `{userId, accountId, email, nickname}` |
+| POST | `/auth/signup` | – | `{nickname(2~20자, 한글·영문·숫자·_ - .), password(4+)}` → `{token, user}`. 이메일 없음. 닉네임은 대소문자 무시 유일(중복 **409**). 가입 보너스 1,000만 원. IP당 10분 5회 초과 시 **429** |
+| POST | `/auth/login` | – | `{nickname, password}` → `{token, user}` (봇·관리자 같은 시스템 계정은 `{email, password}`). IP+로그인 ID당 60초 10회 초과 시 **429** |
+| GET | `/auth/me` | ✓ | 토큰의 사용자 정보 `{userId, accountId, nickname}` |
 | PATCH | `/auth/me` | ✓ | `{nickname}`(1~20자) → 새 `{token, user}` (닉네임이 토큰에 들어 있음) |
 | POST | `/auth/password` | ✓ | `{currentPassword, newPassword(4+)}` → `{ok:true}` |
 
@@ -68,9 +68,9 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/account/realized?limit=` | 실현손익 `{today, todayQty, total, totalQty, bySymbol[], recent[], stats: {fills, wins, losses, winRate, avgWin, avgLoss, profitFactor, best, worst}}` |
 | GET | `/account/equity?range=1d|1w|all` | 분 단위 자산 스냅샷 `[{ts, cash, stockValue, equity}]` (1분/10분/1시간 버킷의 마지막 값) |
 | GET | `/account/daily?days=` | KST 일별 `[{date, closeEquity, closeCash, change, changeRate, realized, fills}]` 최신순 |
-| GET | `/account/leaderboard?limit=&period=all|today|week` | 사용자 계정 수익률 순위 `{total, rows: [{rank, nickname, equity, deposits, pnl, returnRate, indexRate, alpha, realized, me}]}` — `period`가 today/week면 기간 첫 스냅샷 대비 수익률(기간 중 입출금 제외)·기간 실현손익·기간 지수 등락; `alpha = returnRate − indexRate` (봇·`@smoke.local` 제외, 내 행은 항상 포함) |
+| GET | `/account/leaderboard?limit=&period=all|today|week` | 사용자 계정 수익률 순위 `{total, rows: [{rank, nickname, equity, deposits, pnl, returnRate, indexRate, alpha, realized, me}]}` — `period`가 today/week면 기간 첫 스냅샷 대비 수익률(기간 중 입출금 제외)·기간 실현손익·기간 지수 등락; `alpha = returnRate − indexRate` (봇·닉네임 `smoke-*` 제외, 내 행은 항상 포함) |
 | GET | `/account/ledger?limit=` | 현금 원장 |
-| POST | `/account/transfer` | `{toEmail, amount}` 계좌 이체 |
+| POST | `/account/transfer` | `{toNickname, amount}` 계좌 이체 |
 
 ## 운영
 

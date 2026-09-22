@@ -31,9 +31,10 @@ describe("rate limit", () => {
     ).rejects.toMatchObject({ status: 429, message: expect.stringContaining("42초") });
   });
 
-  it("keys login attempts by ip and lower-cased email, signup by ip only", () => {
-    const login = LoginRateLimitGuard.rule.keyOf(request({ email: "Bob@X.io" }, "1.2.3.4"));
-    expect(login).toBe("1.2.3.4:bob@x.io");
+  it("keys login attempts by ip and lower-cased login id (nickname first, else email), signup by ip only", () => {
+    expect(LoginRateLimitGuard.rule.keyOf(request({ nickname: " Bob " }, "1.2.3.4"))).toBe("1.2.3.4:bob");
+    expect(LoginRateLimitGuard.rule.keyOf(request({ email: "Bob@X.io" }, "1.2.3.4"))).toBe("1.2.3.4:bob@x.io");
+    expect(LoginRateLimitGuard.rule.keyOf(request({ nickname: "Bob", email: "x@x.io" }, "1.2.3.4"))).toBe("1.2.3.4:bob");
     const forwarded = { body: {}, ip: "127.0.0.1", headers: { "x-forwarded-for": "9.9.9.9, 10.0.0.2" } } as never;
     expect(SignupRateLimitGuard.rule.keyOf(forwarded)).toBe("9.9.9.9");
   });

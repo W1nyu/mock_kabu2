@@ -90,7 +90,9 @@ pnpm dev
 고정 데이터의 범위·제약, 확장 종목 목록, Alpha Vantage 키 발급 가이드와 혼합 모드의 봇 분리는
 [실전 리플레이 데이터 가이드](docs/replay-data-guide.md)를 참고하세요.
 
-봇 계정: `bot1@bots.local` ~ `bot10@bots.local` / 비밀번호 `botpassword` (각 10억 + 종목별 5만 주)
+봇 계정: 닉네임 `봇#1` ~ `봇#10` / 비밀번호 `botpassword` (각 10억 + 종목별 5만 주). API로는 내부 이메일 `bot1@bots.local`로도 로그인된다.
+
+일반 회원가입은 **이메일 없이 닉네임(2~20자)과 비밀번호만** 받는다. 닉네임이 로그인 ID다.
 
 ### 2번째 실행부터
 

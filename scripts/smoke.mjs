@@ -72,10 +72,12 @@ async function main() {
   check("trading readiness ok", health.status === "ok", health);
 
   const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
-  const email = `smoke-${suffix}@smoke.local`;
-  const signup = await call("POST", "/auth/signup", { email, password: "smokepass123", nickname: `smoke-${suffix}` }, { auth: false });
+  const nickname = `smoke-${suffix}`;
+  const signup = await call("POST", "/auth/signup", { nickname, password: "smokepass123" }, { auth: false });
   token = signup.token;
   check("signup issues a token", typeof token === "string" && token.length > 20);
+  const login = await call("POST", "/auth/login", { nickname, password: "smokepass123" }, { auth: false });
+  check("login by nickname works", login.user?.nickname === nickname, login.user);
 
   const symbols = await call("GET", "/market/symbols", null, { auth: false });
   const symbol = symbols.find((s) => s.symbol === "TANU")?.symbol ?? symbols[0].symbol;
@@ -170,7 +172,7 @@ async function main() {
     console.error(`\n스모크 실패: ${failures}건`);
     process.exit(1);
   }
-  console.log(`\n스모크 전부 통과 (${email})`);
+  console.log(`\n스모크 전부 통과 (${nickname})`);
 }
 
 main().catch((error) => {

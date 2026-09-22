@@ -14,7 +14,6 @@ export function onSessionChange(listener: () => void): () => void {
 export interface SessionUser {
   userId: string;
   accountId: string;
-  email: string;
   nickname: string;
 }
 

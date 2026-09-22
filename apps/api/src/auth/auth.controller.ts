@@ -9,14 +9,15 @@ export class AuthController {
 
   @Post("signup")
   @UseGuards(SignupRateLimitGuard)
-  signup(@Body() body: { email: string; password: string; nickname: string }) {
-    return this.auth.signup(body.email, body.password, body.nickname);
+  signup(@Body() body: { nickname: string; password: string }) {
+    return this.auth.signup(body.nickname, body.password);
   }
 
   @Post("login")
   @UseGuards(LoginRateLimitGuard)
-  login(@Body() body: { email: string; password: string }) {
-    return this.auth.login(body.email, body.password);
+  /** 사용자는 `{nickname, password}`. `{email, password}`는 봇·관리자 같은 시스템 계정용으로 남겨 둔다. */
+  login(@Body() body: { nickname?: string; email?: string; password: string }) {
+    return this.auth.login({ nickname: body.nickname, email: body.email }, body.password);
   }
 
   @Get("me")

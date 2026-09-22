@@ -179,3 +179,16 @@ export const DAILY_CANDLE_INTERVAL = "1d";
 export function candleIntervalSeconds(id: string): number | null {
   return CANDLE_INTERVALS.find((interval) => interval.id === id)?.seconds ?? null;
 }
+
+/** 로그인 ID 겸 표시 이름. 이메일 없이 닉네임+비밀번호로 가입하므로 닉네임이 유일해야 한다. */
+export const NICKNAME_MIN = 2;
+export const NICKNAME_MAX = 20;
+/** 한글·영문·숫자·`_`·`-`·`.` 만. 공백·`@`를 막아 이메일과 헷갈리지 않게 한다. */
+const NICKNAME_PATTERN = /^[\p{L}\p{N}_.-]+$/u;
+export function normalizeNickname(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim() : "";
+}
+export function isValidNickname(nickname: string): boolean {
+  return nickname.length >= NICKNAME_MIN && nickname.length <= NICKNAME_MAX && NICKNAME_PATTERN.test(nickname);
+}
+export const NICKNAME_RULE_MESSAGE = `닉네임은 ${NICKNAME_MIN}~${NICKNAME_MAX}자, 한글·영문·숫자·_ - . 만 쓸 수 있습니다`;

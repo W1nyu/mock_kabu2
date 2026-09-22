@@ -7,7 +7,7 @@ import { api, saveSession, type SessionUser } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -19,7 +19,7 @@ export default function LoginPage() {
     try {
       const res = await api<{ token: string; user: SessionUser }>("/auth/login", {
         method: "POST",
-        body: { email, password },
+        body: { nickname: nickname.trim(), password },
         auth: false,
       });
       saveSession(res.token, res.user);
@@ -38,21 +38,20 @@ export default function LoginPage() {
           <span className="h-3.5 w-3.5 rounded-[4px] bg-abyss" />
         </span>
         <h1 className="mt-5 text-2xl font-semibold tracking-tight">로그인</h1>
-        <p className="mt-1.5 text-sm text-ink-muted">모의 거래소 계정으로 계속하기</p>
+        <p className="mt-1.5 text-sm text-ink-muted">닉네임과 비밀번호로 계속하기</p>
 
         <form onSubmit={submit} className="mt-6 space-y-4">
           <div>
-            <label className="label" htmlFor="login-email">
-              이메일
+            <label className="label" htmlFor="login-nickname">
+              닉네임
             </label>
             <input
-              id="login-email"
+              id="login-nickname"
               className="field"
-              placeholder="you@example.com"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              placeholder="가입할 때 정한 닉네임"
+              autoComplete="username"
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
             />
           </div>
           <div>
@@ -76,7 +75,7 @@ export default function LoginPage() {
             </p>
           )}
 
-          <button disabled={busy} className="btn btn-primary btn-block">
+          <button disabled={busy || !nickname.trim() || !password} className="btn btn-primary btn-block">
             {busy ? "확인 중…" : "로그인"}
           </button>
         </form>

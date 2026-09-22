@@ -15,9 +15,9 @@ datasource db {
 
 model User {
   id           String   @id @default(uuid())
-  email        String   @unique
+  email        String?  @unique
   passwordHash String   @map("password_hash")
-  nickname     String
+  nickname     String   @unique
   isBot        Boolean  @default(false) @map("is_bot")
   createdAt    DateTime @default(now()) @map("created_at")
 

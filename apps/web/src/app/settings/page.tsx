@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { NICKNAME_MAX, NICKNAME_MIN, isValidNickname } from "@mock-kabu/shared";
 import { api, getToken, getUser, saveSession, type SessionUser } from "@/lib/api";
 import {
   canUseDesktopNotifications,
@@ -102,7 +103,7 @@ export default function SettingsPage() {
   }
 
   const trimmed = nickname.trim();
-  const nickValid = trimmed.length >= 1 && trimmed.length <= 20 && trimmed !== user?.nickname;
+  const nickValid = isValidNickname(trimmed) && trimmed !== user?.nickname;
   const pwValid = currentPassword.length > 0 && newPassword.length >= 4 && confirmPassword.length >= 4;
 
   return (
@@ -110,19 +111,19 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">계정 설정</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          {user?.email ?? ""} · 가입 보너스로 시작한 가상 계좌입니다. 이메일은 바꿀 수 없습니다.
+          {user?.nickname ?? ""} · 가입 보너스로 시작한 가상 계좌입니다. 닉네임이 로그인 ID입니다.
         </p>
       </div>
 
       <form onSubmit={submitNickname} className="glass overflow-hidden">
         <div className="panel-head">
           <span className="panel-title">닉네임</span>
-          <span className="text-[11px] text-ink-faint">투자자 랭킹에 표시됩니다</span>
+          <span className="text-[11px] text-ink-faint">로그인 ID이자 랭킹에 표시되는 이름</span>
         </div>
         <div className="space-y-3 p-4">
           <div>
             <label className="label" htmlFor="settings-nickname">
-              닉네임 (1~20자)
+              닉네임 ({NICKNAME_MIN}~{NICKNAME_MAX}자) — 바꾸면 로그인할 때도 새 닉네임을 씁니다
             </label>
             <input
               id="settings-nickname"

@@ -17,7 +17,7 @@ curl -s -o /dev/null -w "api:%{http_code}\n" http://localhost:4100/market/symbol
 ## 접속·인증
 
 - 브라우저(Claude in Chrome)로 http://localhost:3100 접속. localStorage 토큰이 남아 있으면 이미 로그인 상태.
-- 로그인 필요 시 봇 계정 사용: `bot1@bots.local` / `botpassword` (회원가입 불필요).
+- 로그인 필요 시 봇 계정 사용: 닉네임 `봇#1` / `botpassword` (회원가입 불필요). 로그인 폼은 이메일이 아니라 닉네임을 받는다.
 - 종목: KABU, MOCK, NEKO, SAKU, TANU, BYE, MIRAE → 거래 페이지는 `/symbol/{심볼}`.
 
 ## 실시간 흐름 관찰 포인트

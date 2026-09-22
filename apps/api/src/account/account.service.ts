@@ -278,7 +278,7 @@ export class AccountService {
           AND l.created_at > COALESCE(b.ts, ${since})
       ) f ON ${period !== "all"}
       -- 봇과 스모크 테스트(pnpm smoke)가 만든 임시 계정은 순위에서 뺀다.
-      JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false AND u.email NOT LIKE '%@smoke.local'
+      JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false AND u.nickname NOT LIKE 'smoke-%'
       LEFT JOIN (
         SELECT h.account_id, SUM(h.qty::bigint * s.last_price) AS stock_value
         FROM account.holdings h
@@ -342,11 +342,13 @@ export class AccountService {
   }
 
   /** 계좌 이체 — 두 계좌를 ID 오름차순으로 잠근다 (스펙 S1 해결 지점) */
-  async transfer(fromAccountId: string, toEmail: string, amount: number) {
+  async transfer(fromAccountId: string, toNickname: string, amount: number) {
     if (!Number.isInteger(amount) || amount <= 0) {
       throw new BadRequestException("이체 금액은 양의 정수여야 합니다");
     }
-    const toUser = await this.prisma.user.findUnique({ where: { email: toEmail } });
+    const nickname = (toNickname ?? "").trim();
+    if (!nickname) throw new BadRequestException("받는 사람 닉네임을 입력하세요");
+    const toUser = await this.prisma.user.findUnique({ where: { nickname } });
     if (!toUser) throw new NotFoundException("받는 사람을 찾을 수 없습니다");
     const toAccount = await this.prisma.account.findUnique({ where: { userId: toUser.id } });
     if (!toAccount) throw new NotFoundException("받는 사람의 계좌가 없습니다");

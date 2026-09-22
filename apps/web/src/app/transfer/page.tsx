@@ -24,7 +24,7 @@ const REASON_LABEL: Record<string, string> = {
 
 export default function TransferPage() {
   const router = useRouter();
-  const [toEmail, setToEmail] = useState("");
+  const [toNickname, setToNickname] = useState("");
   const [amount, setAmount] = useState("");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -51,7 +51,7 @@ export default function TransferPage() {
     try {
       await api("/account/transfer", {
         method: "POST",
-        body: { toEmail, amount: Number(amount) },
+        body: { toNickname: toNickname.trim(), amount: Number(amount) },
       });
       setMessage({ ok: true, text: "이체가 완료되었습니다" });
       setAmount("");
@@ -80,15 +80,15 @@ export default function TransferPage() {
           <div className="space-y-4 p-4">
             <div>
               <label className="label" htmlFor="transfer-to">
-                받는 사람 이메일
+                받는 사람 닉네임
               </label>
               <input
                 id="transfer-to"
                 className="field"
-                type="email"
-                value={toEmail}
-                onChange={(e) => setToEmail(e.target.value)}
-                placeholder="bot1@bots.local"
+                autoComplete="off"
+                value={toNickname}
+                onChange={(e) => setToNickname(e.target.value)}
+                placeholder="랭킹에 보이는 닉네임 그대로"
               />
             </div>
             <div>
@@ -115,7 +115,7 @@ export default function TransferPage() {
               </p>
             )}
 
-            <button disabled={busy || !toEmail || !amount} className="btn btn-primary btn-block">
+            <button disabled={busy || !toNickname.trim() || !amount} className="btn btn-primary btn-block">
               {busy ? "이체 중…" : "이체하기"}
             </button>
           </div>

@@ -38,7 +38,7 @@ export async function enforceRateLimit(redis: Redis, rule: RateLimitRule, reques
 }
 
 /**
- * 로그인 무차별 대입 완화. IP+이메일당 60초 10회. Redis 카운터(INCR + EXPIRE)라 API 복제본이
+ * 로그인 무차별 대입 완화. IP+로그인 ID(닉네임, 시스템 계정은 이메일)당 60초 10회. Redis 카운터(INCR + EXPIRE)라 API 복제본이
  * 여러 개여도 같은 한도를 공유하며, 성공/실패를 가리지 않고 시도 자체를 센다.
  */
 @Injectable()
@@ -48,9 +48,7 @@ export class LoginRateLimitGuard implements CanActivate {
     windowSeconds: 60,
     maxAttempts: 10,
     keyOf: (request) =>
-      `${clientIp(request)}:${String((request.body as { email?: unknown })?.email ?? "")
-        .toLowerCase()
-        .slice(0, 200)}`,
+      `${clientIp(request)}:${loginIdentifierOf(request.body).toLowerCase().slice(0, 200)}`,
   };
 
   constructor(@Inject(REDIS) private redis: Redis) {}
@@ -61,7 +59,7 @@ export class LoginRateLimitGuard implements CanActivate {
   }
 }
 
-/** 가입 스팸 완화. 이메일은 마음대로 바꿀 수 있으니 IP당 10분 5회로 센다. */
+/** 가입 스팸 완화. 닉네임은 마음대로 바꿀 수 있으니 IP당 10분 5회로 센다. */
 @Injectable()
 export class SignupRateLimitGuard implements CanActivate {
   static readonly rule: RateLimitRule = {
@@ -77,4 +75,10 @@ export class SignupRateLimitGuard implements CanActivate {
     await enforceRateLimit(this.redis, SignupRateLimitGuard.rule, context.switchToHttp().getRequest<Request>());
     return true;
   }
+}
+
+function loginIdentifierOf(body: unknown): string {
+  const { nickname, email } = (body ?? {}) as { nickname?: unknown; email?: unknown };
+  if (typeof nickname === "string" && nickname.trim()) return nickname.trim();
+  return typeof email === "string" ? email : "";
 }

@@ -3,24 +3,31 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { NICKNAME_MAX, NICKNAME_MIN, isValidNickname, normalizeNickname } from "@mock-kabu/shared";
 import { api, saveSession, type SessionUser } from "@/lib/api";
 
 export default function SignupPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const name = normalizeNickname(nickname);
+  const nickValid = isValidNickname(name);
+  const pwValid = password.length >= 4;
+  const confirmValid = confirm === password;
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!nickValid || !pwValid || !confirmValid) return;
     setBusy(true);
     setError("");
     try {
       const res = await api<{ token: string; user: SessionUser }>("/auth/signup", {
         method: "POST",
-        body: { email, password, nickname },
+        body: { nickname: name, password },
         auth: false,
       });
       saveSession(res.token, res.user);
@@ -40,37 +47,26 @@ export default function SignupPage() {
         </span>
         <h1 className="mt-5 text-2xl font-semibold tracking-tight">회원가입</h1>
         <p className="mt-1.5 text-sm text-ink-muted">
-          가입 즉시 가상 현금{" "}
+          이메일 없이 닉네임과 비밀번호만으로 시작합니다. 가입 즉시 가상 현금{" "}
           <span className="num font-semibold text-sky">1,000만원</span>이 지급됩니다.
         </p>
 
         <form onSubmit={submit} className="mt-6 space-y-4">
           <div>
-            <label className="label" htmlFor="signup-email">
-              이메일
-            </label>
-            <input
-              id="signup-email"
-              className="field"
-              placeholder="you@example.com"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-          <div>
             <label className="label" htmlFor="signup-nickname">
-              닉네임
+              닉네임 ({NICKNAME_MIN}~{NICKNAME_MAX}자)
             </label>
             <input
               id="signup-nickname"
               className="field"
-              placeholder="표시될 이름"
-              autoComplete="nickname"
+              placeholder="로그인에 쓰는 이름"
+              autoComplete="username"
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
             />
+            {name.length > 0 && !nickValid && (
+              <p className="mt-1 text-xs text-ink-faint">한글·영문·숫자·_ - . 만 쓸 수 있습니다</p>
+            )}
           </div>
           <div>
             <label className="label" htmlFor="signup-password">
@@ -86,6 +82,23 @@ export default function SignupPage() {
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
+          <div>
+            <label className="label" htmlFor="signup-confirm">
+              비밀번호 확인
+            </label>
+            <input
+              id="signup-confirm"
+              className="field"
+              placeholder="다시 입력"
+              type="password"
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
+            {confirm.length > 0 && !confirmValid && (
+              <p className="mt-1 text-xs text-up">비밀번호가 일치하지 않습니다</p>
+            )}
+          </div>
 
           {error && (
             <p className="rounded-control border border-up/30 bg-up/8 px-3 py-2 text-sm text-up">
@@ -93,7 +106,7 @@ export default function SignupPage() {
             </p>
           )}
 
-          <button disabled={busy} className="btn btn-primary btn-block">
+          <button disabled={busy || !nickValid || !pwValid || !confirmValid} className="btn btn-primary btn-block">
             {busy ? "가입 중…" : "가입하기"}
           </button>
         </form>

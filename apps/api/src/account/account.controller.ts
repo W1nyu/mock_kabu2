@@ -63,8 +63,8 @@ export class AccountController {
   @Post("transfer")
   transfer(
     @CurrentUser() user: JwtUser,
-    @Body() body: { toEmail: string; amount: number },
+    @Body() body: { toNickname: string; amount: number },
   ) {
-    return this.account.transfer(user.accountId, body.toEmail, Number(body.amount));
+    return this.account.transfer(user.accountId, body.toNickname, Number(body.amount));
   }
 }

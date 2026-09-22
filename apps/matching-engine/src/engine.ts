@@ -121,7 +121,7 @@ export class MatchingEngine {
 
     const symbolByUserId = new Map<string, string>();
     for (const user of users) {
-      const symbol = reserveSymbolByEmail.get(user.email);
+      const symbol = user.email ? reserveSymbolByEmail.get(user.email) : undefined;
       if (symbol) symbolByUserId.set(user.id, symbol);
     }
     if (symbolByUserId.size === 0) return new Map();
