@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
-import CandleChart from "@/components/CandleChart";
+import dynamic from "next/dynamic";
 import MyConditionalOrders from "@/components/MyConditionalOrders";
 import MyOpenOrders from "@/components/MyOpenOrders";
 import MyPosition from "@/components/MyPosition";
@@ -15,6 +15,12 @@ import SymbolStrip from "@/components/SymbolStrip";
 import TradesFeed from "@/components/TradesFeed";
 import { api, getToken } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
+
+// 캔들차트(lightweight-charts)는 클라이언트에서만 렌더하고 코드도 따로 싣는다.
+const CandleChart = dynamic(() => import("@/components/CandleChart"), {
+  ssr: false,
+  loading: () => <div className="glass h-[24rem] animate-pulse lg:h-[28rem]" aria-hidden />,
+});
 
 interface SymbolInfo {
   symbol: string;

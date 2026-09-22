@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, getToken, getUser, won } from "@/lib/api";
 import DailyPerformance from "@/components/DailyPerformance";
-import EquityChart from "@/components/EquityChart";
+import dynamic from "next/dynamic";
 import Leaderboard from "@/components/Leaderboard";
 import PerformanceCard, { type RealizedStats } from "@/components/PerformanceCard";
 import { NewsList } from "@/components/NewsFeed";
@@ -15,6 +15,12 @@ import Sparkline from "@/components/Sparkline";
 import { mergeNews, parseNewsItem } from "@/lib/news";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
+
+// lightweight-charts는 브라우저 전용이고 번들이 크다. 첫 화면(자산·시세 표)을 먼저 그리고 차트는 뒤에 싣는다.
+const EquityChart = dynamic(() => import("@/components/EquityChart"), {
+  ssr: false,
+  loading: () => <div className="glass h-56 animate-pulse sm:h-64" aria-hidden />,
+});
 
 interface AccountInfo {
   balance: number;

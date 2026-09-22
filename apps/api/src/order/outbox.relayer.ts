@@ -23,7 +23,9 @@ export class OutboxRelayer implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    this.timer = setInterval(() => void this.flush(), 200);
+    // 주문 접수가 flushSoon()으로 즉시 깨우므로 폴링은 놓친 행을 줍는 안전망일 뿐이다.
+    // 200ms였던 폴링은 한가할 때도 초당 5번 DB를 두드렸다.
+    this.timer = setInterval(() => void this.flush(), 1_000);
     // 발행된 행은 재발행 대상이 아니므로 한 시간 뒤 지운다. 지우지 않으면 주문 수만큼 영원히 쌓인다.
     this.pruneTimer = setInterval(() => void this.prunePublished(), LOG_RETENTION.SWEEP_INTERVAL_MS);
   }
