@@ -33,7 +33,8 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
   const { symbol } = use(params);
   const router = useRouter();
   const [info, setInfo] = useState<SymbolInfo | null>(null);
-  const [priceHint, setPriceHint] = useState<{ symbol: string; price: number; side: "BUY" | "SELL"; seq: number } | null>(null);
+  // 호가 클릭 → 주문폼·정정 중인 주문의 가격 칸. 방향(매수/매도)은 바꾸지 않는다.
+  const [priceHint, setPriceHint] = useState<{ symbol: string; price: number; seq: number } | null>(null);
   const [livePrice, setLivePrice] = useState<{ symbol: string; price: number } | null>(null);
   const [orderRefreshKey, setOrderRefreshKey] = useState(0);
 
@@ -95,10 +96,8 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
         </div>
         <Orderbook
           symbol={symbol}
-          onPriceClick={(price, level) =>
-            // 매도호가(ask)를 누르면 그 값에 사겠다는 뜻, 매수호가(bid)를 누르면 팔겠다는 뜻으로 본다.
-            setPriceHint({ symbol, price, side: level === "ask" ? "BUY" : "SELL", seq: Date.now() })
-          }
+          // 어느 쪽 호가를 눌렀든 가격만 넣는다 — 아래 호가를 눌러 매수하고 싶을 때 매도로 바뀌면 안 된다.
+          onPriceClick={(price) => setPriceHint({ symbol, price, seq: Date.now() })}
         />
       </div>
 
@@ -113,7 +112,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
           onPlaced={() => setOrderRefreshKey((value) => value + 1)}
         />
         <div className="space-y-4">
-          <MyOpenOrders symbol={symbol} refreshKey={orderRefreshKey} />
+          <MyOpenOrders symbol={symbol} refreshKey={orderRefreshKey} priceHint={currentPriceHint} />
           <MyConditionalOrders symbol={symbol} refreshKey={orderRefreshKey} />
         </div>
         <TradesFeed symbol={symbol} />

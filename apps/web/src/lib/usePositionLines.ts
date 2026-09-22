@@ -101,7 +101,7 @@ export function usePositionLines(symbol: string): PositionLine[] {
             id: "avg",
             price: Math.round(holding.avgCost),
             color: AVG_COLOR,
-            title: `평단 ${holding.qty.toLocaleString("ko-KR")}주`,
+            title: "평단",
             style: 2,
           });
         }

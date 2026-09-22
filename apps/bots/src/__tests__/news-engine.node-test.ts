@@ -121,14 +121,15 @@ test("news actually biases which side the bots take", () => {
   assert.equal(model.chooseFlowSide("KABU", "SELL", () => 0.99), "SELL");
 });
 
-test("a simulated hour publishes a readable, non-repeating feed", () => {
+test("two simulated hours publish a readable, non-repeating feed", () => {
   const random = seededRandom(2_026);
   const model = freshModel(seededRandom(99));
   const sink = new RingBufferNewsSink(500);
   const scheduler = new NewsScheduler(model, SYMBOLS, sink, { random });
 
+  // 종목 뉴스 4~8분, 매크로 30~60분 간격이라 한 시간으로는 표본이 적어 두 시간을 돌린다.
   const published: NewsItem[] = [];
-  for (let t = 0; t <= 3_600_000; t += 5_000) {
+  for (let t = 0; t <= 7_200_000; t += 5_000) {
     const item = scheduler.tick(t);
     if (item) published.push(item);
     model.tick();

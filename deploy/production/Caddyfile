@@ -26,7 +26,16 @@
 
 	# The API has no /api prefix. Keeping it on the same public origin avoids
 	# an extra browser CORS surface while Caddy upgrades Socket.IO WebSockets.
-	@api path /auth /auth/* /account /account/* /orders /orders/* /market /market/* /admin /admin/* /replay /replay/* /health /health/* /socket.io /socket.io/*
+	# Some web pages share a path with an API prefix (/orders, /admin, /replay):
+	# a browser page load (Sec-Fetch-Dest: document, or Accept: text/html) and a
+	# Next.js client-side navigation (RSC: 1) must reach the web app, while
+	# fetch/XHR/WebSocket calls for the same path reach the API.
+	@api {
+		path /auth /auth/* /account /account/* /orders /orders/* /market /market/* /admin /admin/* /replay /replay/* /health /health/* /socket.io /socket.io/*
+		not header Sec-Fetch-Dest document
+		not header RSC 1
+		not header Accept text/html*
+	}
 	reverse_proxy @api api:4100
 
 	reverse_proxy web:3100

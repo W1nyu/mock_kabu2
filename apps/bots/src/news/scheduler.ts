@@ -6,8 +6,9 @@ import { RecentNewsMemory } from "./memory";
 import { randomInt, unitRandom, type Range } from "./random";
 import type { FollowUpOutcome, NewsItem, NewsSink } from "./types";
 
-const DEFAULT_SYMBOL_GAP: Range = { min: 120_000, max: 240_000 };
-const DEFAULT_MACRO_GAP: Range = { min: 900_000, max: 1_800_000 };
+/** 종목 뉴스 4~8분, 매크로 30~60분. (처음엔 절반이었는데 너무 잦아 두 배로 늘렸다.) */
+const DEFAULT_SYMBOL_GAP: Range = { min: 240_000, max: 480_000 };
+const DEFAULT_MACRO_GAP: Range = { min: 1_800_000, max: 3_600_000 };
 /** Two stories must never land in the same second; the feed has to stay readable. */
 const DEFAULT_MIN_PUBLISH_GAP_MS = 20_000;
 /** A symbol that just made news is skipped so one name cannot dominate. */

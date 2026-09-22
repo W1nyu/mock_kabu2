@@ -47,7 +47,15 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 실제 배포: https://jobradar.my (OCI ap-osaka-1) (최신 작업)
+## 2026-09-22 — 사용자 피드백 6건 (최신 작업)
+
+- 호가창 클릭 → 가격만(방향 유지). `priceHint`에서 `side` 제거, `OrderForm`은 `setSide`를 더 이상 호출하지 않는다. `MyOpenOrders`도 `priceHint`를 받아 정정 행의 가격 칸을 채운다.
+- `CandleChart`의 `OVERLAYS`(내 체결 마커·평단/예약선) 토글 — `INDICATORS`와 같은 저장 키(`mock-kabu2:chart:indicators`)에 합쳐 저장. 평단선 제목은 `평단`.
+- `/index` 페이지 + `MarketIndexPanel`: 서버 `/market/index`(캐시 15~120초) 추이 + `trades:*` 구독으로 현재값 실시간 재계산(같은 정의: 현재가/시초가 평균 × 1,000). 종목별 기여 = (현재가/시초가 − 1) × 1,000 / 종목 수.
+- 뉴스 간격 2배(`apps/bots/src/news/scheduler.ts` DEFAULT_*_GAP). 엔진 테스트는 2시간 시뮬레이션으로 바꿈.
+- **Caddy 경로 충돌**: `/orders`·`/admin`·`/replay`가 웹 페이지와 API 접두사를 공유한다. `@api` 매처에 `not header Sec-Fetch-Dest document`/`not header RSC 1`/`not header Accept text/html*`를 넣어 페이지 로드·RSC 내비게이션은 웹으로. 로컬 dev는 포트가 달라 재현되지 않으니 프로덕션 Caddyfile을 바꿀 때 이 규칙을 지울 것.
+
+## 2026-09-22 — 실제 배포: https://jobradar.my (OCI ap-osaka-1)
 
 - **어디에**: OCI 콘솔에서 수동 생성한 `VM.Standard.E3.Flex` 2 OCPU / 4GB, x86_64, Ubuntu 24.04.5, 공인 IP `129.225.135.95`(임시 IP — 인스턴스를 지우면 바뀐다). **E3.Flex는 Always Free가 아니라 Free Trial 크레딧 자원**이라 체험 종료 시 회수된다. 상시 무료로 가려면 `deploy/oci/terraform`의 A1.Flex 경로로 다시 만들고 아래 절차를 반복한다.
 - **어떻게**: 보안 목록에 80/443 ingress 추가, VM iptables 80/443 개방(`netfilter-persistent save`), Docker 29 + compose v5, 4GB 스왑, `git -c core.autocrlf=false archive`로 스냅샷을 `/opt/mock-kabu2`에 풀고 `deploy/oci/scripts/bootstrap.sh`. `.env.production`은 스크립트가 생성(APP_DOMAIN=jobradar.my, APP_ORIGIN=https://jobradar.my, CADDYFILE=../production/Caddyfile, BOT_QUOTE_RECONCILE_MS=500, BOT_FLOW_DELAY_SCALE=1.5). SSH 키는 로컬 `~/.ssh/mock-kabu-private.key`.

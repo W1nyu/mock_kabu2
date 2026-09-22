@@ -36,7 +36,7 @@ export default function OrderForm({
 }: {
   symbol: string;
   /** 호가창 클릭. seq가 바뀔 때마다 가격을 넣고 방향도 맞춘다 (같은 값을 다시 눌러도 반영). */
-  priceHint: { price: number; side: "BUY" | "SELL"; seq: number } | null;
+  priceHint: { price: number; seq: number } | null;
   lastPrice: number | null;
   onPlaced?: () => void;
 }) {
@@ -68,12 +68,12 @@ export default function OrderForm({
   useEffect(() => {
     if (priceHint != null) {
       // 호가 클릭은 현재 모드의 가격 칸으로 들어가고, 시장가였으면 지정가로 바꾼다.
+      // 매수/매도 방향은 그대로 둔다(아래 호가를 눌러 낮게 사고 싶은 경우가 흔하다).
       if (type === "STOP") setTriggerPrice(String(priceHint.price));
       else {
         setPrice(String(priceHint.price));
         if (type === "MARKET") setType("LIMIT");
       }
-      setSide(priceHint.side);
       setActivePct(null);
       setSizingNote(null);
     }

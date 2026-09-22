@@ -67,12 +67,24 @@ const INDICATORS = [
   { key: "vwma100", label: "100 VWMA", color: "#cbd5e1" },
   { key: "volume", label: "거래량", color: "#94a3b8" },
 ] as const;
-type IndicatorKey = (typeof INDICATORS)[number]["key"];
+/** 내 포지션 오버레이 — 시리즈가 아니라 마커/가격선이라 따로 켜고 끈다. */
+const OVERLAYS = [
+  { key: "fills", label: "내 체결", color: "#ff5a6e" },
+  { key: "position", label: "평단·예약선", color: "#fbbf24" },
+] as const;
+type IndicatorKey = (typeof INDICATORS)[number]["key"] | (typeof OVERLAYS)[number]["key"];
 type IndicatorState = Record<IndicatorKey, boolean>;
 
 const STORAGE_KEY = "mock-kabu2:chart:indicators";
 const INTERVAL_STORAGE_KEY = "mock-kabu2:chart:interval";
-const DEFAULT_STATE: IndicatorState = { sma50: true, sma200: true, vwma100: true, volume: true };
+const DEFAULT_STATE: IndicatorState = {
+  sma50: true,
+  sma200: true,
+  vwma100: true,
+  volume: true,
+  fills: true,
+  position: true,
+};
 const CANDLE_LIMIT = 500;
 /** Below this, fit the whole series instead of holding the default bar spacing. */
 const SPARSE_BAR_COUNT = 60;
@@ -212,7 +224,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       entry.amount += fill.qty * fill.price;
       grouped.set(key, entry);
     }
-    const markers: SeriesMarker<Time>[] = [...grouped.values()]
+    const markers: SeriesMarker<Time>[] = (indicators.fills ? [...grouped.values()] : [])
       .sort((a, b) => a.time - b.time)
       .map((entry) => ({
         time: entry.time,
@@ -224,13 +236,13 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       }));
     if (!markersRef.current) markersRef.current = createSeriesMarkers(s.candle, markers);
     else markersRef.current.setMarkers(markers);
-  }, [myFills, interval, chartEpoch]);
+  }, [myFills, interval, chartEpoch, indicators.fills]);
 
   useEffect(() => {
     const s = seriesRef.current;
     if (!s) return;
     for (const line of priceLinesRef.current) s.candle.removePriceLine(line);
-    priceLinesRef.current = positionLines.map((line) =>
+    priceLinesRef.current = (indicators.position ? positionLines : []).map((line) =>
       s.candle.createPriceLine({
         price: line.price,
         color: line.color,
@@ -240,7 +252,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
         title: line.title,
       }),
     );
-  }, [positionLines, chartEpoch]);
+  }, [positionLines, chartEpoch, indicators.position]);
 
   useEffect(() => {
     setIndicators(loadIndicatorState());
@@ -490,7 +502,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
           ))}
         </div>
         <div className="flex flex-wrap justify-end gap-1.5">
-          {INDICATORS.map((ind) => (
+          {[...INDICATORS, ...OVERLAYS].map((ind) => (
             <button
               key={ind.key}
               onClick={() => toggle(ind.key)}

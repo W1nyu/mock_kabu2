@@ -20,10 +20,13 @@ interface OrderRow {
 export default function MyOpenOrders({
   symbol,
   refreshKey,
+  priceHint,
 }: {
   symbol?: string;
   /** Bumps immediately after this page successfully accepts an order. */
   refreshKey?: number;
+  /** 호가창 클릭 — 정정 중인 주문이 있으면 그 가격 칸에 넣는다. */
+  priceHint?: { price: number; seq: number } | null;
 }) {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   // 정정 중인 주문: 인라인으로 가격/남은 수량을 고쳐 취소+재접수한다.
@@ -61,6 +64,12 @@ export default function MyOpenOrders({
       clearInterval(t);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    if (priceHint == null) return;
+    setEditing((current) => (current ? { ...current, price: String(priceHint.price) } : current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceHint?.seq]);
 
   function startEdit(o: OrderRow) {
     setEditing({ id: o.id, price: String(o.price ?? ""), qty: String(o.qty - o.filledQty) });
@@ -150,7 +159,7 @@ export default function MyOpenOrders({
                   </button>
                 </div>
                 <p className="text-[11px] text-ink-faint">
-                  취소 후 남은 수량으로 다시 접수합니다 · 남은 {fmt.format(remaining)}주 이하
+                  호가창을 누르면 가격이 들어갑니다 · 취소 후 남은 수량으로 다시 접수 · 남은 {fmt.format(remaining)}주 이하
                   {tick != null && ` · 호가 단위 ${fmt.format(tick)}원`}
                   {editError && <span className="ml-2 text-warn">{editError}</span>}
                 </p>

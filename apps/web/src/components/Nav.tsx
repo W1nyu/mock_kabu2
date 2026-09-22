@@ -7,9 +7,9 @@ import { clearSession, getUser, onSessionChange, type SessionUser } from "@/lib/
 import NotificationBell from "./NotificationBell";
 
 /**
- * Primary customer navigation is deliberately limited to these four flows.
+ * Primary customer navigation is deliberately limited to these flows.
  * `/news` was added by an explicit product decision to surface the market's
- * generated news feed.
+ * generated news feed; `/index` (equal-weight market index) likewise.
  *
  * LEGACY MENU LOCK: `/replay` and `/admin` stay routable only as contingency
  * tools for operators. Do not re-add either route to this list, link to it
@@ -18,6 +18,7 @@ import NotificationBell from "./NotificationBell";
  */
 const PRIMARY_NAV_LINKS = [
   { href: "/", label: "대시보드" },
+  { href: "/index", label: "지수" },
   { href: "/news", label: "뉴스" },
   { href: "/orders", label: "주문내역" },
   { href: "/transfer", label: "이체" },
