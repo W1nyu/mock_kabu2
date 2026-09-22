@@ -53,7 +53,7 @@
 - **`deploy/oci/`**: `terraform/`(VCN·IGW·서브넷·보안목록 22/80/443·A1.Flex 4/24 + Ubuntu 22.04 arm64 + cloud-init, `prevent_destroy`), `terraform/cloud-init.yaml`(Docker·compose 플러그인, iptables 80/443 개방, 4GB 스왑, clone → /opt/mock-kabu2), `compose.oci.yml`(production 위 오버라이드: `APP_ORIGIN`으로 IP/HTTP 모드, `CADDYFILE`·`PGBACKREST_CONF` 마운트, Postgres 2G/512MB·API 768M, 봇 400ms/1.25, ORACLE_* env), `Caddyfile.http`(도메인 없이 HTTP), `pgbackrest.s3.conf`(Object Storage S3 호환), `scripts/bootstrap.sh`(.env 자동 생성·비밀값 openssl 채움 → build → up → systemd 타이머 등록; `--update`), `systemd/`(백업 매일·prune 주간·oracle-sync 매시), `oracle/schema.sql`(1부 ADMIN: 사용자+`ORDS.ENABLE_SCHEMA`, 2부: mk_* 테이블·뷰), `README.md`(전체 절차·A1 용량 팁·회수 정책·문제 해결).
 - **`pnpm oracle:sync`** (`packages/db/scripts/oracle-sync.ts` + 순수 계획기 `oracle-sync-plan.ts`, node 테스트 4개, db `test` 스크립트 신설): 계정 디렉터리·1분 봉·사용자 낀 체결·사용자 실현손익·자산 스냅샷을 스트림별 워터마크(`mk_sync_state`) 이후로 MERGE(200행/문, 실행당 최대 2만 행). `--dry-run`, `--full`. 엔트리포인트 `oracle-sync`. 로컬 DB로 `--dry-run --full` 확인(문장 생성까지; ADB 실호출은 계정이 없어 미검증).
 - Prisma `binaryTargets = ["native", "linux-arm64-openssl-3.0.x", "debian-openssl-3.0.x"]` — x86에서 빌드해 ARM으로 옮겨도 동작.
-- 검증: 두 compose 파일 병합 `docker compose config` 통과(IP 모드 env), cloud-init YAML 파싱, `pnpm test` 11 태스크 통과. Terraform은 로컬에 설치돼 있지 않아 `validate`를 못 돌렸다 — 첫 `terraform init/plan`에서 문법 오류가 나면 그 부분만 손보면 된다.
+- 검증: 두 compose 파일 병합 `docker compose config` 통과(IP 모드 env), cloud-init YAML 파싱, `pnpm test` 11 태스크 통과. Terraform은 로컬에 없어 `validate`는 못 했고 python-hcl2로 HCL 문법 파싱만 확인했다 — 첫 `terraform init/plan`에서 프로바이더 스키마 오류가 나면 그 부분만 손보면 된다.
 
 ## 2026-09-22 — 성능·자원 최적화 5차: 잡다한 것
 
