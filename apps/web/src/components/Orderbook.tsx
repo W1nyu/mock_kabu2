@@ -345,14 +345,11 @@ export default function Orderbook({
           </div>
         </div>
       )}
-      <p className="border-t border-hairline-soft px-4 py-2 text-[11px] text-ink-faint">
-        가격을 클릭하면 주문 폼(정정 중이면 정정 칸)에 입력됩니다 · 매수/매도는 바뀌지 않음
-        {Object.keys(myDepth).length > 0 && (
-          <span className="ml-2 text-sky" title="내 미체결 지정가가 있는 호가 단계">
-            ● 내 주문
-          </span>
-        )}
-      </p>
+      {Object.keys(myDepth).length > 0 && (
+        <p className="border-t border-hairline-soft px-4 py-2 text-[11px] text-sky" title="내 미체결 지정가가 있는 호가 단계">
+          ● 내 주문
+        </p>
+      )}
     </div>
   );
 }
