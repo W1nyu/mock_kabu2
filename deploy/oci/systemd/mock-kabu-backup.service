@@ -1,0 +1,8 @@
+[Unit]
+Description=mock-kabu2 pgBackRest backup (diff daily, full on Sunday)
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/mock-kabu2
+ExecStart=/bin/sh -c 'if [ "$(date +%%u)" = 7 ]; then TYPE=full; else TYPE=diff; fi; docker compose --env-file deploy/production/.env.production -f deploy/production/compose.production.yml -f deploy/oci/compose.oci.yml exec -T postgres pgbackrest --stanza=mock-kabu --type=$TYPE backup'

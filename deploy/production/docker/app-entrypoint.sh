@@ -30,6 +30,10 @@ case "$command_name" in
   consistency)
     exec packages/db/node_modules/.bin/tsx packages/db/scripts/check-consistency.ts
     ;;
+  oracle-sync)
+    shift
+    exec packages/db/node_modules/.bin/tsx packages/db/scripts/oracle-sync.ts "$@"
+    ;;
   prune-history)
     shift
     exec packages/db/node_modules/.bin/tsx packages/db/scripts/prune-history.ts "$@"

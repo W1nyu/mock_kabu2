@@ -23,6 +23,10 @@ PostgreSQL, Redis, API, settlement, matching-engine, bots, web에는 호스트 �
 80/443을 공개한다. `POST /internal/liquidity/ensure`는 Caddy에서 먼저 404 처리되므로 같은 Docker
 내부 네트워크의 `bots`만 API에 직접 요청할 수 있다.
 
+## Oracle Cloud Always Free
+
+무료 A1 VM에 같은 구성을 올리는 절차(Terraform, cloud-init, HTTP/IP 모드, Object Storage 백업, Autonomous Database 아카이브)는 [deploy/oci/README.md](../deploy/oci/README.md)에 따로 정리했다. 이 문서의 나머지 절차(비밀값, 백업·복구, 보존 정책)는 그대로 적용된다.
+
 ## 저장 공간 보존 정책
 
 봇 시장은 하루에 수만 건의 주문·체결을 만든다. 정리하지 않으면 로컬 2주 운영에서 DB가 4.6GB까지 자랐고,

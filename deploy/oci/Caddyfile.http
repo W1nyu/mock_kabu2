@@ -1,0 +1,32 @@
+# 도메인 없이 공인 IP로만 쓸 때의 Caddy 구성 (HTTP 전용, 인증서 없음).
+# compose.oci.yml이 APP_DOMAIN이 비어 있으면 이 파일을 /etc/caddy/Caddyfile로 마운트한다.
+# 브라우저 알림(Notification API)과 일부 보안 헤더는 HTTPS에서만 동작한다 — 도메인을 붙일 수
+# 있게 되면 production Caddyfile로 돌아간다.
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	encode zstd gzip
+
+	log {
+		output stdout
+		format console
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	@internal path /internal /internal/*
+	respond @internal "Not found" 404
+
+	@api path /auth /auth/* /account /account/* /orders /orders/* /market /market/* /admin /admin/* /replay /replay/* /health /health/* /socket.io /socket.io/*
+	reverse_proxy @api api:4100
+
+	reverse_proxy web:3100
+}

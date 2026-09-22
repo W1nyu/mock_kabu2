@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly mock-kabu2 → Oracle ADB sync
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,5 +1,8 @@
 generator client {
   provider = "prisma-client-js"
+  // 이미지를 x86 PC에서 빌드해 Oracle Cloud A1(ARM) VM으로 옮겨도 엔진이 있도록 두 리눅스 타깃을 함께 생성한다.
+  // VM 위에서 직접 빌드하면 native만으로 충분하지만 비용은 엔진 파일 두 개뿐이다.
+  binaryTargets = ["native", "linux-arm64-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {

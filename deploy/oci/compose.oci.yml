@@ -1,0 +1,110 @@
+# Oracle Cloud Always Free (A1.Flex, arm64) 오버라이드. production compose 위에 겹쳐 쓴다:
+#
+#   docker compose -f deploy/production/compose.production.yml -f deploy/oci/compose.oci.yml up -d --build
+#
+# 바뀌는 것
+#  - APP_ORIGIN: 도메인이 있으면 https://도메인, 없으면 http://공인IP. 웹 번들과 CORS가 이 값을 쓴다.
+#    (production 파일이 APP_DOMAIN을 필수로 요구하므로 IP 모드에서는 APP_DOMAIN=localhost 자리표시자를 둔다.)
+#  - Caddy: 도메인이 없으면 .env에 CADDYFILE=../oci/Caddyfile.http 를 줘 HTTP 전용 구성을 마운트한다.
+#  - pgBackRest: PGBACKREST_CONF=../oci/pgbackrest.s3.conf 를 주면 OCI Object Storage(S3 호환) 저장소 설정을 마운트한다.
+#  - 상대 경로는 첫 compose 파일의 디렉터리(deploy/production) 기준이다 — scripts/bootstrap.sh가 맞춰 준다.
+#  - 자원: 4 OCPU/24GB 기준으로 Postgres·API에 조금 더 준다. 2 OCPU/12GB면 이 파일의 limits를 절반으로.
+name: ${COMPOSE_PROJECT_NAME:-mock-kabu2-oci}
+
+x-app-build: &app-build
+  context: ../..
+  dockerfile: deploy/production/Dockerfile
+  args:
+    # 빈 APP_DOMAIN이면 IP + HTTP. production 파일의 필수 검사(:?)를 피하려고 여기서 다시 정의한다.
+    NEXT_PUBLIC_API_URL: ${APP_ORIGIN:?APP_ORIGIN is required (https://domain or http://public-ip)}
+
+services:
+  postgres:
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=mock-kabu archive-push %p
+      - -c
+      - archive_timeout=900
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=4GB
+      - -c
+      - max_connections=80
+      - -c
+      - wal_compression=on
+      - -c
+      - autovacuum_naptime=30s
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - pgbackrest-data:/var/lib/pgbackrest
+      - ${PGBACKREST_CONF:-../production/postgres/pgbackrest.conf}:/etc/pgbackrest/pgbackrest.conf:ro
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_INITDB_ARGS: --data-checksums
+      PGDATA: /var/lib/postgresql/data/pgdata
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_REPO1_CIPHER_PASS:?PGBACKREST_REPO1_CIPHER_PASS is required}
+      # S3 호환 저장소를 쓸 때 pgBackRest가 읽는 값 (설정 파일의 %env 참조)
+      PGBACKREST_REPO1_S3_KEY: ${OCI_S3_ACCESS_KEY:-}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${OCI_S3_SECRET_KEY:-}
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  migrate:
+    build: *app-build
+  seed:
+    build: *app-build
+
+  api:
+    build: *app-build
+    environment:
+      WEB_ORIGIN: ${APP_ORIGIN:?APP_ORIGIN is required}
+      # Autonomous Database 아카이브 동기화 (run --rm api oracle-sync). 비어 있으면 스크립트가 바로 종료한다.
+      ORACLE_ORDS_URL: ${ORACLE_ORDS_URL:-}
+      ORACLE_DB_USER: ${ORACLE_DB_USER:-}
+      ORACLE_DB_PASSWORD: ${ORACLE_DB_PASSWORD:-}
+      ORACLE_SYNC_TRADES_DAYS: ${ORACLE_SYNC_TRADES_DAYS:-3650}
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: 768M
+        reservations:
+          memory: 256M
+
+  matching-engine:
+    build: *app-build
+  settlement:
+    build: *app-build
+
+  bots:
+    build: *app-build
+    environment:
+      # A1 4코어면 로컬과 같은 활기(250ms/1)도 충분하지만 기본은 조금 느긋하게.
+      BOT_QUOTE_RECONCILE_MS: ${BOT_QUOTE_RECONCILE_MS:-400}
+      BOT_FLOW_DELAY_SCALE: ${BOT_FLOW_DELAY_SCALE:-1.25}
+
+  web:
+    build: *app-build
+    environment:
+      NEXT_PUBLIC_API_URL: ${APP_ORIGIN:?APP_ORIGIN is required}
+
+  caddy:
+    environment:
+      # production Caddyfile은 APP_DOMAIN이 필수(:?)라 HTTP 모드에서는 자리표시자를 준다.
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+      CADDY_EMAIL: ${CADDY_EMAIL:-admin@example.com}
+    volumes:
+      - ${CADDYFILE:-../production/Caddyfile}:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config

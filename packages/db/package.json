@@ -12,7 +12,9 @@
     "seed": "tsx prisma/seed.ts",
     "check:consistency": "tsx scripts/check-consistency.ts",
     "recover:settlement": "tsx scripts/recover-unsettled-trades.ts",
-    "prune:history": "tsx scripts/prune-history.ts"
+    "prune:history": "tsx scripts/prune-history.ts",
+    "oracle:sync": "tsx scripts/oracle-sync.ts",
+    "test": "tsx --test scripts/__tests__/settlement-recovery-plan.node-test.ts scripts/__tests__/oracle-sync-plan.node-test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.8.0",

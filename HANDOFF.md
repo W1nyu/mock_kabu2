@@ -47,7 +47,15 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 성능·자원 최적화 5차: 잡다한 것 (최신 작업)
+## 2026-09-22 — Oracle Cloud Always Free 배포 환경 + Autonomous Database 아카이브 (최신 작업)
+
+- **왜 이렇게**: Free tier의 관리형 DB는 Oracle DB뿐이고 Prisma에 Oracle 커넥터가 없다(정산·매칭도 PostgreSQL 전용 SQL). 그래서 주 DB는 A1 VM의 PostgreSQL 컨테이너 그대로, 무료 ADB는 **드라이버 없이 ORDS REST SQL로 밀어 넣는 아카이브·분석 저장소**로 붙였다. 주 DB 교체를 다시 검토하려면 Prisma를 버리고 데이터 계층(락 전략 3종·raw SQL 40여 개)을 다시 써야 한다.
+- **`deploy/oci/`**: `terraform/`(VCN·IGW·서브넷·보안목록 22/80/443·A1.Flex 4/24 + Ubuntu 22.04 arm64 + cloud-init, `prevent_destroy`), `terraform/cloud-init.yaml`(Docker·compose 플러그인, iptables 80/443 개방, 4GB 스왑, clone → /opt/mock-kabu2), `compose.oci.yml`(production 위 오버라이드: `APP_ORIGIN`으로 IP/HTTP 모드, `CADDYFILE`·`PGBACKREST_CONF` 마운트, Postgres 2G/512MB·API 768M, 봇 400ms/1.25, ORACLE_* env), `Caddyfile.http`(도메인 없이 HTTP), `pgbackrest.s3.conf`(Object Storage S3 호환), `scripts/bootstrap.sh`(.env 자동 생성·비밀값 openssl 채움 → build → up → systemd 타이머 등록; `--update`), `systemd/`(백업 매일·prune 주간·oracle-sync 매시), `oracle/schema.sql`(1부 ADMIN: 사용자+`ORDS.ENABLE_SCHEMA`, 2부: mk_* 테이블·뷰), `README.md`(전체 절차·A1 용량 팁·회수 정책·문제 해결).
+- **`pnpm oracle:sync`** (`packages/db/scripts/oracle-sync.ts` + 순수 계획기 `oracle-sync-plan.ts`, node 테스트 4개, db `test` 스크립트 신설): 계정 디렉터리·1분 봉·사용자 낀 체결·사용자 실현손익·자산 스냅샷을 스트림별 워터마크(`mk_sync_state`) 이후로 MERGE(200행/문, 실행당 최대 2만 행). `--dry-run`, `--full`. 엔트리포인트 `oracle-sync`. 로컬 DB로 `--dry-run --full` 확인(문장 생성까지; ADB 실호출은 계정이 없어 미검증).
+- Prisma `binaryTargets = ["native", "linux-arm64-openssl-3.0.x", "debian-openssl-3.0.x"]` — x86에서 빌드해 ARM으로 옮겨도 동작.
+- 검증: 두 compose 파일 병합 `docker compose config` 통과(IP 모드 env), cloud-init YAML 파싱, `pnpm test` 11 태스크 통과. Terraform은 로컬에 설치돼 있지 않아 `validate`를 못 돌렸다 — 첫 `terraform init/plan`에서 문법 오류가 나면 그 부분만 손보면 된다.
+
+## 2026-09-22 — 성능·자원 최적화 5차: 잡다한 것
 
 - migration `20260922160000_tune_autovacuum_hot_tables`: outbox·claim·orders·trades·ledger에 `autovacuum_vacuum_scale_factor` 0.02~0.05 — 배치 삭제로 생기는 dead tuple을 기본(20%)보다 훨씬 빨리 회수해 힙이 자라지 않게.
 - API `OutboxRelayer` 유휴 폴링 200ms → 1s (주문 접수는 `flushSoon()`이 즉시 깨움). 한가한 API의 DB 쿼리 초당 5회 → 1회.

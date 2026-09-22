@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily mock-kabu2 database backup (03:30 KST)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Seoul
+Persistent=true
+
+[Install]
+WantedBy=timers.target

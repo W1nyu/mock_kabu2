@@ -27,6 +27,11 @@
 - 프로세스: 정산·매칭·봇을 tsc로 컴파일해 프로덕션에서 `node dist/main.js`(tsx 상주 제거). 봇 부하 손잡이 `BOT_QUOTE_RECONCILE_MS`/`BOT_FLOW_DELAY_SCALE`(프로덕션 500ms/1.5).
 - 웹: 계정 push 후 재조회 400ms 디바운스, 차트 컴포넌트 지연 로드(`next build` 대시보드 134KB). 웹 vitest 16개.
 
+### Oracle Cloud Always Free
+- `deploy/oci/`: Terraform(A1.Flex 4 OCPU/24GB, 네트워크, 방화벽) + cloud-init + `compose.oci.yml`(IP/HTTP 모드, Object Storage 백업) + `bootstrap.sh` + systemd 타이머(백업·정리·ADB 동기화). 가이드 `deploy/oci/README.md`.
+- Autonomous Database(무료 Oracle DB)를 아카이브·분석 저장소로: `deploy/oci/oracle/schema.sql`, `pnpm oracle:sync`(ORDS REST SQL, 드라이버 없음, 워터마크 증분 MERGE). 주 DB는 PostgreSQL 유지(Prisma에 Oracle 커넥터 없음).
+- Prisma 엔진 arm64/x86 동시 생성.
+
 ### 봇·운영
 - 개미 봇은 매수 뒤 고정 손절, 모멘텀 봇은 트레일링을 걸어 하락장 스탑 연쇄를 재현.
 - `/health/ready`에 백그라운드 작업 상태, `pnpm check:consistency`에 실현손익·조건부 주문 불변식, `pnpm smoke` E2E 스모크(19개 체크), `apps/web` vitest 도입, [REST API 레퍼런스](docs/api.md).

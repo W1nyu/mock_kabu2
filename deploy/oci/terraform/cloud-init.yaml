@@ -1,0 +1,57 @@
+#cloud-config
+# Ubuntu 22.04 aarch64 (VM.Standard.A1.Flex) 첫 부팅: Docker + compose 플러그인, 방화벽, 저장소 clone.
+# 진행 상황: /var/log/cloud-init-output.log
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - gnupg
+  - iptables-persistent
+  - unattended-upgrades
+
+write_files:
+  # OCI Ubuntu 이미지는 iptables INPUT 체인이 22 외에는 REJECT라, 보안 목록을 열어도 80/443이 막힌다.
+  - path: /usr/local/sbin/open-web-ports.sh
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+      for port in 80 443; do
+        iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null \
+          || iptables -I INPUT 5 -p tcp --dport "$port" -m state --state NEW -j ACCEPT
+      done
+      netfilter-persistent save
+  # A1 24GB에서도 페이지 캐시·컨테이너에 여유를 주고, 스왑은 마지막 안전망으로만.
+  - path: /etc/sysctl.d/90-mock-kabu.conf
+    content: |
+      vm.swappiness = 10
+      net.core.somaxconn = 1024
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "local",
+        "log-opts": { "max-size": "10m", "max-file": "3" }
+      }
+
+runcmd:
+  # Docker 공식 저장소 (arm64)
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list'
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable --now docker
+  - usermod -aG docker ubuntu
+  - /usr/local/sbin/open-web-ports.sh
+  - sysctl --system
+  # 4GB 스왑 파일 (부트 볼륨에). OOM으로 컨테이너가 죽는 것보다 느려지는 편이 낫다.
+  - fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  - sh -c 'echo "/swapfile none swap sw 0 0" >> /etc/fstab'
+  # 저장소
+  - git clone --branch "${repo_ref}" "${repo_url}" /opt/mock-kabu2
+  - chown -R ubuntu:ubuntu /opt/mock-kabu2
+  - sh -c 'echo "APP_DOMAIN=${app_domain}" > /opt/mock-kabu2/deploy/oci/.cloud-init-domain'
+  - echo "cloud-init done — run /opt/mock-kabu2/deploy/oci/scripts/bootstrap.sh as ubuntu" > /var/log/mock-kabu-cloud-init.done

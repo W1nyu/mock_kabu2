@@ -1,0 +1,13 @@
+tenancy_ocid     = "ocid1.tenancy.oc1..aaaa..."
+user_ocid        = "ocid1.user.oc1..aaaa..."
+fingerprint      = "aa:bb:cc:..."
+private_key_path = "~/.oci/oci_api_key.pem"
+compartment_ocid = "ocid1.tenancy.oc1..aaaa..."   # 루트 컴파트먼트를 써도 된다
+region           = "ap-chuncheon-1"                # 홈 리전. Always Free 자원은 홈 리전에서만 만들어진다
+
+ssh_public_key   = "ssh-ed25519 AAAA... you@pc"
+ssh_allowed_cidr = "0.0.0.0/0"                     # 가능하면 "본인IP/32"
+
+repo_url   = "https://github.com/<you>/mock_kabu2.git"
+repo_ref   = "main"
+app_domain = ""                                    # 예: "kabu.example.com" — 비우면 IP + HTTP

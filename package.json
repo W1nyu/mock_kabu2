@@ -15,7 +15,8 @@
     "check:consistency": "pnpm --filter @mock-kabu/db check:consistency",
     "recover:settlement": "pnpm --filter @mock-kabu/db recover:settlement",
     "smoke": "node scripts/smoke.mjs",
-    "prune:history": "pnpm --filter @mock-kabu/db prune:history"
+    "prune:history": "pnpm --filter @mock-kabu/db prune:history",
+    "oracle:sync": "pnpm --filter @mock-kabu/db oracle:sync"
   },
   "devDependencies": {
     "turbo": "^2.5.0",
