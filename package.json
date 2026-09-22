@@ -14,7 +14,8 @@
     "db:seed": "pnpm --filter @mock-kabu/db seed",
     "check:consistency": "pnpm --filter @mock-kabu/db check:consistency",
     "recover:settlement": "pnpm --filter @mock-kabu/db recover:settlement",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "prune:history": "pnpm --filter @mock-kabu/db prune:history"
   },
   "devDependencies": {
     "turbo": "^2.5.0",

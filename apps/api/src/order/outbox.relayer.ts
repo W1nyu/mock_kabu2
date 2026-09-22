@@ -1,6 +1,6 @@
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import type { PrismaClient } from "@mock-kabu/db";
-import { STREAMS } from "@mock-kabu/shared";
+import { LOG_RETENTION, STREAMS, pruneUntilDrained } from "@mock-kabu/shared";
 import type Redis from "ioredis";
 import { PRISMA, REDIS } from "../core/tokens";
 
@@ -14,6 +14,7 @@ import { PRISMA, REDIS } from "../core/tokens";
 @Injectable()
 export class OutboxRelayer implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
+  private pruneTimer?: NodeJS.Timeout;
   private busy = false;
 
   constructor(
@@ -23,10 +24,28 @@ export class OutboxRelayer implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     this.timer = setInterval(() => void this.flush(), 200);
+    // 발행된 행은 재발행 대상이 아니므로 한 시간 뒤 지운다. 지우지 않으면 주문 수만큼 영원히 쌓인다.
+    this.pruneTimer = setInterval(() => void this.prunePublished(), LOG_RETENTION.SWEEP_INTERVAL_MS);
   }
 
   onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
+    if (this.pruneTimer) clearInterval(this.pruneTimer);
+  }
+
+  private async prunePublished(): Promise<void> {
+    try {
+      const removed = await pruneUntilDrained(this.prisma, {
+        table: '"order"."outbox"',
+        column: "published_at",
+        key: "event_id",
+        before: new Date(Date.now() - LOG_RETENTION.PUBLISHED_OUTBOX_MS),
+        extraWhere: '"published_at" IS NOT NULL',
+      });
+      if (removed > 0) console.log(`[outbox] pruned ${removed} published rows`);
+    } catch (error) {
+      console.error("[outbox] prune failed", error);
+    }
   }
 
   /** Wake the durable relay after a committed order instead of waiting for its next poll. */

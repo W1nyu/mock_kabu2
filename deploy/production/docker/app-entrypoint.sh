@@ -30,6 +30,10 @@ case "$command_name" in
   consistency)
     exec packages/db/node_modules/.bin/tsx packages/db/scripts/check-consistency.ts
     ;;
+  prune-history)
+    shift
+    exec packages/db/node_modules/.bin/tsx packages/db/scripts/prune-history.ts "$@"
+    ;;
   recover-settlement)
     shift
     exec packages/db/node_modules/.bin/tsx packages/db/scripts/recover-unsettled-trades.ts "$@"

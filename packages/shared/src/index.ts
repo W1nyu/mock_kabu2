@@ -5,3 +5,4 @@ export * from "./replay";
 export * from "./settlement";
 export * from "./conditional";
 export * from "./stream-retention";
+export * from "./log-retention";

@@ -4,6 +4,8 @@ import {
   CONSUMER_GROUPS,
   KEYS,
   STREAM_RETENTION,
+  LOG_RETENTION,
+  pruneUntilDrained,
   STREAMS,
   WORKERS,
   trimAcknowledgedStream,
@@ -158,6 +160,7 @@ async function main() {
   let heartbeatTimer: NodeJS.Timeout | undefined;
   let leaseRenewTimer: NodeJS.Timeout | undefined;
   let streamTrimTimer: NodeJS.Timeout | undefined;
+  let logPruneTimer: NodeJS.Timeout | undefined;
   let renewingLease = false;
   let publishingHeartbeat = false;
 
@@ -236,6 +239,38 @@ async function main() {
     streamTrimTimer = setInterval(trimAcknowledgedOrders, STREAM_RETENTION.TRIM_INTERVAL_MS);
     trimAcknowledgedOrders();
 
+    // 발행된 정산 outbox와 오래된 멱등 claim을 배치로 지운다(리더만). 스트림이 ACK 구간을 trim하므로
+    // 7일 지난 event id는 다시 오지 않고, 발행 표시된 outbox 행은 재발행 대상이 아니다.
+    const pruneDurableLog = async () => {
+      if (stopping || !lease.isHeld) return;
+      const now = Date.now();
+      try {
+        const removed =
+          (await pruneUntilDrained(prisma, {
+            table: '"matching"."outbox_events"',
+            column: "published_at",
+            before: new Date(now - LOG_RETENTION.PUBLISHED_OUTBOX_MS),
+            extraWhere: '"published_at" IS NOT NULL',
+          })) +
+          (await pruneUntilDrained(prisma, {
+            table: '"matching"."processed_order_events"',
+            column: "processed_at",
+            key: "event_id",
+            before: new Date(now - LOG_RETENTION.IDEMPOTENCY_CLAIM_MS),
+          })) +
+          (await pruneUntilDrained(prisma, {
+            table: '"matching"."closed_order_markers"',
+            column: "created_at",
+            key: "order_id",
+            before: new Date(now - LOG_RETENTION.IDEMPOTENCY_CLAIM_MS),
+          }));
+        if (removed > 0) console.log(`[engine] pruned ${removed} durable log rows`);
+      } catch (error) {
+        console.warn("[engine] durable log prune deferred", error);
+      }
+    };
+    logPruneTimer = setInterval(() => void pruneDurableLog(), LOG_RETENTION.SWEEP_INTERVAL_MS);
+
     // 1) 늦게 구독한 클라이언트를 위한 주기적 스냅샷 재발행
     snapshotTimer = setInterval(() => {
       if (stopping) return;
@@ -301,6 +336,7 @@ async function main() {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     if (leaseRenewTimer) clearInterval(leaseRenewTimer);
     if (streamTrimTimer) clearInterval(streamTrimTimer);
+    if (logPruneTimer) clearInterval(logPruneTimer);
     process.off("SIGTERM", onSigterm);
     process.off("SIGINT", onSigint);
     // A predecessor must never delete a heartbeat a successor has already

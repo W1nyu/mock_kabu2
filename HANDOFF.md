@@ -47,7 +47,15 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 성능·자원 최적화 2차: 프로세스·봇 부하 (최신 작업)
+## 2026-09-22 — 성능·자원 최적화 3차: 저장 공간 보존 (최신 작업)
+
+- **진단**: 로컬 DB 4,665MB 중 `order.outbox` 1.4GB(2.9M행), `matching.outbox_events` 1.1GB, `processed_order_events` 428MB, `closed_order_markers` 406MB, `orders` 845MB(봇 종결 주문 1.07M). 발행된 outbox와 옛 claim이 전체의 85%.
+- **프로세스 자체 정리** `packages/shared/src/log-retention.ts` (`LOG_RETENTION`, `pruneBatch`, `pruneUntilDrained`: 5,000행 배치·최대 20회/스윕, 1분 주기): API `OutboxRelayer`가 발행 1시간 지난 `order.outbox`, 매칭 리더가 발행된 `matching.outbox_events` + 7일 지난 `processed_order_events`·`closed_order_markers`를 지운다. 테스트 `core/__tests__/log-retention.test.ts`.
+- **주의 — `account.processed_events`는 프로세스가 지우지 않는다.** 체결의 event id == trade id라 정합성 검사("all trades settled")와 복구 플래너가 정산 증거로 쓴다. 이 세션에서 한 번 7일 기준으로 지웠다가(같은 psql -c 트랜잭션에서 VACUUM 에러로 전부 롤백돼 실제 피해 없음) 설계를 바로잡았다: 체결 행이 있는 동안 claim은 남고, 봇 체결을 지울 때만 함께 지운다.
+- **`pnpm prune:history`** (`packages/db/scripts/prune-history.ts`, 엔트리포인트 `prune-history`): dry-run 기본, `--apply`. 봇 종결 주문 7일, 봇↔봇 체결 30일(+실현손익·정산 claim), 봇 종결 조건부 주문 7일, 뉴스 30일, `--compact-bot-ledger`로 봇 원장을 계정당 `COMPACTED` 1행으로 압축(sum(delta)==balance 유지). 사용자 계정이 낀 행은 건드리지 않는다. 로컬 적용 결과: 4,665MB → 821MB(VACUUM FULL 후), `check:consistency` 전부 통과. `docs/production-vps-deployment.md`에 "저장 공간 보존 정책" 절 추가(주 1회 cron 권장).
+- 스택이 죽을 때 스트림에 남아 있던 미정산 체결 2건은 `pnpm recover:settlement --apply`로 정산했다(복구 플래너의 realized_pnl 생성도 실데이터에서 확인). 스택을 다시 올리면 settlement가 같은 event id를 XAUTOCLAIM으로 받지만 processed_events 덕분에 건너뛴다.
+
+## 2026-09-22 — 성능·자원 최적화 2차: 프로세스·봇 부하
 
 - **워커 컴파일**: settlement·matching-engine·bots에 `tsconfig.build.json`(noEmit false, 테스트 제외)과 `build: tsc -p tsconfig.build.json` / `start: node dist/main.js`. 프로덕션 엔트리포인트(`deploy/production/docker/app-entrypoint.sh`)가 `node apps/*/dist/main.js`를 실행 — tsx/esbuild 서비스가 각 192MB 컨테이너에 상주하지 않고 기동도 빠르다. `pnpm dev`는 여전히 tsx watch. 로컬에서 `node dist/main.js`로 settlement·matching 기동 확인(매칭의 첫 lease 시도가 Redis 연결 전이라 에러 로그 한 줄 뒤 재시도 성공 — 기존 동작).
 - **`GET /market/overview`**: 종목 목록 + 당일 요약을 `GROUP BY symbol` 한 쿼리로(2초 캐시). 대시보드가 15초마다 보내던 6개 요청이 1개로. 요약 SQL의 `price*qty`는 int4 오버플로를 피해 `price::bigint*qty`로.

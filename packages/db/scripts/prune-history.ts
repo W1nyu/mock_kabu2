@@ -1,0 +1,202 @@
+/**
+ * 오래된 봇 이력 정리 (운영 보존 정책).
+ *
+ * 봇 20계정이 하루 수십만 건을 거래하므로 orders/trades/ledger가 사용자 이력의 수천 배로 자란다.
+ * 이 스크립트는 **봇만 관련된** 오래된 행을 지우고, 사용자 계정이 한쪽이라도 낀 체결·주문·원장은
+ * 그대로 둔다. 캔들·실현손익 같은 파생 데이터는 이미 계산돼 있어 영향이 없다.
+ *
+ *   pnpm prune:history                       # dry-run: 지울 행 수만 출력
+ *   pnpm prune:history -- --apply            # 실제 삭제 (배치 5,000행)
+ *   pnpm prune:history -- --apply --orders-days 7 --trades-days 30 --news-days 30 --compact-bot-ledger
+ *
+ * 정리 대상 (기본 보존 기간):
+ *  - order.orders            봇 계정의 종결(FILLED/CANCELED/REJECTED) 주문, 7일
+ *  - order.conditional_orders 봇 계정의 비대기(TRIGGERED/CANCELED/FAILED) 행, 7일
+ *  - matching.trades          양쪽 모두 봇인 체결, 30일  (+ 그 실현손익 행, + 정산 claim account.processed_events)
+ *  - market.news_items        30일
+ *  - account.ledger_entries   (--compact-bot-ledger) 봇 계정의 7일 지난 원장을 계정당 1행(COMPACTED)으로 압축.
+ *                             sum(delta) == balance 불변식은 그대로 유지된다.
+ *
+ * outbox·멱등 claim은 각 프로세스가 스스로 지우고(shared/log-retention), 자산 스냅샷은 API가 압축한다.
+ */
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
+const BATCH = 5_000;
+
+interface Options {
+  apply: boolean;
+  ordersDays: number;
+  tradesDays: number;
+  newsDays: number;
+  compactBotLedger: boolean;
+  ledgerDays: number;
+}
+
+function parseArgs(argv: string[]): Options {
+  const options: Options = {
+    apply: false,
+    ordersDays: 7,
+    tradesDays: 30,
+    newsDays: 30,
+    compactBotLedger: false,
+    ledgerDays: 7,
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const next = () => Number(argv[++index]);
+    if (arg === "--apply") options.apply = true;
+    else if (arg === "--orders-days") options.ordersDays = next();
+    else if (arg === "--trades-days") options.tradesDays = next();
+    else if (arg === "--news-days") options.newsDays = next();
+    else if (arg === "--ledger-days") options.ledgerDays = next();
+    else if (arg === "--compact-bot-ledger") options.compactBotLedger = true;
+  }
+  for (const [name, value] of Object.entries(options)) {
+    if (typeof value === "number" && (!Number.isFinite(value) || value < 1)) {
+      throw new Error(`${name} must be a positive number of days`);
+    }
+  }
+  return options;
+}
+
+const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+async function count(sql: string, ...params: unknown[]): Promise<number> {
+  const [row] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(sql, ...params);
+  return Number(row?.n ?? 0n);
+}
+
+/** 배치 삭제. 지운 총 행 수를 돌려준다. */
+async function deleteBatched(sql: string, ...params: unknown[]): Promise<number> {
+  let total = 0;
+  for (;;) {
+    const removed = await prisma.$executeRawUnsafe(sql, ...params);
+    total += removed;
+    if (removed < BATCH) return total;
+  }
+}
+
+const BOT_ACCOUNTS = `SELECT a.id FROM account.accounts a JOIN auth.users u ON u.id = a.user_id WHERE u.is_bot`;
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  console.log(options.apply ? "APPLY 모드: 실제로 삭제합니다" : "DRY-RUN: 지울 행 수만 계산합니다 (--apply로 실행)");
+
+  // 1) 봇의 종결 주문
+  const ordersBefore = daysAgo(options.ordersDays);
+  const ordersWhere = `WHERE account_id IN (${BOT_ACCOUNTS}) AND status IN ('FILLED','CANCELED','REJECTED') AND created_at < $1`;
+  console.log(`bot terminal orders (>${options.ordersDays}d): ${await count(`SELECT COUNT(*) AS n FROM "order".orders ${ordersWhere}`, ordersBefore)}`);
+  if (options.apply) {
+    const removed = await deleteBatched(
+      `DELETE FROM "order".orders WHERE id IN (SELECT id FROM "order".orders ${ordersWhere} LIMIT ${BATCH})`,
+      ordersBefore,
+    );
+    console.log(`  deleted ${removed}`);
+  }
+
+  // 2) 봇의 종결 조건부 주문
+  const conditionalWhere = `WHERE account_id IN (${BOT_ACCOUNTS}) AND status <> 'WAITING' AND created_at < $1`;
+  console.log(`bot settled conditional orders (>${options.ordersDays}d): ${await count(`SELECT COUNT(*) AS n FROM "order".conditional_orders ${conditionalWhere}`, ordersBefore)}`);
+  if (options.apply) {
+    const removed = await deleteBatched(
+      `DELETE FROM "order".conditional_orders WHERE id IN (SELECT id FROM "order".conditional_orders ${conditionalWhere} LIMIT ${BATCH})`,
+      ordersBefore,
+    );
+    console.log(`  deleted ${removed}`);
+  }
+
+  // 3) 봇 ↔ 봇 체결 (+ 그 체결의 봇 실현손익 행). 사용자가 한쪽이라도 끼면 남긴다.
+  const tradesBefore = daysAgo(options.tradesDays);
+  const tradesWhere = `WHERE buyer_account_id IN (${BOT_ACCOUNTS}) AND seller_account_id IN (${BOT_ACCOUNTS}) AND created_at < $1`;
+  console.log(`bot-only trades (>${options.tradesDays}d): ${await count(`SELECT COUNT(*) AS n FROM matching.trades ${tradesWhere}`, tradesBefore)}`);
+  console.log(
+    `  their realized_pnl rows: ${await count(
+      `SELECT COUNT(*) AS n FROM account.realized_pnl r WHERE r.trade_id IN (SELECT id FROM matching.trades ${tradesWhere})`,
+      tradesBefore,
+    )}`,
+  );
+  if (options.apply) {
+    // 실현손익 행을 먼저 지워야 정합성 검사(realized ↔ trade 1:1)가 중간에도 깨지지 않는다.
+    const removedPnl = await deleteBatched(
+      `DELETE FROM account.realized_pnl WHERE id IN (
+         SELECT r.id FROM account.realized_pnl r
+         WHERE r.trade_id IN (SELECT id FROM matching.trades ${tradesWhere}) LIMIT ${BATCH})`,
+      tradesBefore,
+    );
+    // 체결의 event id == trade id. 체결을 지우면 그 정산 claim도 더 이상 증거로 쓰이지 않는다.
+    const removedClaims = await deleteBatched(
+      `DELETE FROM account.processed_events WHERE event_id IN (
+         SELECT p.event_id FROM account.processed_events p
+         WHERE p.event_id IN (SELECT id FROM matching.trades ${tradesWhere}) LIMIT ${BATCH})`,
+      tradesBefore,
+    );
+    const removedTrades = await deleteBatched(
+      `DELETE FROM matching.trades WHERE id IN (SELECT id FROM matching.trades ${tradesWhere} LIMIT ${BATCH})`,
+      tradesBefore,
+    );
+    console.log(`  deleted ${removedTrades} trades, ${removedPnl} realized rows, ${removedClaims} settlement claims`);
+  }
+
+  // 4) 오래된 뉴스
+  const newsBefore = daysAgo(options.newsDays);
+  console.log(`news items (>${options.newsDays}d): ${await count(`SELECT COUNT(*) AS n FROM market.news_items WHERE created_at < $1`, newsBefore)}`);
+  if (options.apply) {
+    const removed = await deleteBatched(
+      `DELETE FROM market.news_items WHERE id IN (SELECT id FROM market.news_items WHERE created_at < $1 LIMIT ${BATCH})`,
+      newsBefore,
+    );
+    console.log(`  deleted ${removed}`);
+  }
+
+  // 5) 봇 원장 압축 (opt-in). 계정별로 오래된 행을 한 줄로 합친다 — 합계·마지막 잔액 보존.
+  if (options.compactBotLedger) {
+    const ledgerBefore = daysAgo(options.ledgerDays);
+    const candidates = await prisma.$queryRawUnsafe<{ account_id: string; n: bigint }[]>(
+      `SELECT account_id, COUNT(*) AS n FROM account.ledger_entries
+       WHERE account_id IN (${BOT_ACCOUNTS}) AND created_at < $1 AND reason <> 'COMPACTED'
+       GROUP BY account_id HAVING COUNT(*) > 1`,
+      ledgerBefore,
+    );
+    const total = candidates.reduce((sum, row) => sum + Number(row.n), 0);
+    console.log(`bot ledger entries to compact (>${options.ledgerDays}d): ${total} rows across ${candidates.length} accounts`);
+    if (options.apply) {
+      for (const { account_id } of candidates) {
+        await prisma.$transaction(async (tx) => {
+          const [agg] = await tx.$queryRawUnsafe<{ total: bigint; last_id: bigint; last_balance: bigint; first_at: Date }[]>(
+            `SELECT SUM(delta) AS total, MAX(id) AS last_id,
+                    (array_agg(balance_after ORDER BY id DESC))[1] AS last_balance,
+                    MIN(created_at) AS first_at
+             FROM account.ledger_entries WHERE account_id = $1 AND created_at < $2`,
+            account_id,
+            ledgerBefore,
+          );
+          if (!agg || agg.last_id == null) return;
+          await tx.$executeRawUnsafe(`DELETE FROM account.ledger_entries WHERE account_id = $1 AND created_at < $2`, account_id, ledgerBefore);
+          // 압축 행은 원래 구간의 첫 시각을 달고 들어가 이후 행보다 항상 앞선다.
+          await tx.$executeRawUnsafe(
+            `INSERT INTO account.ledger_entries (account_id, delta, balance_after, reason, ref_id, created_at)
+             VALUES ($1, $2, $3, 'COMPACTED', $4, $5)`,
+            account_id,
+            agg.total,
+            agg.last_balance,
+            `through-${agg.last_id}`,
+            agg.first_at,
+          );
+        });
+      }
+      console.log(`  compacted ${candidates.length} accounts`);
+    }
+  }
+
+  if (options.apply) {
+    console.log("\n완료. 공간 회수는 autovacuum이 처리합니다 (즉시 필요하면 VACUUM ANALYZE). pnpm check:consistency로 확인하세요.");
+  }
+}
+
+main()
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  })
+  .finally(() => prisma.$disconnect());
