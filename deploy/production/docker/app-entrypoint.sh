@@ -7,14 +7,16 @@ case "$command_name" in
   api)
     exec node apps/api/dist/main.js
     ;;
+  # Workers run the tsc output built by `pnpm build`: no esbuild transform at
+  # start-up and no tsx/esbuild service resident in each 192MB container.
   settlement)
-    exec apps/settlement/node_modules/.bin/tsx apps/settlement/src/main.ts
+    exec node apps/settlement/dist/main.js
     ;;
   matching)
-    exec apps/matching-engine/node_modules/.bin/tsx apps/matching-engine/src/main.ts
+    exec node apps/matching-engine/dist/main.js
     ;;
   bots)
-    exec apps/bots/node_modules/.bin/tsx apps/bots/src/main.ts
+    exec node apps/bots/dist/main.js
     ;;
   web)
     exec node apps/web/node_modules/next/dist/bin/next start -p 3100

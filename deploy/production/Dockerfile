@@ -1,6 +1,7 @@
 # One immutable application image is shared by api, settlement, matching-engine,
-# bots, migration, and web services. Worker processes intentionally keep tsx
-# available because their current production start scripts execute TypeScript directly.
+# bots, migration, and web services. Every long-running process executes compiled
+# JavaScript (nest build / tsc / next build); tsx remains only for the one-shot
+# seed, consistency and recovery scripts.
 FROM node:22-bookworm-slim AS build
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
