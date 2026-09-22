@@ -51,6 +51,7 @@
 
 - migration `20260922160000_tune_autovacuum_hot_tables`: outbox·claim·orders·trades·ledger에 `autovacuum_vacuum_scale_factor` 0.02~0.05 — 배치 삭제로 생기는 dead tuple을 기본(20%)보다 훨씬 빨리 회수해 힙이 자라지 않게.
 - API `OutboxRelayer` 유휴 폴링 200ms → 1s (주문 접수는 `flushSoon()`이 즉시 깨움). 한가한 API의 DB 쿼리 초당 5회 → 1회.
+- `next build`(프로덕션) 통과 확인: 대시보드 First Load JS 134KB, 종목 페이지 141KB, 차트 청크는 별도 로드. 빌드 산출물(.next)은 dev와 섞이지 않게 지웠다.
 - 웹: `CandleChart`·`EquityChart`를 `next/dynamic({ ssr:false })`로 지연 로드 — lightweight-charts가 첫 JS 번들·SSR에서 빠지고 스켈레톤(glass pulse)이 먼저 그려진다.
 
 ## 2026-09-22 — 성능·자원 최적화 4차: 웹 요청 폭주 완화
