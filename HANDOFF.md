@@ -47,7 +47,12 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 사용자 피드백 6건 (최신 작업)
+## 2026-09-22 — 낙폭 제거·모바일·뉴스 다양화 (최신 작업)
+
+- 뉴스: `MacroChannel`에 `COMMODITY` 추가(회사 프로필 베타: SAKU −0.55, MOCK −0.4, KABU 0.2, NEKO 0.5, TANU 0.95), vocab `commodity`/`centralBank`/`region`. 템플릿 160종(매크로 43, 종목 84, 후속 17). 매크로 풀은 상승/하락 방향 수 차이 ≤2 테스트가 있으니 추가할 때 짝을 맞출 것. 후속 보도 테스트는 첫 후속이 나올 때까지(최대 하루) 돌리도록 바꿈.
+- 모바일: `.tbl td`가 `white-space: nowrap`(표는 `overflow-x-auto` 래퍼 안에서 가로 스크롤), 640px 이하에서 표 간격·글자 축소, `.field` 16px. `MobileSectionBar`(거래 페이지 하단 고정, `lg:hidden`, 섹션 id `chart/orderbook/order/trades` + `scroll-mt-28`). 폰 확인은 헤드리스 크롬+CDP 스크립트로 했다(로컬 Chrome 창은 최대화라 resize가 안 먹음) — 필요하면 `Emulation.setDeviceMetricsOverride` 390×844로 다시 찍으면 된다.
+
+## 2026-09-22 — 사용자 피드백 6건
 
 - 호가창 클릭 → 가격만(방향 유지). `priceHint`에서 `side` 제거, `OrderForm`은 `setSide`를 더 이상 호출하지 않는다. `MyOpenOrders`도 `priceHint`를 받아 정정 행의 가격 칸을 채운다.
 - `CandleChart`의 `OVERLAYS`(내 체결 마커·평단/예약선) 토글 — `INDICATORS`와 같은 저장 키(`mock-kabu2:chart:indicators`)에 합쳐 저장. 평단선 제목은 `평단`.
