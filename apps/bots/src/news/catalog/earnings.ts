@@ -133,4 +133,31 @@ export const EARNINGS_TEMPLATES: readonly NewsTemplate[] = [
       duration: { kind: "duration", range: { min: 4, max: 12 }, unit: "분기" },
     },
   },
+
+  {
+    id: "earn.preview.up",
+    category: "EARNINGS",
+    scope: "SYMBOL",
+    sentiment: "POSITIVE",
+    strength: { min: 0.3, max: 0.5 },
+    headlines: ["{broker} '{name} {quarter} 영업이익 컨센서스 {pct} 상회 전망'", "{name} {quarter} 실적 프리뷰… '어닝 서프라이즈 가능성'"],
+    slots: {
+      broker: { kind: "pick", vocab: "broker" },
+      quarter: { kind: "quarter" },
+      pct: { kind: "percent", range: { min: 8, max: 25 }, decimals: 0 },
+    },
+  },
+  {
+    id: "earn.preview.down",
+    category: "EARNINGS",
+    scope: "SYMBOL",
+    sentiment: "NEGATIVE",
+    strength: { min: 0.3, max: 0.5 },
+    headlines: ["{broker} '{name} {quarter} 실적 부진 예상… 영업이익 {pct} 감소 전망'", "{name} {quarter} 실적 눈높이 잇단 하향"],
+    slots: {
+      broker: { kind: "pick", vocab: "broker" },
+      quarter: { kind: "quarter" },
+      pct: { kind: "percent", range: { min: 10, max: 35 }, decimals: 0 },
+    },
+  },
 ];

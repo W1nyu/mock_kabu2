@@ -17,8 +17,12 @@ export type NewsCategory =
 
 export type SectorTag = "ELECTRONICS" | "BROKER" | "TRADING" | "HEAVY" | "MATERIALS" | "BIO";
 
-/** The macro axis a market-wide story moves along. Each symbol has a signed beta on it. */
-export type MacroChannel = "RATE" | "FX" | "OIL" | "GLOBAL";
+/**
+ * The macro axis a market-wide story moves along. Each symbol has a signed beta on it.
+ * COMMODITY is industrial raw materials (copper, nickel, iron ore, lithium, freight) as
+ * distinct from crude, because a trader and a shipbuilder sit on opposite sides of it.
+ */
+export type MacroChannel = "RATE" | "FX" | "OIL" | "COMMODITY" | "GLOBAL";
 
 export type VocabKey =
   | "broker"
@@ -32,7 +36,10 @@ export type VocabKey =
   | "title"
   | "index"
   | "grade"
-  | "plant";
+  | "plant"
+  | "commodity"
+  | "centralBank"
+  | "region";
 
 export type SlotSpec =
   /** Money that scales with the company's implied market cap. */

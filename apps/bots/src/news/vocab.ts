@@ -58,6 +58,9 @@ export const GLOBAL_VOCAB: Readonly<Record<VocabKey, readonly string[]>> = {
   index: ["대표지수", "글로벌 신흥국지수", "배당성장지수", "반도체 테마지수"],
   grade: ["A+", "A", "A−", "BBB+", "BBB", "BBB−", "BB+"],
   plant: ["본사", "제1공장"],
+  commodity: ["구리", "니켈", "철광석", "알루미늄", "리튬", "아연", "천연가스", "석탄"],
+  centralBank: ["미국 연준", "유럽중앙은행", "일본은행", "영란은행"],
+  region: ["중국", "유럽", "미국", "일본", "신흥국", "동남아"],
 };
 
 /**

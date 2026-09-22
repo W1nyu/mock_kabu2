@@ -187,14 +187,19 @@ test("a follow-up fires once, inside its declared delay, and can reverse", () =>
   assert.ok(parent);
 
   // Drive the scheduler until a sequel appears, then check its provenance.
+  // 종목 뉴스가 4~8분마다 하나이고 후속이 붙는 템플릿이 절반쯤이라, 최대 하루까지 돌리되
+  // 첫 후속 보도가 나오고 한 시간 더 지나면 멈춘다.
   const published: NewsItem[] = [];
-  for (let t = 0; t <= 3_600_000; t += 5_000) {
+  let firstSequelAtMs: number | null = null;
+  for (let t = 0; t <= 86_400_000; t += 5_000) {
     const item = scheduler.tick(t);
     if (item) published.push(item);
+    if (item?.parentItemId && firstSequelAtMs === null) firstSequelAtMs = t;
+    if (firstSequelAtMs !== null && t - firstSequelAtMs > 3_600_000) break;
   }
 
   const sequels = published.filter((item) => item.parentItemId !== null);
-  assert.ok(sequels.length > 0, "expected at least one sequel in an hour");
+  assert.ok(sequels.length > 0, "expected at least one sequel in a day");
 
   for (const sequel of sequels) {
     const source = published.find((item) => item.id === sequel.parentItemId);

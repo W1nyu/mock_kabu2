@@ -116,4 +116,26 @@ export const ANALYST_TEMPLATES: readonly NewsTemplate[] = [
       target: { kind: "targetPrice", ratio: { min: 1.08, max: 1.2 } },
     },
   },
+
+  {
+    id: "an.coverage.drop",
+    category: "ANALYST",
+    scope: "SYMBOL",
+    sentiment: "NEGATIVE",
+    strength: { min: 0.25, max: 0.42 },
+    headlines: ["{broker}, {name} 커버리지 중단… '가시성 낮다'", "{broker}, {name} 투자의견 '중립'으로 낮춰… 목표주가 미제시"],
+    slots: { broker: { kind: "pick", vocab: "broker" } },
+  },
+  {
+    id: "an.consensus.up",
+    category: "ANALYST",
+    scope: "SYMBOL",
+    sentiment: "POSITIVE",
+    strength: { min: 0.28, max: 0.45 },
+    headlines: ["{name} 목표주가 컨센서스 {duration} 연속 상향… 평균 {targetPrice}"],
+    slots: {
+      duration: { kind: "duration", range: { min: 3, max: 8 }, unit: "개월" },
+      targetPrice: { kind: "targetPrice", ratio: { min: 1.15, max: 1.4 } },
+    },
+  },
 ];

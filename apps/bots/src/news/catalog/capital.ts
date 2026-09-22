@@ -203,4 +203,39 @@ export const CAPITAL_TEMPLATES: readonly NewsTemplate[] = [
       pct: { kind: "percent", range: { min: 0.3, max: 2.5 } },
     },
   },
+
+  {
+    id: "cap.treasury.burn",
+    category: "CAPITAL",
+    scope: "SYMBOL",
+    sentiment: "POSITIVE",
+    strength: { min: 0.4, max: 0.62 },
+    headlines: ["{name}, 자사주 {money} 소각 결정… 발행주식 {pct} 감소", "{name}, 보유 자사주 전량 소각… 주주환원 강화"],
+    slots: {
+      money: { kind: "money", capFraction: { min: 0.01, max: 0.05 } },
+      pct: { kind: "percent", range: { min: 1, max: 5 } },
+    },
+  },
+  {
+    id: "cap.dividend.quarterly",
+    category: "CAPITAL",
+    scope: "SYMBOL",
+    sentiment: "POSITIVE",
+    strength: { min: 0.3, max: 0.5 },
+    headlines: ["{name}, 분기배당 도입… 배당성향 {pct}까지 확대", "{name}, {duration}간 배당 총액 {money} 약속"],
+    slots: {
+      pct: { kind: "percent", range: { min: 25, max: 50 }, decimals: 0 },
+      duration: { kind: "duration", range: { min: 2, max: 3 }, unit: "년" },
+      money: { kind: "money", capFraction: { min: 0.03, max: 0.1 } },
+    },
+  },
+  {
+    id: "cap.bw",
+    category: "CAPITAL",
+    scope: "SYMBOL",
+    sentiment: "NEGATIVE",
+    strength: { min: 0.3, max: 0.5 },
+    headlines: ["{name}, {money} 규모 신주인수권부사채 발행… 희석 우려", "{name}, 교환사채 {money} 발행 결정"],
+    slots: { money: { kind: "money", capFraction: { min: 0.03, max: 0.12 } } },
+  },
 ];

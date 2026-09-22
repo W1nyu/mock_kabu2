@@ -52,19 +52,13 @@ export default function PerformanceCard({ stats }: { stats: RealizedStats | null
         )}
       </div>
       {drawdown && (
-        <dl className="num grid grid-cols-2 gap-x-4 border-b border-hairline-soft px-5 py-3 text-sm">
+        <dl className="num grid grid-cols-1 gap-x-4 border-b border-hairline-soft px-5 py-3 text-sm">
           <Stat
             label="최대 낙폭 (MDD)"
             value={`-${(drawdown.maxDrawdown * 100).toFixed(2)}%`}
             sub={`최고 자산 ${won(drawdown.peak)}`}
             tone={drawdown.maxDrawdown > 0.05 ? "down" : undefined}
             title="자산 추이에서 최고점 대비 가장 크게 내려간 비율"
-          />
-          <Stat
-            label="현재 낙폭"
-            value={drawdown.current > 0 ? `-${(drawdown.current * 100).toFixed(2)}%` : "고점"}
-            tone={drawdown.current > 0 ? "down" : "up"}
-            title="지금 자산이 최고 자산에서 얼마나 내려와 있는지"
           />
         </dl>
       )}
