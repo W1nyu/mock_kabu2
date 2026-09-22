@@ -135,6 +135,9 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # DATABASE_URL carries an explicit Prisma pool size per service (8+4+4 plus
+  # one-shot jobs) so four processes stay far below postgres max_connections=80
+  # and a slow query cannot fan out into dozens of idle connections.
   api:
     <<: [*app-common, *api-resources]
     build: *app-build
@@ -143,7 +146,7 @@ services:
     environment:
       API_PORT: "4100"
       WEB_ORIGIN: https://${APP_DOMAIN:?APP_DOMAIN is required}
-      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?connection_limit=8
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       LOCK_STRATEGY: ${LOCK_STRATEGY:-pessimistic}
@@ -170,7 +173,7 @@ services:
     command: ["matching"]
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?connection_limit=4
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
       NODE_OPTIONS: --max-old-space-size=192
     depends_on:
@@ -185,7 +188,7 @@ services:
     command: ["settlement"]
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?connection_limit=4
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
       LOCK_STRATEGY: ${LOCK_STRATEGY:-pessimistic}
       NODE_OPTIONS: --max-old-space-size=192
