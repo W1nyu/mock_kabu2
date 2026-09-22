@@ -19,7 +19,9 @@ case "$command_name" in
     exec node apps/bots/dist/main.js
     ;;
   web)
-    exec node apps/web/node_modules/next/dist/bin/next start -p 3100
+    # `next start` reads .next from the project directory argument; the working
+    # directory is /app, so the app path must be passed explicitly.
+    exec node apps/web/node_modules/next/dist/bin/next start apps/web -p 3100
     ;;
   migrate)
     exec packages/db/node_modules/.bin/prisma migrate deploy --schema packages/db/prisma/schema.prisma
