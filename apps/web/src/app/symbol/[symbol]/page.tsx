@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import MyConditionalOrders from "@/components/MyConditionalOrders";
 import MyOpenOrders from "@/components/MyOpenOrders";
 import MyPosition from "@/components/MyPosition";
+import MobileSectionBar from "@/components/MobileSectionBar";
 import OrderForm from "@/components/OrderForm";
 import Orderbook from "@/components/Orderbook";
 import QuoteHeader from "@/components/QuoteHeader";
@@ -70,7 +71,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
   const currentLivePrice = livePrice?.symbol === symbol ? livePrice.price : null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-16 lg:pb-0">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Link
           href="/"
@@ -91,34 +92,41 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+        <div id="chart" className="scroll-mt-28 lg:col-span-2">
           <CandleChart symbol={symbol} />
         </div>
-        <Orderbook
-          symbol={symbol}
-          // 어느 쪽 호가를 눌렀든 가격만 넣는다 — 아래 호가를 눌러 매수하고 싶을 때 매도로 바뀌면 안 된다.
-          onPriceClick={(price) => setPriceHint({ symbol, price, seq: Date.now() })}
-        />
+        <div id="orderbook" className="scroll-mt-28">
+          <Orderbook
+            symbol={symbol}
+            // 어느 쪽 호가를 눌렀든 가격만 넣는다 — 아래 호가를 눌러 매수하고 싶을 때 매도로 바뀌면 안 된다.
+            onPriceClick={(price) => setPriceHint({ symbol, price, seq: Date.now() })}
+          />
+        </div>
       </div>
 
       <MyPosition symbol={symbol} onProtected={() => setOrderRefreshKey((value) => value + 1)} />
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
-        <OrderForm
-          key={symbol}
-          symbol={symbol}
-          priceHint={currentPriceHint}
-          lastPrice={currentLivePrice ?? currentInfo?.lastPrice ?? null}
-          onPlaced={() => setOrderRefreshKey((value) => value + 1)}
-        />
+        <div id="order" className="scroll-mt-28">
+          <OrderForm
+            key={symbol}
+            symbol={symbol}
+            priceHint={currentPriceHint}
+            lastPrice={currentLivePrice ?? currentInfo?.lastPrice ?? null}
+            onPlaced={() => setOrderRefreshKey((value) => value + 1)}
+          />
+        </div>
         <div className="space-y-4">
           <MyOpenOrders symbol={symbol} refreshKey={orderRefreshKey} priceHint={currentPriceHint} />
           <MyConditionalOrders symbol={symbol} refreshKey={orderRefreshKey} />
         </div>
-        <TradesFeed symbol={symbol} />
+        <div id="trades" className="scroll-mt-28">
+          <TradesFeed symbol={symbol} />
+        </div>
       </div>
 
       <SymbolNews symbol={symbol} />
+      <MobileSectionBar />
     </div>
   );
 }

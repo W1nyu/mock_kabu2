@@ -248,7 +248,7 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
                   {changeRate.toFixed(2)}%)
                 </span>
               )}
-              <span className="ml-2 text-ink-faint">
+              <span className="ml-2 hidden text-ink-faint sm:inline">
                 {hover ? formatKstTime(hover.ts).slice(0, 5) : "현재"} · 현금 {won(shown.cash)} ·
                 주식 {won(shown.stockValue)}
               </span>

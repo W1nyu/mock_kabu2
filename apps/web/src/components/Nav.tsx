@@ -77,7 +77,7 @@ export default function Nav() {
                 href="/settings"
                 title="계정 설정 (닉네임·비밀번호)"
                 aria-current={pathname === "/settings" ? "page" : undefined}
-                className={`hidden items-center gap-2 rounded-full border py-1 pr-3 pl-1 transition-colors sm:flex ${
+                className={`flex items-center gap-2 rounded-full border py-1 pr-1 pl-1 transition-colors sm:pr-3 ${
                   pathname === "/settings"
                     ? "border-sky/40 bg-sky/10"
                     : "border-hairline bg-surface-2/60 hover:border-hairline-strong hover:bg-surface-3/70"
@@ -86,7 +86,7 @@ export default function Nav() {
                 <span className="grid h-6 w-6 place-items-center rounded-full bg-linear-to-br from-sky/80 to-indigo/80 text-[11px] font-bold text-abyss">
                   {user.nickname.slice(0, 1).toUpperCase()}
                 </span>
-                <span className="text-[13px] text-ink-muted">{user.nickname}</span>
+                <span className="hidden text-[13px] text-ink-muted sm:inline">{user.nickname}</span>
               </Link>
               <button
                 className="btn btn-ghost btn-sm"
@@ -107,7 +107,7 @@ export default function Nav() {
       </nav>
 
       {/* Mobile row — the pill tabs move below the brand bar instead of collapsing into a tray. */}
-      <div className="flex items-center gap-1 border-t border-hairline-soft px-4 py-2 sm:hidden">
+      <div className="flex items-center gap-1 overflow-x-auto border-t border-hairline-soft px-3 py-1.5 sm:hidden">
         {PRIMARY_NAV_LINKS.map((l) => {
           const active = pathname === l.href;
           return (

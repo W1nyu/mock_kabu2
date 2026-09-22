@@ -246,18 +246,18 @@ export default function MarketIndexPanel() {
     <div className="space-y-4">
       <div className="glass overflow-hidden">
         <div className="panel-head flex-wrap gap-y-2">
-          <div className="flex items-baseline gap-3">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="panel-title">KABU 지수</span>
             {shown && (
               <>
                 <span className="num text-2xl font-semibold tracking-tight">{indexFormatter.format(shown.value)}</span>
                 {rangeDelta != null && rangeRate != null && (
-                  <span className={`num text-sm font-medium ${toneOf(rangeDelta)}`}>
+                  <span className={`num text-sm font-medium whitespace-nowrap ${toneOf(rangeDelta)}`}>
                     {signed(rangeDelta)} ({signed(rangeRate)}%) <span className="text-ink-faint">{rangeLabel}</span>
                   </span>
                 )}
                 {baseRate != null && (
-                  <span className={`num text-xs ${toneOf(baseRate)}`}>
+                  <span className={`num text-xs whitespace-nowrap ${toneOf(baseRate)}`}>
                     기준 대비 {signed(baseRate)}%
                   </span>
                 )}
@@ -300,26 +300,26 @@ export default function MarketIndexPanel() {
         <table className="num w-full text-sm">
           <thead className="text-[11px] text-ink-faint">
             <tr className="border-b border-hairline-soft">
-              <th className="px-4 py-2 text-left font-medium">종목</th>
-              <th className="px-4 py-2 text-right font-medium">시초가</th>
-              <th className="px-4 py-2 text-right font-medium">현재가</th>
-              <th className="px-4 py-2 text-right font-medium">등락률</th>
-              <th className="px-4 py-2 text-right font-medium">지수 기여</th>
+              <th className="px-3 py-2 text-left font-medium sm:px-4">종목</th>
+              <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">시초가</th>
+              <th className="px-3 py-2 text-right font-medium sm:px-4">현재가</th>
+              <th className="px-3 py-2 text-right font-medium sm:px-4">등락률</th>
+              <th className="px-3 py-2 text-right font-medium sm:px-4">지수 기여</th>
             </tr>
           </thead>
           <tbody>
             {contributions.map((r) => (
               <tr key={r.symbol} className="border-b border-hairline-soft last:border-b-0">
-                <td className="px-4 py-2">
+                <td className="px-3 py-2 sm:px-4">
                   <Link href={`/symbol/${r.symbol}`} className="font-medium hover:text-sky">
                     {r.symbol}
                   </Link>
-                  <span className="ml-2 text-xs text-ink-faint">{r.name}</span>
+                  <span className="ml-2 hidden text-xs text-ink-faint sm:inline">{r.name}</span>
                 </td>
-                <td className="px-4 py-2 text-right text-ink-muted">{fmt.format(r.initialPrice)}</td>
-                <td className="px-4 py-2 text-right">{fmt.format(r.price)}</td>
-                <td className={`px-4 py-2 text-right ${toneOf(r.rate)}`}>{signed(r.rate)}%</td>
-                <td className={`px-4 py-2 text-right ${toneOf(r.points)}`}>{signed(r.points)}p</td>
+                <td className="hidden px-4 py-2 text-right text-ink-muted sm:table-cell">{fmt.format(r.initialPrice)}</td>
+                <td className="px-3 py-2 text-right whitespace-nowrap sm:px-4">{fmt.format(r.price)}</td>
+                <td className={`px-3 py-2 text-right whitespace-nowrap sm:px-4 ${toneOf(r.rate)}`}>{signed(r.rate)}%</td>
+                <td className={`px-3 py-2 text-right whitespace-nowrap sm:px-4 ${toneOf(r.points)}`}>{signed(r.points)}p</td>
               </tr>
             ))}
             {contributions.length === 0 && (
