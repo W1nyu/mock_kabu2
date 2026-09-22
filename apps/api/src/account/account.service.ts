@@ -3,13 +3,18 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import type { BalanceMutator } from "@mock-kabu/concurrency";
 import { Prisma, type PrismaClient } from "@mock-kabu/db";
 import { SYMBOLS } from "@mock-kabu/shared";
 import { koreaDayStart } from "../common/market-time";
+import { MemoCache } from "../core/memo-cache";
 import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
+
+/** 랭킹은 모든 사용자 계정을 LATERAL 조인으로 훑는다 — 보는 사람 수만큼 반복할 이유가 없다. */
+const LEADERBOARD_TTL_MS = 10_000;
 import { RealtimeGateway } from "../gateway/realtime.gateway";
 
 export type LeaderboardPeriod = "all" | "today" | "week";
@@ -20,6 +25,7 @@ export class AccountService {
     @Inject(PRISMA) private prisma: PrismaClient,
     @Inject(BALANCE_MUTATOR) private mutator: BalanceMutator,
     private realtime: RealtimeGateway,
+    @Optional() private cache: MemoCache = new MemoCache(),
   ) {}
 
   async getAccount(accountId: string) {
@@ -207,6 +213,18 @@ export class AccountService {
    * 봇 계정은 유동성 풀이라 제외한다.
    */
   async getLeaderboard(viewerAccountId: string, limit = 20, period: LeaderboardPeriod = "all") {
+    // 순위표 자체는 보는 사람과 무관하니 기간별로 한 번만 계산하고, `me`만 요청마다 붙인다.
+    const ranked = await this.cache.getOrCompute(`leaderboard:${period}`, LEADERBOARD_TTL_MS, () =>
+      this.rankAccounts(period),
+    );
+    const withViewer = ranked.map((row) => ({ ...row, me: row.accountId === viewerAccountId }));
+    const me = withViewer.find((row) => row.me) ?? null;
+    const top = withViewer.slice(0, Math.min(Math.max(1, limit), 100));
+    // 상위 밖이어도 내 순위는 항상 함께 돌려준다.
+    return { total: withViewer.length, rows: me && !top.some((row) => row.me) ? [...top, me] : top };
+  }
+
+  private async rankAccounts(period: LeaderboardPeriod) {
     // 기간 랭킹: 기간 시작 이후 첫 스냅샷을 기준 자산으로, 그 뒤 입출금은 성과에서 뺀다.
     // 기간 시작 전에 스냅샷이 없는(그 뒤 가입한) 계정은 순입금을 기준으로 삼는다.
     const since =
@@ -303,7 +321,6 @@ export class AccountService {
           alpha: returnRate != null && indexRate != null ? returnRate - indexRate : null,
           realized: Number(row.realized),
           joinedAt: row.joined_at.toISOString(),
-          me: row.account_id === viewerAccountId,
         };
       })
       .sort((a, b) => {
@@ -313,10 +330,7 @@ export class AccountService {
         return b.returnRate - a.returnRate || b.equity - a.equity;
       })
       .map((row, index) => ({ rank: index + 1, ...row }));
-    const me = ranked.find((row) => row.me) ?? null;
-    const top = ranked.slice(0, Math.min(Math.max(1, limit), 100));
-    // 상위 밖이어도 내 순위는 항상 함께 돌려준다.
-    return { total: ranked.length, rows: me && !top.some((row) => row.me) ? [...top, me] : top };
+    return ranked;
   }
 
   async getLedger(accountId: string, limit = 50) {

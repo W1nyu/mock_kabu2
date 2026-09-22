@@ -3,6 +3,7 @@ import { getPrisma } from "@mock-kabu/db";
 import { createBalanceMutator } from "@mock-kabu/concurrency";
 import Redis from "ioredis";
 import { BackgroundStatusRegistry } from "./background-status";
+import { MemoCache } from "./memo-cache";
 import { CoreLifecycleService } from "./core-lifecycle.service";
 import { readApiRuntimeConfig, type ApiRuntimeConfig } from "./runtime-config";
 import { API_RUNTIME_CONFIG, BALANCE_MUTATOR, PRISMA, REDIS, REDIS_SUB } from "./tokens";
@@ -34,7 +35,8 @@ const runtimeConfig = readApiRuntimeConfig();
     },
     CoreLifecycleService,
     BackgroundStatusRegistry,
+    MemoCache,
   ],
-  exports: [API_RUNTIME_CONFIG, PRISMA, REDIS, REDIS_SUB, BALANCE_MUTATOR, BackgroundStatusRegistry],
+  exports: [API_RUNTIME_CONFIG, PRISMA, REDIS, REDIS_SUB, BALANCE_MUTATOR, BackgroundStatusRegistry, MemoCache],
 })
 export class CoreModule {}

@@ -180,6 +180,7 @@ model ConditionalOrder {
   @@index([symbol, status])
   @@index([accountId, createdAt])
   @@index([ocoGroupId])
+  @@index([accountId, status])
   @@map("conditional_orders")
   @@schema("order")
 }
@@ -237,6 +238,10 @@ model Trade {
   createdAt       DateTime @default(now()) @map("created_at")
 
   @@index([symbol, createdAt])
+  @@index([buyerAccountId, createdAt])
+  @@index([sellerAccountId, createdAt])
+  @@index([buyOrderId])
+  @@index([sellOrderId])
   @@map("trades")
   @@schema("matching")
 }

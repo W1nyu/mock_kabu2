@@ -469,35 +469,30 @@ class SettlementWorker {
     }
   }
 
+  /**
+   * 1분 봉을 그 분의 체결 원장 전체에서 다시 집계한다(재전달에도 거래량이 중복되지 않음).
+   * 집계는 DB 안에서 한 문장으로 끝낸다 — 체결이 많은 분에 수백 행을 매번 Node로 끌어와
+   * 줄이던 예전 방식은 체결 수에 비례해 DB·프로세스 CPU를 함께 태웠다.
+   */
   private async updateMarket(event: TradeExecutedEvent): Promise<void> {
     const bucket = new Date(Math.floor(event.ts / 60_000) * 60_000);
     const bucketEnd = new Date(bucket.getTime() + 60_000);
-    const trades = await this.prisma.trade.findMany({
-      where: { symbol: event.symbol, createdAt: { gte: bucket, lt: bucketEnd } },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    });
-    if (trades.length === 0) return;
-
-    await this.prisma.candle.upsert({
-      where: { symbol_interval_ts: { symbol: event.symbol, interval: "1m", ts: bucket } },
-      update: {
-        open: trades[0].price,
-        high: Math.max(...trades.map((trade) => trade.price)),
-        low: Math.min(...trades.map((trade) => trade.price)),
-        close: trades[trades.length - 1].price,
-        volume: trades.reduce((total, trade) => total + BigInt(trade.qty), 0n),
-      },
-      create: {
-        symbol: event.symbol,
-        interval: "1m",
-        ts: bucket,
-        open: trades[0].price,
-        high: Math.max(...trades.map((trade) => trade.price)),
-        low: Math.min(...trades.map((trade) => trade.price)),
-        close: trades[trades.length - 1].price,
-        volume: trades.reduce((total, trade) => total + BigInt(trade.qty), 0n),
-      },
-    });
+    await this.prisma.$executeRaw`
+      INSERT INTO market.candles (symbol, interval, ts, open, high, low, close, volume)
+      SELECT
+        ${event.symbol}, '1m', ${bucket},
+        (array_agg(price ORDER BY created_at ASC, id ASC))[1],
+        MAX(price),
+        MIN(price),
+        (array_agg(price ORDER BY created_at DESC, id DESC))[1],
+        SUM(qty)::bigint
+      FROM matching.trades
+      WHERE symbol = ${event.symbol} AND created_at >= ${bucket} AND created_at < ${bucketEnd}
+      HAVING COUNT(*) > 0
+      ON CONFLICT (symbol, interval, ts) DO UPDATE SET
+        open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+        close = EXCLUDED.close, volume = EXCLUDED.volume
+    `;
   }
 }
 

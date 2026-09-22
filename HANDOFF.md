@@ -47,7 +47,14 @@
 - **자기 체결 방지**: 매칭 엔진은 동일 accountId의 교차 주문을 발견하면 들어온 주문의 잔여분만 취소하고 기존 maker 호가는 유지한다. 새 DB 런타임 관찰에서 자기 체결은 0건이었다.
 - **최종 런타임 검증 (2026-07-13)**: 5개 종목 모두 양방향 10단·`bestBid < bestAsk`를 확인했다. 42초 전후 비교에서 각 종목의 양쪽 비최우선 호가가 8~18개 가격 단위로 변했다. Redis Streams의 matching/settlement 그룹은 재관찰 시 `pending=0`, `lag=0`; outbox 대기는 0; `pnpm check:consistency` 전체 통과; `pnpm recover:settlement` dry-run은 미정산 0건 SAFE였다. matching-engine 26개, bots 22개, API 26개 테스트와 shared·matching·bots·API build, 웹 TypeScript 검사를 통과했다.
 
-## 2026-09-22 — 랭킹 기간 필터 (최신 작업)
+## 2026-09-22 — 성능·자원 최적화 1차 (최신 작업)
+
+배포(VPS 1대, 컨테이너별 192~384MB) 관점에서 CPU·메모리를 줄이는 작업. 런타임 확인은 스택이 내려가 있어 SQL 직접 실행·단위 테스트로만 했다.
+- **정산 캔들 집계를 DB 한 문장으로**: `updateMarket`이 그 분의 체결 행 전부를 Node로 끌어와 max/min/reduce 하던 것을 `INSERT … SELECT array_agg/MAX/MIN/SUM … ON CONFLICT DO UPDATE` 한 번으로 바꿨다. 재전달 멱등성(원장 재집계)은 그대로. 체결이 분당 수백 건일 때 왕복·전송·GC가 모두 줄어든다.
+- **인덱스** migration `20260922150000_add_trade_account_order_indexes`: `matching.trades(buyer_account_id, created_at)`, `(seller_account_id, created_at)`, `(buy_order_id)`, `(sell_order_id)`, `conditional_orders(account_id, status)`. 내 체결/차트 마커/브래킷 평균가/복구 플래너가 seq scan → index scan (EXPLAIN ANALYZE 1ms).
+- **읽기 캐시** `apps/api/src/core/memo-cache.ts` (`MemoCache`, 프로세스 내 TTL + single-flight, CoreModule 전역): `/market/summary` 2초, 집계 봉(5m~1d) 5초, `/market/index` 15초/60초/120초, 랭킹 10초(기간별, `me`는 요청마다 붙임). 1분 봉·호가·최근 체결은 캐시하지 않는다. 테스트 `core/__tests__/memo-cache.test.ts`.
+
+## 2026-09-22 — 랭킹 기간 필터
 
 - `GET /account/leaderboard?period=all|today|week`: today/week는 기간 시작(KST 자정 / 7일 전) 이후 **첫 자산 스냅샷**을 기준으로 `(현재 자산 − 기준 − 기간 중 입출금) / 기준`, 기준 스냅샷이 없으면(그 뒤 가입) 순입금. 실현손익은 기간 내 합, 지수 등락은 `GREATEST(가입, 기간 시작)` 시점 대비. SQL은 psql로 형태 검증(API 미기동). 웹 랭킹 패널에 오늘/1주/전체 토글(`localStorage("dashboard:leaderboard-period")`).
 

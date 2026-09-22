@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, NotFoundException, Param, Query } from "@nestjs/common";
+import { Controller, Get, Inject, NotFoundException, Optional, Param, Query } from "@nestjs/common";
 import type { PrismaClient } from "@mock-kabu/db";
 import {
   BASE_CANDLE_INTERVAL,
@@ -9,7 +9,17 @@ import {
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
 import { koreaDayStart } from "../common/market-time";
+import { MemoCache } from "../core/memo-cache";
 import { PRISMA, REDIS } from "../core/tokens";
+
+/**
+ * 읽기 캐시 TTL. 대시보드 한 화면이 요약 5개·추세선 5개·지수 1개를 15초~5분마다 부르고, 종목
+ * 페이지도 요약·봉을 반복 조회한다. 몇 초 재사용해도 체감은 같고 DB 부하는 접속 수와 분리된다.
+ * 1분 봉·호가·최근 체결은 실시간성이 우선이라 캐시하지 않는다.
+ */
+const SUMMARY_TTL_MS = 2_000;
+const AGGREGATE_CANDLE_TTL_MS = 5_000;
+const INDEX_TTL_MS = { "1d": 15_000, "1w": 60_000, all: 120_000 } as const;
 
 const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
 const BASE_CANDLE_SECONDS = candleIntervalSeconds(BASE_CANDLE_INTERVAL) ?? 60;
@@ -19,6 +29,7 @@ export class MarketController {
   constructor(
     @Inject(PRISMA) private prisma: PrismaClient,
     @Inject(REDIS) private redis: Redis,
+    @Optional() private cache: MemoCache = new MemoCache(),
   ) {}
 
   @Get("symbols")
@@ -31,8 +42,12 @@ export class MarketController {
 
   /** KST 당일 체결 기준 시세 요약. 캔들 개수 제한과 무관하게 하루 전체를 집계한다. */
   @Get("summary/:symbol")
-  async summary(@Param("symbol") symbol: string) {
+  summary(@Param("symbol") symbol: string) {
     this.assertActiveSymbol(symbol);
+    return this.cache.getOrCompute(`summary:${symbol}`, SUMMARY_TTL_MS, () => this.computeSummary(symbol));
+  }
+
+  private async computeSummary(symbol: string) {
     const sessionStart = koreaDayStart();
     const [marketSymbol, [stats]] = await Promise.all([
       this.prisma.marketSymbol.findUnique({ where: { symbol } }),
@@ -82,7 +97,14 @@ export class MarketController {
    * 자산 추이와 나란히 놓고 "시장을 이겼는지" 볼 때 쓴다.
    */
   @Get("index")
-  async marketIndex(@Query("range") range = "1d") {
+  marketIndex(@Query("range") range = "1d") {
+    const normalized = range === "all" || range === "1w" ? range : "1d";
+    return this.cache.getOrCompute(`index:${normalized}`, INDEX_TTL_MS[normalized], () =>
+      this.computeMarketIndex(normalized),
+    );
+  }
+
+  private async computeMarketIndex(range: "1d" | "1w" | "all") {
     const bucketSeconds = range === "all" ? 3_600 : range === "1w" ? 600 : 60;
     const rangeMs = range === "all" ? null : range === "1w" ? 7 * 24 * 3_600_000 : 24 * 3_600_000;
     const since = rangeMs == null ? new Date(0) : new Date(Date.now() - rangeMs);
@@ -168,7 +190,13 @@ export class MarketController {
       });
       return rows.reverse();
     }
+    // 집계 봉은 1분 봉을 매번 다시 묶는 무거운 쿼리라 몇 초 재사용한다.
+    return this.cache.getOrCompute(`candles:${symbol}:${interval}:${take}`, AGGREGATE_CANDLE_TTL_MS, () =>
+      this.aggregateCandles(symbol, seconds, take),
+    );
+  }
 
+  private async aggregateCandles(symbol: string, seconds: number, take: number) {
     // Bounded by a window back from the newest stored candle rather than from
     // now(), so a quiet market still returns a full chart instead of nothing.
     // The slack absorbs gaps where no trade printed inside a bucket.
