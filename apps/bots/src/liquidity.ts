@@ -30,11 +30,6 @@ export const LIQUIDITY_DISTANCE_TICKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] 
  */
 export const LIQUIDITY_LEVEL_WEIGHTS = [100, 120, 140, 155, 150, 135, 115, 95, 80, 65, 55, 45] as const;
 /**
- * High-price listings keep the front-loaded shape. Their whole side is only a
- * few hundred shares, so a hump would leave a near-empty executable best.
- */
-export const HIGH_PRICE_LEVEL_WEIGHTS = [160, 140, 120, 100, 85, 70, 60, 50, 45, 40, 35, 30] as const;
-/**
  * Small ordinary market orders (1..48 shares) should not exhaust the best
  * quote. Low enough that the hump holds even for KABU's compact ladder.
  */
@@ -45,8 +40,11 @@ export const LIQUIDITY_MIN_BEST_QTY = 80;
  * taker cap even just before a replacement is posted.
  */
 export const LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO = 0.9;
-/** SAKU keeps more of its existing side budget at the executable price. */
-export const SAKU_MIN_BEST_QTY = 180;
+/**
+ * High-price listings (a few hundred shares per side) follow the same hump.
+ * This floor only guards against a near-empty best if the budget shrinks.
+ */
+export const SAKU_MIN_BEST_QTY = 20;
 /**
  * 상장가가 이 이상인 고가 종목(SAKU 300,000원, DAON 400,000원)은 가격에 비례해 줄어든 수량을
  * 체결 가능한 가까운 호가에 모은다. 원래 SAKU 전용이던 규칙을 가격 기준으로 넓혔다.
@@ -58,11 +56,7 @@ export function isHighPriceListing(def: SymbolDef): boolean {
 }
 /** Normalise legacy 80-share SAKU best walls promptly without replacing after every small fill. */
 export const SAKU_BEST_REFILL_LOW_WATER_RATIO = 0.9;
-
-export function liquidityLevelWeights(def: SymbolDef): readonly number[] {
-  return isHighPriceListing(def) ? HIGH_PRICE_LEVEL_WEIGHTS : LIQUIDITY_LEVEL_WEIGHTS;
-}
-/** The REST/UI order book exposes the nearest ten price levels per side. */
+const LIQUIDITY_WEIGHT_TOTAL = LIQUIDITY_LEVEL_WEIGHTS.reduce((sum, weight) => sum + weight, 0);/** The REST/UI order book exposes the nearest ten price levels per side. */
 export const VISIBLE_LIQUIDITY_LEVELS = 10;
 /** Bound fresh opposite-side expansion when a historical partial is extreme. */
 export const GUARD_AWARE_VISIBLE_TARGET_CAP_MULTIPLIER = 2;
@@ -113,10 +107,8 @@ function liquidityQtyByLevelForProfile(
   total: number,
   minimumBestQty: number,
   preserveNearDepth = false,
-  weights: readonly number[] = LIQUIDITY_LEVEL_WEIGHTS,
 ): number[] {
-  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
-  const raw = weights.map((weight) => (weight / weightTotal) * total);
+  const raw = LIQUIDITY_LEVEL_WEIGHTS.map((weight) => (weight / LIQUIDITY_WEIGHT_TOTAL) * total);
   const quantities = raw.map((value) => Math.floor(value));
   let remainder = total - quantities.reduce((sum, qty) => sum + qty, 0);
 
@@ -171,7 +163,6 @@ export function liquidityQtyByLevelForSymbol(def: SymbolDef, centerPrice: number
     liquidityTotalQty(centerPrice),
     highPrice ? SAKU_MIN_BEST_QTY : LIQUIDITY_MIN_BEST_QTY,
     highPrice,
-    liquidityLevelWeights(def),
   );
 }
 
@@ -347,13 +338,12 @@ function guardAwareSideQuantities(
   // distribute just the remaining notional instead of scaling a second full
   // weighted ladder on top of it.
   const remainingBudget = Math.max(0, freshVisibleBudget - minimumVisibleNotional);
-  const weights = liquidityLevelWeights(def);
   const weightedNotional = visiblePrices.reduce(
-    (sum, price, level) => sum + Math.max(def.tickSize, price) * weights[level],
+    (sum, price, level) => sum + Math.max(def.tickSize, price) * LIQUIDITY_LEVEL_WEIGHTS[level],
     0,
   );
   const rawExtras = visiblePrices.map((_, level) =>
-    weightedNotional > 0 ? (weights[level] * remainingBudget) / weightedNotional : 0,
+    weightedNotional > 0 ? (LIQUIDITY_LEVEL_WEIGHTS[level] * remainingBudget) / weightedNotional : 0,
   );
   for (let level = 0; level < VISIBLE_LIQUIDITY_LEVELS; level++) {
     quantities[level] += Math.floor(rawExtras[level]);

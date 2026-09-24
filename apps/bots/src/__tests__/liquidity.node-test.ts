@@ -172,32 +172,25 @@ test("price-normalised ladders keep comparable visible notional from ₩100 thro
   assert.equal(liquidityTotalQty(100), 1_200_000);
   assert.equal(liquidityTotalQty(10_000), 12_000);
   assert.equal(liquidityTotalQty(300_000), 400);
-  assert.ok(liquidityBestWallQty(SAKU, 300_000) >= 180);
+  assert.ok(liquidityBestWallQty(SAKU, 300_000) >= SAKU_MIN_BEST_QTY);
   assert.equal(liquidityQtyByLevel(100).reduce((sum, qty) => sum + qty, 0), 1_200_000);
 });
 
-test("SAKU keeps its existing side budget concentrated at the near-price wall", () => {
-  const standard = liquidityQtyByLevel(300_000);
+test("high-price SAKU follows the same hump inside its compact 400-share budget", () => {
   const saku = liquidityQtyByLevelForSymbol(SAKU, 300_000);
   const ladder = buildLiquidityLadder(SAKU, 300_000);
   const bestBid = ladder.find((quote) => quote.side === "BUY" && quote.level === 0)!;
-  const nextBid = ladder.find((quote) => quote.side === "BUY" && quote.level === 1)!;
-  const thirdBid = ladder.find((quote) => quote.side === "BUY" && quote.level === 2)!;
 
-  // The per-side budget stays at 400 shares, but the three nearest executable
-  // rungs are materially thicker than the generic high-price distribution.
   assert.equal(saku.reduce((sum, qty) => sum + qty, 0), liquidityTotalQty(300_000));
-  assert.equal(saku[0], SAKU_MIN_BEST_QTY);
   assert.equal(liquidityMinimumBestQty(SAKU), SAKU_MIN_BEST_QTY);
-  assert.ok(saku[1] > standard[1]);
-  assert.ok(saku[2] > standard[2]);
-  assert.ok(bestBid.qty > nextBid.qty && nextBid.qty > thirdBid.qty);
-  assert.equal(liquidityBestWallQty(SAKU, 300_000), SAKU_MIN_BEST_QTY);
+  assert.ok(saku[0] >= SAKU_MIN_BEST_QTY);
+  const peak = saku.indexOf(Math.max(...saku));
+  assert.equal(peak, 3);
+  assert.ok(saku[0] < saku[peak] && saku[11] < saku[peak]);
 
-  // A predecessor's smaller best wall is post-before-cancel normalised only
-  // once it falls below the profile's refill threshold.
+  // The best wall is still replenished before it is half gone.
   const lowWater = Math.ceil(bestBid.qty * (bestBid.refillLowWaterRatio ?? 1));
-  assert.equal(isQuoteSufficient({ ...bestBid, id: "legacy-saku-best", qty: lowWater - 1 }, bestBid), false);
+  assert.equal(isQuoteSufficient({ ...bestBid, id: "thin-saku-best", qty: lowWater - 1 }, bestBid), false);
   assert.equal(isQuoteSufficient({ ...bestBid, id: "fresh-saku-best", qty: lowWater }, bestBid), true);
 });
 
@@ -334,7 +327,7 @@ test("a large matched price can immediately override an old synthetic reference"
   assert.equal(quoteCenterFromMarketPrice(KABU, 132_000, 120_000, true), 132_000);
 });
 
-test("a one-tick recenter normalizes a reused best wall when it becomes a smaller outer rung", () => {
+test("a one-tick recenter reuses the old best wall at its new level without a repost", () => {
   const currentPlan = buildLiquidityLadder(SAKU, 304_000);
   const active = new Map<string, ManagedQuote>(
     currentPlan.map((quote) => [
@@ -351,9 +344,10 @@ test("a one-tick recenter normalizes a reused best wall when it becomes a smalle
   assert.equal(obsolete.length, 2);
   assert.equal(nextOuterBid.level, 1);
   assert.equal(reused.id, oldBestBid.id);
-  assert.ok(oldBestBid.qty > nextOuterBid.qty);
-  assert.equal(reused.needsNormalization, true);
-  assert.equal(isQuoteSufficient(reused, nextOuterBid), false);
+  // Neighbouring hump weights stay within the reuse margin, so the row is
+  // neither oversized nor below its refill mark at the new level.
+  assert.ok(!reused.needsNormalization);
+  assert.equal(isQuoteSufficient(reused, nextOuterBid), true);
 });
 
 test("ordinary one-tick drift reuses most rows while preserved depth keeps exact budgeting", () => {
@@ -763,9 +757,9 @@ test("adopts price-compatible legacy rungs even when old fixed share quantities 
   assert.equal(adopted!.active.size, 24);
   assert.equal(adopted!.active.get("SELL:0")?.qty, 160);
   assert.equal(adopted!.active.get("BUY:11")?.qty, 160);
-  // The new SAKU best-wall target is larger than this legacy row, so low
-  // water replenishment replaces it even though it is not oversized.
-  assert.equal(adopted!.active.get("SELL:0")?.needsNormalization, undefined);
+  // Every legacy 160-share row is far above the compact hump targets, so
+  // each is marked for post-before-cancel normalisation.
+  assert.equal(adopted!.active.get("SELL:0")?.needsNormalization, true);
   assert.equal(adopted!.active.get("BUY:11")?.needsNormalization, true);
   assert.notEqual(adopted!.active.get("BUY:0")?.id, duplicatePartial.id);
   assert.equal(adopted!.preserved.get(duplicatePartial.id)?.price, duplicatePartial.price);
