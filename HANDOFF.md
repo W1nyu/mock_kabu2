@@ -1,5 +1,12 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-25 — 관리자 시장 시나리오 (GCP 운영 적용)
+
+- 관리자 전용 `/ops`(메뉴 미노출): 종목 복수·방향(UP/DOWN)·강도 1~3·시작(KST)·기간 5분~24시간. API `/admin/market-scenarios`(비관리자 404), 봇은 `/internal/scenarios/active`를 30초마다 폴링. 테이블 `market.scenarios`.
+- 봇 효과: 해당 방향 뉴스 비율(약 61/73/84%)·추가 종목 뉴스 스트림·방향 일치 뉴스 강도 최대 +30%·흐름 봇 기울기(`SCENARIO_FLOW_WEIGHT` 0.3). 시작·종료 최대 10분 램프. 가격을 직접 움직이지 않으므로 방향 보장은 없다.
+- 운영: pgBackRest diff `20260923-183013F_20260924-175719D`, 롤백 이미지 `mock-kabu2-app:pre-scenario-20260925`, 원본 소스 서버 `/tmp/src-before-scenario.tgz`. 마이그레이션 `20260925120000_market_scenarios` 적용 후 api/bots/web만 재생성. 10종목 양측 10단, `/health/ready` 정상, 외부에서 `/internal/scenarios/active` 404.
+- 확인: `docker logs mock-kabu2-prod-bots-1 | grep scenario` → 등록 시 `[scenario] active/upcoming: <id>`.
+
 ## 2026-09-24 — 롤백 이미지 정리
 
 - 운영 서버에서 `pre-admin/theme/mmfix/mobileui/relist/leaderboard-20260924` 이미지 태그 6개를 삭제했다(사용자 승인). 디스크 32GB → 27GB 사용(19%).
