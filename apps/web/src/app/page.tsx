@@ -15,6 +15,7 @@ import Sparkline from "@/components/Sparkline";
 import { mergeNews, parseNewsItem } from "@/lib/news";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
+import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 
 // lightweight-charts는 브라우저 전용이고 번들이 크다. 첫 화면(자산·시세 표)을 먼저 그리고 차트는 뒤에 싣는다.
 const EquityChart = dynamic(() => import("@/components/EquityChart"), {
@@ -24,8 +25,10 @@ const EquityChart = dynamic(() => import("@/components/EquityChart"), {
 
 interface AccountInfo {
   balance: number;
+  balanceExact?: string;
   holdAmount: number;
   available: number;
+  availableExact?: string;
 }
 interface HoldingRow {
   symbol: string;
@@ -43,7 +46,7 @@ interface SymbolRow {
   symbol: string;
   name: string;
   lastPrice: number;
-  initialPrice: number;
+  referencePrice: number;
 }
 interface RealizedSummary {
   today: number;
@@ -55,6 +58,7 @@ interface RealizedSummary {
 interface MarketSummary {
   turnover: number | string | null;
   lastTradeTs: number | string | null;
+  sessionStart: number;
 }
 interface CandleDto {
   ts: string;
@@ -149,17 +153,19 @@ export default function DashboardPage() {
     // 종목 목록과 당일 요약을 한 요청으로 받는다 (예전: /symbols + 종목별 /summary 5번).
     api<(SymbolRow & MarketSummary)[]>("/market/overview", { auth: false })
       .then(async (rows) => {
-        setSymbols(rows.map(({ symbol, name, lastPrice, initialPrice }) => ({ symbol, name, lastPrice, initialPrice })));
+        if (rows.some((row) => row.sessionStart < kstSessionStartMs())) return;
+        setSymbols(rows.map(({ symbol, name, lastPrice, referencePrice }) => ({ symbol, name, lastPrice, referencePrice })));
         const summaries = rows.map((row) => ({ symbol: row.symbol, summary: row as MarketSummary }));
 
         const nextTurnovers: Record<string, number> = {};
         for (const { symbol, summary } of summaries) {
           const watermark = finiteNumber(summary.lastTradeTs) ?? Number.NEGATIVE_INFINITY;
+          const sessionStart = finiteNumber(summary.sessionStart) ?? kstSessionStartMs();
           const pending = pendingTurnoverTicksRef.current.get(symbol);
           let pendingTurnover = 0;
           if (pending) {
             for (const [id, tick] of pending) {
-              if (tick.ts > watermark) pendingTurnover += tick.price * tick.qty;
+              if (tick.ts >= sessionStart && tick.ts > watermark) pendingTurnover += tick.price * tick.qty;
               else pending.delete(id);
             }
           }
@@ -189,8 +195,10 @@ export default function DashboardPage() {
       refreshAccount();
       refreshSymbols();
     }, 15_000);
+    const stopSessionRefresh = onKstSessionOpen(refreshSymbols);
     return () => {
       window.clearInterval(fallback);
+      stopSessionRefresh();
       refreshAccountSoon.cancel();
       unsub();
     };
@@ -247,6 +255,7 @@ export default function DashboardPage() {
     return subscribe(channels, ({ channel, data }) => {
       const tick = parseTradeTick(data);
       if (!tick) return;
+      if (tick.ts < kstSessionStartMs()) return;
       const symbol = channel.slice("trades:".length);
       let pending = pendingTurnoverTicksRef.current.get(symbol);
       if (!pending) {
@@ -282,7 +291,7 @@ export default function DashboardPage() {
         case "price":
           return row.lastPrice;
         case "change":
-          return row.initialPrice > 0 ? (row.lastPrice - row.initialPrice) / row.initialPrice : 0;
+          return row.referencePrice > 0 ? (row.lastPrice - row.referencePrice) / row.referencePrice : 0;
         case "turnover":
           return row.turnover ?? 0;
         default:
@@ -311,7 +320,9 @@ export default function DashboardPage() {
   );
 
   const stockValue = liveHoldings.reduce((sum, h) => sum + h.value, 0);
+  const stockValueExact = liveHoldings.reduce((sum, h) => sum + BigInt(h.qty) * BigInt(h.lastPrice), 0n);
   const total = (account?.balance ?? 0) + stockValue;
+  const totalExact = BigInt(account?.balanceExact ?? String(account?.balance ?? 0)) + stockValueExact;
   const totalCost = liveHoldings.reduce((sum, h) => sum + h.costBasis, 0);
   const totalPnl = liveHoldings.reduce((sum, h) => sum + h.pnl, 0);
   const totalPnlRate = totalCost > 0 ? totalPnl / totalCost : 0;
@@ -320,15 +331,17 @@ export default function DashboardPage() {
   const hasHoldings = liveHoldings.length > 0;
   const pnlTone = totalPnl >= 0 ? "text-up" : "text-down";
 
+  // 폰(sm 미만)에서는 종목 표·뉴스를 증권·뉴스 탭에 맡기고, 총자산 바로 아래에 보유 종목을 둔다.
+  // flex order로 순서만 바꾸므로 데스크톱 배치는 그대로다.
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       {/* ── Portfolio hero ─────────────────────────────────────── */}
       <section className="glass overflow-hidden">
         <div className="flex flex-col gap-6 p-5 sm:p-6 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
           <div>
             <p className="panel-title">총 자산</p>
             <p className="num mt-2 text-4xl font-semibold tracking-tight sm:text-5xl">
-              {won(total)}
+              {won(totalExact)}
             </p>
             <p className="num mt-2 text-sm font-medium">
               {hasHoldings ? (
@@ -347,9 +360,9 @@ export default function DashboardPage() {
           </div>
 
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-5">
-            <Metric label="현금 잔액" value={won(account?.balance ?? 0)} />
-            <Metric label="주문 가능" value={won(account?.available ?? 0)} />
-            <Metric label="주식 평가금액" value={won(stockValue)} />
+            <Metric label="현금 잔액" value={won(BigInt(account?.balanceExact ?? String(account?.balance ?? 0)))} />
+            <Metric label="주문 가능" value={won(BigInt(account?.availableExact ?? String(account?.available ?? 0)))} />
+            <Metric label="주식 평가금액" value={won(stockValueExact)} />
             <Metric
               label="오늘 실현손익"
               value={realized ? signedWon(realized.today) : "—"}
@@ -368,7 +381,7 @@ export default function DashboardPage() {
         {/* Allocation bar — cash vs. equity at a glance. */}
         {total > 0 && (
           <div className="border-t border-hairline-soft px-5 py-3 sm:px-6">
-            <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-white/6">
+            <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-surface-3/35">
               <div
                 className="bg-sky/70"
                 style={{ width: `${((account?.balance ?? 0) / total) * 100}%` }}
@@ -390,7 +403,7 @@ export default function DashboardPage() {
       </section>
 
       {/* ── Equity curve + performance ─────────────────────────── */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 max-sm:order-1 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <EquityChart />
         </div>
@@ -398,7 +411,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Market ─────────────────────────────────────────────── */}
-      <section className="glass overflow-hidden">
+      <section className="glass overflow-hidden max-sm:hidden">
         <div className="panel-head">
           <span className="panel-title">종목</span>
           <span className="chip chip-live">
@@ -411,7 +424,7 @@ export default function DashboardPage() {
             <thead>
               <tr>
                 <SortableTh label="종목" sortKey="symbol" sort={sort} onSort={toggleSort} />
-                <th className="hidden text-right sm:table-cell" title="모의 시장 시작 기준가">
+                <th className="hidden text-right sm:table-cell" title="매일 09:00 KST 이후 첫 체결가 (첫 체결 전에는 직전 체결가)">
                   기준가(시가)
                 </th>
                 <SortableTh label="현재가" sortKey="price" sort={sort} onSort={toggleSort} align="right" />
@@ -422,7 +435,7 @@ export default function DashboardPage() {
                   sort={sort}
                   onSort={toggleSort}
                   align="right"
-                  title="KST 당일 누적 체결 금액을 만 원 단위로 표시"
+                  title="09:00 KST부터의 누적 체결 금액을 만 원 단위로 표시"
                 />
                 <th className="hidden text-right md:table-cell" title="최근 6시간 5분봉 종가 흐름">
                   6시간 흐름
@@ -432,7 +445,7 @@ export default function DashboardPage() {
             </thead>
             <tbody>
               {liveSymbols.map((s) => {
-                const change = ((s.lastPrice - s.initialPrice) / s.initialPrice) * 100;
+                const change = s.referencePrice > 0 ? ((s.lastPrice - s.referencePrice) / s.referencePrice) * 100 : 0;
                 const tone = change > 0 ? "text-up" : change < 0 ? "text-down" : "text-ink-muted";
                 return (
                   <tr key={s.symbol}>
@@ -450,7 +463,7 @@ export default function DashboardPage() {
                         </span>
                       </Link>
                     </td>
-                    <td className="num hidden text-right text-ink-muted sm:table-cell">{fmt.format(s.initialPrice)}원</td>
+                    <td className="num hidden text-right text-ink-muted sm:table-cell">{fmt.format(s.referencePrice)}원</td>
                     <td className={`num text-right font-semibold ${tone}`}>
                       {fmt.format(s.lastPrice)}원
                     </td>
@@ -483,7 +496,7 @@ export default function DashboardPage() {
       </section>
 
       {/* ── Latest news ────────────────────────────────────────── */}
-      <section className="glass overflow-hidden">
+      <section className="glass overflow-hidden max-sm:hidden">
         <div className="panel-head">
           <span className="panel-title">최신 뉴스</span>
           <Link href="/news" className="text-[11px] text-ink-muted transition-colors hover:text-sky">
@@ -494,7 +507,7 @@ export default function DashboardPage() {
       </section>
 
       {/* ── Leaderboard + daily performance ────────────────────── */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 max-sm:order-1 lg:grid-cols-2">
         <Leaderboard />
         <DailyPerformance />
       </div>
@@ -511,11 +524,45 @@ export default function DashboardPage() {
           <div className="px-5 py-12 text-center">
             <p className="text-sm text-ink-muted">보유 종목이 없습니다.</p>
             <p className="mt-1 text-xs text-ink-faint">
-              위 목록에서 종목을 골라 첫 매수를 해보세요.
+              <span className="max-sm:hidden">위 목록에서 종목을 골라 첫 매수를 해보세요.</span>
+              <Link href="/market" className="text-sky sm:hidden">
+                증권 탭에서 종목을 골라 첫 매수를 해보세요 →
+              </Link>
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* 폰: 한 줄에 종목·수량 / 평가금액·손익만 보여 주는 목록 */}
+          <ul className="divide-y divide-hairline-soft sm:hidden">
+            {liveHoldings.map((h) => {
+              const name = symbols.find((s) => s.symbol === h.symbol)?.name ?? h.symbol;
+              const tone = h.pnl >= 0 ? "text-up" : "text-down";
+              return (
+                <li key={h.symbol}>
+                  <Link href={`/symbol/${h.symbol}`} className="flex items-center gap-3 px-4 py-3 active:bg-surface-3/45">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-hairline-soft bg-surface-2/70 text-[12px] font-semibold text-ink-muted">
+                      {name.slice(0, 2)}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-semibold">{name}</span>
+                      <span className="num block text-xs text-ink-faint">
+                        {fmt.format(h.qty)}주 · 평단 {fmt.format(Math.round(h.avgCost))}원
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className="num block font-semibold">{won(h.value)}</span>
+                      <span className={`num block text-xs font-medium ${tone}`}>
+                        {h.pnl >= 0 ? "+" : ""}
+                        {won(h.pnl)} ({h.pnl >= 0 ? "+" : ""}
+                        {(h.pnlRate * 100).toFixed(2)}%)
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="overflow-x-auto max-sm:hidden">
             <table className="tbl tbl-hover">
               <thead>
                 <tr>
@@ -553,6 +600,7 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </section>
     </div>

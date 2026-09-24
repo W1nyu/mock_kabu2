@@ -151,7 +151,7 @@ export default function Toaster() {
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed right-4 bottom-4 z-[60] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2"
+      className="pointer-events-none fixed right-4 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-[70] sm:bottom-4 flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2"
     >
       {toasts.map((toast) => {
         const accent =

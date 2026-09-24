@@ -1,8 +1,112 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-24 — 투자자 랭킹 정리 (GCP 운영 적용)
+
+- `Leaderboard.tsx`: 상위 10등(`TOP_N`)만 표시 — API가 순위 밖 내 행을 덧붙여도 화면에서는 뺀다. '지수 대비' 열과 그 설명 문구 제거. API 응답의 `indexRate/alpha` 필드는 그대로 둔다. web만 재빌드·재생성, 롤백 이미지 `mock-kabu2-app:pre-leaderboard-20260924`.
+
+## 2026-09-24 — KABU 재상장·시가총액 가중 지수·MM 자가 복구 (GCP 운영 적용)
+
+- **MM 자가 복구**: `OneSidedQuoteWatchdog` — 전용 MM의 자기 호가가 한쪽이라도 60초(`BOT_MM_ONE_SIDED_RESTART_MS`) 동안 0이면 `MarketMakerStalledError`로 빠져나와 `runDedicatedMarketMaker`가 보충·재로그인 후 새로 띄운다(원인 무관 최후 안전장치). 확인 `docker logs mock-kabu2-prod-bots-1 | grep -E "restarting maker|stalled|re-sent cancel"`.
+- **시가총액 가중 지수**: `SYMBOLS.listedShares`(MOCK 2,400만·KABU 1,000만·TANU 1억5,000만·SAKU 400만·NEKO 4,800만 → 상장 시가총액 각 1.2조, 상장 시 각 20%). 지수 = Σ(가격 × 발행주식수) ÷ 제수, 편입·제수는 `market.index_epochs`(마이그레이션 `20260924170000_market_cap_index`, 새 DB는 시드가 첫 구간 생성). API `/market/index`, 새 `/market/index/meta`, 랭킹 SQL, 웹(지수 패널 비중·오늘 기여, 증권 탭)이 같은 식을 쓴다.
+- **재상장**: `market.symbols.listed_at` 이전 체결은 원장에만 남고 시세(현재가·기준가·당일 통계·체결 목록·엔진 재기동 가격·정합성 현재가 검사)에서 제외. 스크립트 `packages/db/scripts/relist-symbol.ts`(컨테이너 `relist`): 점검 → `--cancel-orders`(API와 같은 outbox 취소, 대기 예약 CANCELED) → `--apply`(가격 기본값 = 직전 종가, 지수 과거 구간에서 종목 제외 + 지금부터 수준이 이어지는 새 구간, 종목 1분봉·뉴스 삭제). 보유는 건드리지 않아 1:1 유지. 과거 구간이 이미 여러 개면 거부한다(다음 재상장 전에 확장 필요).
+- **운영 적용 (09:17 UTC)**: pgBackRest diff `20260923-183013F_20260924-090556D`, 롤백 이미지 `mock-kabu2-app:pre-relist-20260924`, 원본 소스 서버 `/tmp/src-before-relist.tgz`. 봇 정지 → 마이그레이션 → api/settlement/web 교체 → KABU 주문 52건 취소 → 재상장(직전 종가 **104,800원**, 사용자 보유 2명 81·62주 유지, 봉 904·뉴스 35건 삭제, 지수 958.42 유지, 과거 지수는 4종목) → 엔진 교체 → 봇 시작. 이후 5종목 양측 10단, KABU 104,800 연속 체결, 지수 958.42→957.52(점프 없음), 정합성 검사 전 항목 통과, `/health/ready` 정상.
+- 폰 거래 화면 하단 버튼 순서를 매수(왼쪽)/매도(오른쪽)로 변경(같이 배포). 로컬 DB에는 옛 bot17 close-pending 주문 11건이 있어(운영은 0건) 로컬 MM이 옛 가격대에 묶일 수 있다.
+
+## 2026-09-24 — 모바일 UI 개편 (GCP 운영 적용)
+
+- 폰(sm 미만) 하단 탭 `MobileTabBar`(홈·증권·뉴스·내역·이체), 상단 알약 메뉴 줄 제거. 새 증권 탭 `/market`(KABU 지수 카드 → `/market-index`, 전 종목 목록·정렬). 홈은 폰에서 종목표·뉴스 숨기고 보유 종목을 총자산 아래 목록으로.
+- 거래 화면(lg 미만): 시세 카드 축소·이평선 편집 접기로 차트가 첫 화면에, 아래 내 주문/체결/뉴스 탭, 하단 고정 매도·매수 버튼 → `MobileOrderSheet`(위 호가창·아래 주문폼, `OrderForm initialSide`). `MobileSectionBar` 삭제. 판단은 `lib/media.ts`의 `useMediaQuery`.
+- 운영: 웹 파일 14개만 교체(서버 소스가 이 변경 외 로컬과 동일함을 diff로 확인, md5 일치), 이미지 빌드 후 **web 컨테이너만** 재생성. 롤백 이미지 `mock-kabu2-app:pre-mobileui-20260924`, 원본 소스 서버 `/tmp/web-src-before-mobileui.tgz`. 운영 폰 화면에서 증권/뉴스 하단 탭 확인. 홈·거래 화면은 로그인 필요라 운영에서는 미확인(로컬에서 확인).
+- 운영 접속: 사용자 PC `~/.ssh/config`의 `ssh mock-kabu`(사용자 `winyu-mock-kabu`, 영구 키, 만료 없음, passphrase는 Windows ssh-agent). Git Bash `ssh`가 아닌 `C:\Windows\System32\OpenSSH\ssh.exe`를 써야 agent를 쓴다.
+
+## 2026-09-24 — KABU 매수 호가 소실 수정 (GCP 운영 적용)
+
+- 증상: KABU 호가창 매수 쪽이 0~1단. 원인: 05:17 UTC API 재배포 재시작 순간 KABU 전용 MM(`Liquidity KABU`, bot17)이 SELL-first 재배치(113,900→114,500) 중이었고, 옛 매도 7건의 취소가 `fetch failed`로 실패했다. `retiring`에 들어간 주문은 취소를 다시 보내지 않아 재배치가 "옛 매도 종료 대기"에서 약 2시간 멈췄고, 그동안 매수 호가가 체결로 소진된 뒤 다시 걸리지 않았다(운영 로그·DB로 확인: MM 매수 0건, 05:16:58 매도 OPEN 잔존).
+- 수정 `apps/bots/src/market-maker.ts`: reconcile 직후 `retryStaleRetiringCancels()`가 여전히 live인 retiring 주문의 취소를 2초 간격으로 재전송한다. 재배치가 30초 이상 멈추면 `staged relocation stalled` 경고 로그. 사고 재현 회귀 테스트 포함, 봇 테스트 79개 통과.
+- 운영: 두 봇 파일만 교체, 이미지 재빌드 후 **bots 컨테이너만** 재생성(API/DB 재시작 없음). 롤백 이미지 `mock-kabu2-app:pre-mmfix-20260924`, 원본 파일 서버 `/tmp/*.orig-prod`. 재기동 후 KABU MM 매수·매도 각 12건, 5종목 모두 양측 10단, `/health/ready` 정상. 일회용 SSH 키는 메타데이터에서 제거·접속 거부 확인·로컬 파일 삭제.
+- 주의: 이후 API를 재시작하는 배포에서도 이 수정으로 자동 복구되어야 한다. 확인은 `docker logs mock-kabu2-prod-bots-1 | grep -E "re-sent cancel|stalled"`.
+
+## 2026-09-24 — 라이트 모드·지수 09:00 기준·이평선 종류 확장 (GCP 운영 적용)
+
+- 라이트/다크 전환 버튼을 전역 내비게이션에 추가하고 브라우저에 선택을 저장한다. 화면 토큰과 캔들·지수·자산·리플레이 차트 축/격자가 전환에 맞춰 바뀐다. 운영 HTTPS에서 지수·종목 화면 양쪽 모드를 확인했다.
+- `/market/index`는 조회 범위 직전의 종목 종가를 이어받아 지수 수준이 구간 시작에서 왜곡되지 않게 한다. KST 09:00 점은 그 시각 1분봉 시가로 계산하고, 지수 자체는 날짜별로 1,000에 재설정하지 않는다. 10분/1시간 조회에서도 해당 버킷의 첫 1분봉 시가를 사용하도록 수정해 1일·1주·전체의 09:00 값이 모두 **927.55**로 일치함을 운영 API와 화면에서 확인했다. 화면의 오늘 변화량·기준 대비·기준선은 해당 09:00 지수 수준을 사용한다. 페이지의 기존 지수 산식 설명 문구는 제거했다.
+- 신규 브라우저의 기본 이평선은 5/10/20 SMA다. 추가 종류는 SMA/EMA/WMA/VWMA이며 기간 1~500, 최대 12개, 표시/삭제/색상 저장이 가능하다. 기존 사용자가 색상 등을 수정해 저장한 구성은 유지한다.
+- 웹 타입체크·Next 프로덕션 빌드, API 타입체크, 웹 21개/API 110개 테스트 통과. GCP 배포 전 pgBackRest 차등 백업 `20260923-183013F_20260924-043909D` 성공, 기존 이미지는 `mock-kabu2-app:pre-theme-20260924`에 보존. 새 앱 이미지 배포 후 웹/API/Postgres/Redis 정상, `/health/ready`의 DB·Redis·매칭·정산 모두 up. `ops.sh review 5` 표본은 711건, p95 117.28ms, 5xx 0건이었다.
+
+## 2026-09-24 — 랭킹 지수·차트 이평선·운영 지표·관리자 이체 (GCP 운영 적용)
+
+- 랭킹의 지수 대비를 KABU 지수와 같은 `평균(종목 현재가/상장 기준가) ÷ 평균(기준 시점 종가/상장 기준가) − 1`로 변경했다. 응답에 `indexBase/indexCurrent`를 넣어 툴팁에서 지수 수준을 확인할 수 있다.
+- 종목 차트의 SMA/VWMA를 기간 1~500, 최대 12개까지 추가·삭제·표시 전환하고 각 선의 색을 고를 수 있게 했다. 설정은 브라우저에 저장된다.
+- `bash scripts/ops/ops.sh review 5`로 GCP 서버 CPU·메모리·디스크·컨테이너·소켓 동접·헬스·최근 HTTP 트래픽·NIC 속도를 한 번에 볼 수 있도록 기본 Compose 구성을 GCP로 맞췄다. OCI는 `MOCK_KABU_COMPOSE_OVERLAY` 지정이 필요하다.
+- 관리자 DB 역할 마이그레이션, 랭킹 제외, 닉네임 선점 방지, 1시간 관리자 토큰, 로그인/이체 횟수 제한, 이체 시 비밀번호 재확인 구현. `ADMIN_PASSWORD`는 시드 환경 변수로만 받고 코드에 넣지 않는다. 관리자 신규 계좌 초기 현금은 기존대로 10^16원. 개별 투자자 검색·이체 및 전원 동일 금액 원자적 일괄 지급(요청 ID 멱등) 추가. 운영은 비관적 잠금 전략으로 일괄 지급 가능하다.
+- Prisma 생성·스키마 검증, 웹 타입체크/프로덕션 빌드, API 타입체크/빌드/테스트 109개 통과. 사용자가 로컬 Docker 검증 대신 운영 적용을 요청했다.
+- GCP `mock-kabu-prod`에 소스와 새 이미지를 배포했다. 배포 전 pgBackRest 차등 백업 `20260923-183013F_20260924-034755D` 성공, 기존 앱 이미지 `mock-kabu2-app:pre-admin-20260924` 보존. `20260924120000_add_admin_role`, `20260924121000_admin_distributions` 마이그레이션 적용, 시드 및 컨테이너 기동 완료. 운영 `ADMIN_PASSWORD`는 사용자가 지정한 값으로 0600 환경 파일에 저장했으며 문서·Git에는 남기지 않았다.
+- 운영 HTTPS에서 `admin` 로그인·역할·초기 자산 정확히 10^16원·랭킹 제외·투자자 조회를 확인했다. 차트에 이평선 추가/삭제/색상 입력 UI 표시를 확인했고, 운영 원장 정합성 검사 전 항목 및 HTTPS 헤더/nonce/내부 API 차단 검사 통과. `sudo bash scripts/ops/ops.sh review 5`에서 소켓 동접·CPU/메모리·최근 HTTP 트래픽·NIC 속도·헬스 출력이 정상이다. 배포 중 재시작 구간이 포함된 5분 트래픽 표본에는 일시적 502가 8건 있었다.
+- 재시작 이후 별도 1분 트래픽 표본은 41건 중 200/304만 있고 5xx는 0건이었다. 최종 외부 HTTPS `/health/ready`는 DB·Redis up, 대시보드와 KABU 종목 화면은 200이다. 배포에 사용한 30분 일회용 SSH 키는 GCP VM 메타데이터에서 제거했고 해당 키의 접속 실패를 확인한 뒤 로컬 개인/공개 키 파일도 삭제했다. 운영 접속 명령은 `docs/server-operations.md`의 GCP Cloud Shell 경로를 사용한다.
+
+## 2026-09-24 — 운영 봇 체결 빈도 소폭 상향
+
+- GCP 운영 1분봉 5종목을 최근 57분 확인한 결과, 비어 있는 분은 0개였다. 실제 봉 시가와 직전 종가의 차이는 종목별 26~34개 구간에 있었고, 최근 체결은 종목당 분당 약 20~38건이었다. 최우선 매수·매도 호가가 1~2틱 벌어져 매수·매도 체결이 번갈아 나오는 가격 갭이다.
+- 봇의 호가 재배치 속도는 유지하고 `BOT_FLOW_DELAY_SCALE`을 운영에서 1.5→1.2로 낮춰 일반 시장가 흐름 대기시간을 20% 줄였다(이론상 시도 빈도 약 25% 증가). GCP 신규 환경 생성 스크립트, 운영 Compose 기본값, 예시 env에도 반영했다. 운영 봇 컨테이너 재생성 후 5개 전용 MM이 24개 호가씩 채택하고 흐름 봇이 실행되는 것을 확인했다. 이 설정은 가격 갭을 없애지는 않는다.
+- 재시작 4분 후 `/health/ready` 정상, 5종목 모두 최근 봉 생성 및 양측 10단 호가 확인. 19:02~19:04 UTC 각 종목의 완료된 분당 체결 수는 대략 26~43건이었다. 루트 디스크 사용률 7%(135GiB 여유), 스토리지 가드 경고·위험·WAL 대기·백업 오류 0. 단기 관찰이므로 장기 디스크 증가율은 이후 표본으로 판단해야 한다.
+
+## 2026-09-24 — Google Cloud 신규 배포 및 초기 검증 완료
+
+- 사용자가 Oracle 접근 불가를 확인하고 기존 데이터 이전을 포기해 **새 DB로 재배포**했다. 기존 계정·거래 기록은 새 서버에 없다. Cloudflare의 `jobradar.my` A 레코드를 고정 IP `34.158.205.10`으로 전환했고, HTTPS 인증서·HTTP→HTTPS 이동·홈페이지/API 200을 외부에서 확인했다.
+- GCP 프로젝트 `gen-lang-client-0924937280` (`COMMUTE`), 서울 `asia-northeast3-a`의 `mock-kabu-prod`: e2-standard-2(2 vCPU/8GB), Ubuntu 24.04 LTS, 150GB pd-balanced, 일일 스냅샷 정책 `default-schedule-1` 연결, 보안 부트/vTPM/무결성 모니터링, 삭제 보호, 서비스 계정 없음. 생성 화면 VM+디스크 월 추정 US$82.25(IPv4·스냅샷·송신료 별도). 무료 체험 크레딧 잔액 ₩435,523, 만료 2026-10-30을 확인했다.
+- `/opt/mock-kabu2`에 Docker·Compose 스택을 배포하고 새 운영 비밀값을 `/opt/mock-kabu2/deploy/production/.env.production`에 생성했다(0600). PostgreSQL/Redis/API/웹/매칭/정산/봇/Caddy 기동, pgBackRest 초기 전체 백업 성공. 6시간 백업, 1분 디스크 가드, 매일 04:10~04:20 KST 거래 점검·이력/빌드 캐시 정리 타이머 활성. 일일 스냅샷 정책이 부트 디스크에 붙어 있음을 CLI로 확인했다.
+- 외부 HTTPS `/health/ready`는 DB·Redis·매칭·정산 모두 up, 홈페이지/종목 API 200. Chrome 거래 화면에서 현재가·호가·체결의 실시간 갱신 확인, 브라우저 경고/오류 없음. DB 정합성 전 항목 통과, CSP nonce/보안 헤더/내부 API 차단 검사 통과. 빌드 캐시 수동 정리 후 루트 디스크 145GiB 중 8.3GiB 사용(6%), 137GiB 여유. 스토리지 가드 경고·위험·WAL 적체·백업 오류 없음.
+- `www.jobradar.my`는 별도 프록시 A 레코드가 오래된 `20.194.25.57`을 가리켜 요청이 타임아웃된다. 자동 승인 검토가 이 별도 호스트의 DNS 변경을 거절했으므로 기록은 그대로이고, 변경 초안은 취소했다. 별도 사용자 승인이 필요하다.
+- 웹 `api.ts`에 인증된 요청이 401을 받으면 해당 세션을 지우고 로그인 화면으로 이동하는 처리를 추가했다. 로컬 타입 검사와 운영 이미지 재빌드가 통과했고 웹 컨테이너를 교체해 healthy 상태를 확인했다. 교체 후 브라우저 거래 화면에서 계정 잔액·실시간 호가·체결이 표시되고 콘솔 경고/오류가 없었다.
+- 03:30 KST 예약 전체 백업 `20260923-183013F` 성공(pgBackRest stanza `ok`). 마지막 빌드 뒤 캐시 정리 성공, 루트 디스크 145GiB 중 9.7GiB 사용(7%). 스토리지 가드에는 경고·위험·WAL 대기·백업 실패가 없다. 현재 가드 표본 28개로 24시간 증가율은 아직 산출할 수 없다.
+
+## 2026-09-24 — 매일 거래 점검 (배포 대기)
+
+- 로컬에 매일 04:10~04:20 KST 주문 제한(일반·조건부·취소·정정), 종목 화면 점검 안내, 봇 정지/재개 systemd 타이머, 04:11 이력 정리·04:12 Docker 캐시 정리 예약을 구현했다. 스토리지 가드가 봇을 정지한 상태라면 점검 종료가 재시작하지 않는다. 상세 `docs/daily-maintenance.md`.
+- API 테스트 101개와 웹 프로덕션 빌드 통과. **운영 배포는 아직 안 됨**: 9/24 01:15 KST부터 `129.225.135.95` SSH와 `jobradar.my` HTTPS가 모두 타임아웃. 사용자에게 OCI 콘솔 로그인을 요청했다. 마지막 접속 시(9/23 22:23 KST) 96G 루트 중 31G 사용/66G 여유(32%), 8개 컨테이너 동작. 운영 서버에 롤백용 `/tmp/mock-kabu-before-maintenance-20260923.tar`만 생성됨. 로컬 배포 묶음은 `tmp/maintenance-deploy.tar`이나 최신 스토리지 추세 스크립트를 추가해 재생성 필요.
+- 10분 거래 중단 자체는 하루 쓰기의 약 0.7%만 줄인다. 하루 한 번의 정리로 충분한지 판단하려면 운영 `storage-guard`의 24시간 이상 표본에서 순증가량과 정리 후 최저 사용량을 비교해야 한다. `scripts/ops/storage-trend.py`를 준비했으나 서버 연결 불가로 실제 값을 아직 측정하지 못했다.
+
 다른 AI 모델/세션이 이 프로젝트 작업을 이어받기 위한 문서. 프로젝트 개요·실행법은 [README.md](README.md), 원 기획은 `docs/superpowers/specs/2026-07-11-virtual-exchange-design.md` 참고.
 
-## 프로젝트 한 줄 요약
+## 2026-09-23 — 장기 디스크 증가 억제
+
+- 운영 45GB 디스크에서 주문 약 292만 건, 매칭 멱등 claim 약 559만 건이 누적됐다. 최근 10분 봇 주문 약 5,906건 중 약 90%가 전용 유동성 봇이었다. 한 틱 재배치 때 작은 수량 차이까지 새 주문으로 바꾸는 것이 WAL·DB 증가의 주요 원인이었다.
+- `apps/bots/src/market-maker.ts`: 일반 호가 이동 기본 간격 750ms→5초, 운영 Compose에서 15초로 설정. 일반 재배치의 작은 수량 초과(25% 이내)는 기존 주문을 재사용하고, 보존 중인 부분 체결이 있는 쪽은 엄격히 보정한다. 체결 후 빈 호가 보충과 6틱 이상 급변 대응은 빠른 경로를 유지한다. 운영 관찰은 분당 약 1,000건대→7분 평균 약 226건(시장 상황이 달라 정확한 배율 보장은 아님). 봇 테스트 77개, 타입 검사, 운영 전체 이미지 빌드·거래 정합성 통과.
+- `account.processed_events`에는 체결 claim 외에 `order.closed` claim이 계속 누적되는 것도 확인했다. `prune-history`가 30일 지난 비체결 claim만 정리하고 체결 행에 연결된 claim은 보존한다. `processed_at` 인덱스 마이그레이션 `20260923210000_index_processed_event_age` 운영 적용, dry-run 및 systemd 실제 실행 성공(현재 만료 대상 0). 정리 타이머는 매일 04:10 KST로 변경했다.
+- 미사용 Docker 빌드 캐시(2GB 보존)와 태그 없는 이미지 정리 타이머를 매일 02:30 KST에 추가·운영 활성화했다. 최종 빌드 뒤 캐시 정리, 약 67% 사용/15GB 여유, WAL 보관 대기 0, 백업 오류 없음. 기존 앱 이미지 `mock-kabu2-app:pre-storage-churn-20260923`은 롤백용으로 보존했다. 30일 지난 기록이 아직 없어 실제 삭제 경로는 미검증이며 이후 타이머 로그 확인이 필요하다.
+
+## 2026-09-23 — 배포 후 보안 점검
+
+- 운영 Next.js `15.5.20` 등 의존성 취약점 확인 후 Next.js `15.5.24`와 관련 하위 의존성 수정 버전으로 업데이트했다. `pnpm build`, `pnpm test`, `pnpm audit --prod --audit-level low` 통과(알려진 취약점 0건). 운영 이미지 빌드 및 웹·API·정산·매칭·봇 순차 교체 완료. 홈페이지·거래 헬스·보안 헤더·거래 원장 정합성 통과. 기존 이미지 `mock-kabu2-app:pre-security-20260923` 보존. 상세 `docs/incidents/2026-09-23-security-audit.md`.
+- 운영 HTTPS 헤더·내부 API 차단 통과, DB/Redis 공개 포트 없음. SSH 비밀번호 로그인은 이미 꺼져 있었고, 9/23 root SSH 로그인·X11 포워딩도 해제했다. `ubuntu` 공개키 재접속·sudo 확인, Ubuntu `sudo` 보안 패치 적용. 외부 SSH 탐색은 계속 관찰한다.
+- 디스크 증가 경고에 대응해 추가 차등 백업을 성공시켜 사용률 65%에서 44%로 낮춘 뒤 배포했다. 이후 약 55%/여유 20GB. OCI 게시 IAM 정책과 서버 알림 설정은 활성이고 테스트 발행·Gmail 수신을 모두 확인했다.
+
+## 2026-09-23 — 예방 보호 장치
+
+- `scripts/ops/storage-guard.py`, 1분 systemd timer 운영 반영. 48시간 bounded 측정값, 디스크/inode/WAL 적체/백업 노후 점검. 위험 시 봇만 중지하고 수동 해제까지 유지한다. 사용자 주문 쓰기는 계속 가능하므로 고갈 방지의 절대 보장은 아니다.
+- 백업 실패 시 15분 재시도, 2시간 최대 3회. 테스트 6개 및 운영 실제 수집/서비스 실행 통과.
+- 02:00 KST 디스크 41%/여유 27GB, DB 1.73GB, WAL 대기 0, 백업 오류 없음.
+- OCI Notifications `mock-kabu-storage-alerts` 토픽을 전용 `mock-kabu-alerting` 컴파트먼트에 생성·이동하고 `stomailce0206@gmail.com` 구독 활성 확인. 운영 서버에 OCI SDK와 `storage-notify.py`를 배포했다. 단일 인스턴스 `ONS_TOPIC_PUBLISH` 정책과 `/etc/mock-kabu/notifications.json`이 활성이다. 테스트 발행·메일 수신 확인 완료. 외부 Object Storage 백업은 미구성. 상세 `docs/storage-guard.md`.
+
+## 2026-09-22 — jobradar.my 디스크 고갈 복구
+
+- 운영 45GB 루트 디스크 100%: 미사용 빌드 캐시 14.47GB + pgBackRest 설정 오류로 미보관 WAL 약 19GB 누적. PostgreSQL 재시작 반복으로 거래 중단.
+- 캐시만 정리하고 DB/Redis 데이터는 보존했다. OCI의 빈 S3 환경 변수 제거 wrapper + `PGBACKREST_PG1_USER` 설정, stanza 초기화로 아카이브를 복구했다. wrapper 실행 권한 및 LF 유지 필요.
+- 사용자가 승인한 정책: 매일 03:30 KST full, 09:30/15:30/21:30 diff. 로컬 full 2개/diff 6개, WAL은 최신 diff부터 유지(과거 PITR 범위 제한). 백업 실행 OS 사용자는 postgres.
+- 배포 bootstrap은 DB healthy/stanza 확인 및 빌드 캐시 2GB 보존 정리를 수행한다. 기존 `/opt/mock-kabu2`는 git 저장소가 아니므로 실제 변경은 scp로 반영했다.
+- 외부 HTTPS 200, 거래 health 전체 up, 정합성 검사 전체 통과. 실시간 2연결×10초에 296 메시지/연결·HTTP 오류 0. 브라우저 차트·호가·체결 갱신 확인.
+- 상세: `docs/incidents/2026-09-22-disk-full.md`. 로컬 백업은 물리 디스크 장애를 보호하지 않으므로 장기 운영은 별도 저장소·용량 관찰이 필요하다.
+- 최종 23:57 KST: 디스크 31%/여유 31GB, 전체 백업 `20260922-145613F` 성공(DB 1.3GB → 암호화·압축 411.8MB), pgBackRest check/status 정상. 다음 자동 백업 9/23 03:30 KST.
+
+## 2026-09-22 — 운영 CLI·보안 헤더 실제 배포
+
+- `docs/server-operations.md`: SSH 접속 후 `bash scripts/ops/ops.sh status|users|health|traffic|network|watch|security|load` 사용. load는 URL/인원/초를 받고 시세 HTTP+Socket.IO만 생성, 주문 쓰기 없음. 최대 동접 측정은 별도 머신에서 단계적으로 실행한다.
+- API `/internal/operations`: 실제 loopback peer만 허용(Caddy public 404), 현재 소켓/인증 소켓/고유 인증 계정/프로세스 메모리. 사람 수와 탭 수를 혼동하지 말 것. Caddy JSON access log 집계는 최근 최대 100,000줄, WebSocket 프레임 제외.
+- 웹 middleware CSP nonce + root `force-dynamic` + no-store(정적 HTML 캐시 제거), Next X-Powered-By off. Caddy Permissions-Policy/COOP/CORP 및 식별 헤더 제거, API 제한 CSP. 외부 폰트 때문에 style/font 출처 유지, script unsafe-inline/unsafe-eval 없음. COEP는 보고서의 향후 권고이지 확정 취약점이 아니므로 강제하지 않았다.
+- 실제 `/opt/mock-kabu2`에 해당 파일만 전송 후 전체 8개 패키지 Docker build 통과, gateway/operations 6개 테스트 통과, api/web만 재생성, Caddy 재시작. DB migration/seed/주문 작업 없음. 이전 이미지 `mock-kabu2-app:before-ops`, 원본 설정 백업 `/tmp/mock-kabu-before-ops.tar.gz` 유지. 이미지 태그를 이전 것으로 지정해 api/web 재생성하고 Caddyfile 원본 복원/재시작하면 롤백 가능.
+- 검증: 홈페이지 2회·거래·주문 페이지 CSP/nonce 일치 및 재사용 없음, 운영 API 외부 404, health 전부 up. 5연결×30초: 모든 연결 메시지 수신, 2,291 메시지, HTTP 31건/오류 0, p95 23ms(서버 자체 생성기이며 용량 보장 아님). 브라우저 거래 화면 차트/호가 렌더와 콘솔 오류 없음 확인.
+
+## 프로젝트 개요
 
 로컬 모의 거래소 모노레포(pnpm + turbo): `apps/web`(Next.js 15 :3000) ↔ `apps/api`(NestJS :4000, REST + socket.io) ↔ `apps/matching-engine`(Redis Streams 매칭) + `apps/bots`(기존 흐름 봇과 전용 유동성 봇). 인프라는 docker-compose(PostgreSQL 16 + Redis 7).
 

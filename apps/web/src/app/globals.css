@@ -58,6 +58,35 @@
 
 :root {
   color-scheme: dark;
+  --chart-grid: rgba(255, 255, 255, 0.05);
+  --chart-border: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-abyss: #f4f7fb;
+  --color-abyss-deep: #e9eef6;
+  --color-surface: #ffffff;
+  --color-surface-2: #edf2f8;
+  --color-surface-3: #dfe7f2;
+  --color-hairline: rgba(31, 53, 83, 0.18);
+  --color-hairline-soft: rgba(31, 53, 83, 0.1);
+  --color-hairline-strong: rgba(31, 53, 83, 0.3);
+  --color-ink: #162236;
+  --color-ink-muted: #52647d;
+  --color-ink-faint: #697b92;
+  --color-sky: #0875b5;
+  --color-sky-deep: #075c91;
+  --color-indigo: #4f46b5;
+  --color-up: #c72746;
+  --color-down: #3156c9;
+  --color-warn: #916000;
+  --color-ok: #087b57;
+  --shadow-glass: 0 8px 28px rgba(31, 53, 83, 0.09);
+  --shadow-lift: 0 16px 40px rgba(31, 53, 83, 0.15);
+  --shadow-glow: 0 0 16px rgba(8, 117, 181, 0.16);
+  --chart-grid: rgba(31, 53, 83, 0.08);
+  --chart-border: rgba(31, 53, 83, 0.18);
 }
 
 html {
@@ -85,6 +114,12 @@ body::before {
     radial-gradient(58rem 40rem at 12% -8%, rgba(56, 189, 248, 0.14), transparent 60%),
     radial-gradient(52rem 38rem at 92% 6%, rgba(129, 140, 248, 0.12), transparent 62%),
     radial-gradient(46rem 34rem at 60% 104%, rgba(56, 189, 248, 0.07), transparent 60%);
+}
+
+:root[data-theme="light"] body::before {
+  background:
+    radial-gradient(58rem 40rem at 12% -8%, rgba(8, 117, 181, 0.08), transparent 60%),
+    radial-gradient(52rem 38rem at 92% 6%, rgba(79, 70, 181, 0.06), transparent 62%);
 }
 
 ::selection {
@@ -197,6 +232,22 @@ body::before {
   }
   .btn-primary:hover:not(:disabled) {
     background: #5accfa;
+  }
+  :root[data-theme="light"] .btn-primary {
+    color: #ffffff;
+  }
+  :root[data-theme="light"] .btn-primary:hover:not(:disabled) {
+    background: #09699f;
+  }
+  :root[data-theme="light"] .btn-buy,
+  :root[data-theme="light"] .btn-sell {
+    color: #ffffff;
+  }
+  :root[data-theme="light"] .btn-buy:hover:not(:disabled) {
+    background: #a91d3b;
+  }
+  :root[data-theme="light"] .btn-sell:hover:not(:disabled) {
+    background: #2547ad;
   }
 
   .btn-ghost {
@@ -313,7 +364,7 @@ body::before {
     transition: background-color 0.12s ease;
   }
   .tbl-hover tbody tr:hover {
-    background: rgba(255, 255, 255, 0.035);
+    background: color-mix(in srgb, var(--color-surface-3) 35%, transparent);
   }
 
   /* --- Chips / badges --- */
@@ -351,5 +402,23 @@ body::before {
 
   .num {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+/* 폰 거래 화면의 주문 시트(하단에서 올라오는 창). */
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes sheet-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }

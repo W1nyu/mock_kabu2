@@ -11,8 +11,6 @@ interface LeaderRow {
   deposits: number;
   pnl: number;
   returnRate: number | null;
-  indexRate: number | null;
-  alpha: number | null;
   realized: number;
   me: boolean;
 }
@@ -23,6 +21,8 @@ interface LeaderboardDto {
 }
 
 const REFRESH_MS = 30_000;
+/** 랭킹은 상위 몇 등까지만 보여 준다. */
+const TOP_N = 10;
 
 type Period = "all" | "today" | "week";
 const PERIODS: { id: Period; label: string; hint: string }[] = [
@@ -60,7 +60,7 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
     if (!getToken()) return;
     let active = true;
     const load = () => {
-      api<LeaderboardDto>(`/account/leaderboard?limit=10&period=${period}`)
+      api<LeaderboardDto>(`/account/leaderboard?limit=${TOP_N}&period=${period}`)
         .then((data) => {
           if (active) setBoard(data);
         })
@@ -73,6 +73,9 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
       window.clearInterval(t);
     };
   }, [refreshKey, period]);
+
+  // 상위 10등까지만 보여 준다. API는 순위 밖이어도 내 행을 덧붙이지만 여기서는 뺀다.
+  const topRows = board?.rows.filter((row) => row.rank <= TOP_N) ?? [];
 
   return (
     <section className="glass overflow-hidden">
@@ -96,7 +99,7 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
                 period === p.id
                   ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
-                  : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                  : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
               }`}
             >
               {p.label}
@@ -117,16 +120,13 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
               >
                 수익률
               </th>
-              <th className="hidden text-right sm:table-cell" title="가입 이후 시장 지수 등락 대비 초과수익 (수익률 − 지수 등락률)">
-                지수 대비
-              </th>
               <th className="hidden text-right sm:table-cell" title="매도 체결에서 확정된 손익 합계">
                 실현손익
               </th>
             </tr>
           </thead>
           <tbody>
-            {board?.rows.map((row) => {
+            {topRows.map((row) => {
               const tone =
                 row.pnl > 0 ? "text-up" : row.pnl < 0 ? "text-down" : "text-ink-muted";
               return (
@@ -152,14 +152,6 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
                   </td>
                   <td
                     className={`num hidden text-right sm:table-cell ${
-                      row.alpha == null ? "text-ink-faint" : row.alpha > 0 ? "text-up" : row.alpha < 0 ? "text-down" : "text-ink-muted"
-                    }`}
-                    title={row.indexRate != null ? `가입 이후 지수 ${row.indexRate > 0 ? "+" : ""}${(row.indexRate * 100).toFixed(2)}%` : undefined}
-                  >
-                    {row.alpha == null ? "—" : `${row.alpha > 0 ? "+" : ""}${(row.alpha * 100).toFixed(2)}%p`}
-                  </td>
-                  <td
-                    className={`num hidden text-right sm:table-cell ${
                       row.realized > 0 ? "text-up" : row.realized < 0 ? "text-down" : "text-ink-faint"
                     }`}
                   >
@@ -169,9 +161,9 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
                 </tr>
               );
             })}
-            {(!board || board.rows.length === 0) && (
+            {(!board || topRows.length === 0) && (
               <tr>
-                <td colSpan={6} className="py-10 text-center text-sm text-ink-faint">
+                <td colSpan={5} className="py-10 text-center text-sm text-ink-faint">
                   {board ? "아직 투자자가 없습니다" : "랭킹을 불러오는 중…"}
                 </td>
               </tr>

@@ -29,6 +29,8 @@ import { api } from "@/lib/api";
 import { useMyFills, usePositionLines } from "@/lib/usePositionLines";
 import { formatKstHm, formatKstMonthDay, formatKstTime } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
+import { chartTheme, useTheme } from "@/lib/theme";
+import { averageAt, type AverageKind } from "@/lib/moving-average";
 
 interface CandleDto {
   ts: string;
@@ -55,18 +57,19 @@ interface HoveredCandle {
   close: number;
 }
 
-// 한국 관례: 상승=빨강, 하락=파랑. 하락 파랑은 sky 액센트(#38BDF8)와 구분되도록
-// 인디고 쪽으로 밀어, 차트에서 "클릭 가능"과 "하락"이 같은 색으로 읽히지 않게 한다.
-const UP = "#ff5a6e";
-const DOWN = "#6e8aff";
-
-/** 지표 정의 — 기본: 50 SMA(민트), 200 SMA(인디고), 100 VWMA(슬레이트), 거래량 */
-const INDICATORS = [
-  { key: "sma50", label: "50 SMA", color: "#34d399" },
-  { key: "sma200", label: "200 SMA", color: "#818cf8" },
-  { key: "vwma100", label: "100 VWMA", color: "#cbd5e1" },
-  { key: "volume", label: "거래량", color: "#94a3b8" },
-] as const;
+interface MovingAverage {
+  id: string;
+  kind: AverageKind;
+  period: number;
+  color: string;
+  visible: boolean;
+}
+const DEFAULT_AVERAGES: MovingAverage[] = [
+  { id: "sma5", kind: "SMA", period: 5, color: "#f59e0b", visible: true },
+  { id: "sma10", kind: "SMA", period: 10, color: "#10b981", visible: true },
+  { id: "sma20", kind: "SMA", period: 20, color: "#6366f1", visible: true },
+];
+const INDICATORS = [{ key: "volume", label: "거래량", color: "#94a3b8" }] as const;
 /** 내 포지션 오버레이 — 시리즈가 아니라 마커/가격선이라 따로 켜고 끈다. */
 const OVERLAYS = [
   { key: "fills", label: "내 체결", color: "#ff5a6e" },
@@ -76,11 +79,9 @@ type IndicatorKey = (typeof INDICATORS)[number]["key"] | (typeof OVERLAYS)[numbe
 type IndicatorState = Record<IndicatorKey, boolean>;
 
 const STORAGE_KEY = "mock-kabu2:chart:indicators";
+const AVERAGES_STORAGE_KEY = "mock-kabu2:chart:moving-averages";
 const INTERVAL_STORAGE_KEY = "mock-kabu2:chart:interval";
 const DEFAULT_STATE: IndicatorState = {
-  sma50: true,
-  sma200: true,
-  vwma100: true,
   volume: true,
   fills: true,
   position: true,
@@ -97,6 +98,40 @@ function loadIndicatorState(): IndicatorState {
   }
 }
 
+function loadAverages(): MovingAverage[] {
+  try {
+    const saved = localStorage.getItem(AVERAGES_STORAGE_KEY);
+    if (!saved) {
+      const legacy = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as Record<string, unknown>;
+      return DEFAULT_AVERAGES.map((item) => ({ ...item, visible: legacy[item.id] !== false }));
+    }
+    const parsed: unknown = JSON.parse(saved);
+    if (!Array.isArray(parsed)) return DEFAULT_AVERAGES;
+    const valid = parsed.slice(0, 12).filter((item): item is MovingAverage =>
+      item && typeof item.id === "string" && item.id.length <= 80 &&
+      (item.kind === "SMA" || item.kind === "EMA" || item.kind === "WMA" || item.kind === "VWMA") &&
+      Number.isInteger(item.period) && item.period >= 1 && item.period <= CANDLE_LIMIT &&
+      typeof item.color === "string" && /^#[0-9a-fA-F]{6}$/.test(item.color) &&
+      typeof item.visible === "boolean",
+    );
+    // 이전 버전의 기본 3개를 그대로 저장한 사용자만 새 기본값으로 옮긴다.
+    if (valid.length === 3 && ["sma50", "sma200", "vwma100"].every((id, index) =>
+      valid[index].id === id && valid[index].visible &&
+      valid[index].color.toLowerCase() === ["#34d399", "#818cf8", "#cbd5e1"][index]
+    )) return DEFAULT_AVERAGES;
+    return valid;
+  } catch {
+    return DEFAULT_AVERAGES;
+  }
+}
+
+function averageData(candles: Candle[], config: MovingAverage) {
+  return candles.flatMap((candle, index) => {
+    const value = averageAt(candles, index, config.period, config.kind);
+    return value == null ? [] : [{ time: candle.time, value }];
+  });
+}
+
 function loadInterval(): string {
   try {
     const stored = localStorage.getItem(INTERVAL_STORAGE_KEY);
@@ -106,25 +141,6 @@ function loadInterval(): string {
   }
 }
 
-/** 종가 단순이동평균 — 윈도우 미달 구간은 null */
-function smaAt(candles: Candle[], i: number, window: number): number | null {
-  if (i + 1 < window) return null;
-  let sum = 0;
-  for (let k = i - window + 1; k <= i; k++) sum += candles[k].close;
-  return sum / window;
-}
-
-/** 거래량가중이동평균 — Σ(종가×거래량)/Σ거래량, 거래량 합이 0이면 null */
-function vwmaAt(candles: Candle[], i: number, window: number): number | null {
-  if (i + 1 < window) return null;
-  let pv = 0;
-  let v = 0;
-  for (let k = i - window + 1; k <= i; k++) {
-    pv += candles[k].close * candles[k].volume;
-    v += candles[k].volume;
-  }
-  return v > 0 ? pv / v : null;
-}
 
 function volumeColor(c: Candle): string {
   return c.close >= c.open ? "rgba(255, 90, 110, 0.42)" : "rgba(110, 138, 255, 0.42)";
@@ -184,6 +200,7 @@ const chartPriceFormat: PriceFormatCustom = {
 };
 
 export default function CandleChart({ symbol }: { symbol: string }) {
+  const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candlesRef = useRef<Candle[]>([]);
@@ -192,17 +209,22 @@ export default function CandleChart({ symbol }: { symbol: string }) {
   const seriesRef = useRef<{
     candle: ISeriesApi<"Candlestick">;
     volume: ISeriesApi<"Histogram">;
-    sma50: ISeriesApi<"Line">;
-    sma200: ISeriesApi<"Line">;
-    vwma100: ISeriesApi<"Line">;
   } | null>(null);
+  const averageSeriesRef = useRef(new Map<string, ISeriesApi<"Line">>());
   // SSR과 첫 클라이언트 렌더를 기본값으로 일치시키고(hydration mismatch 방지),
   // localStorage 값은 마운트 후에 반영한다
   const [indicators, setIndicators] = useState<IndicatorState>(DEFAULT_STATE);
+  const [averages, setAverages] = useState<MovingAverage[]>(DEFAULT_AVERAGES);
+  const [newKind, setNewKind] = useState<AverageKind>("SMA");
+  const [newPeriod, setNewPeriod] = useState("20");
+  const [averageEditorOpen, setAverageEditorOpen] = useState(false);
+  const [newColor, setNewColor] = useState("#fbbf24");
   const [interval, setChartInterval] = useState<string>(DEFAULT_CANDLE_INTERVAL);
   const [hoveredCandle, setHoveredCandle] = useState<HoveredCandle | null>(null);
   const indicatorsRef = useRef(indicators);
   indicatorsRef.current = indicators;
+  const averagesRef = useRef(averages);
+  averagesRef.current = averages;
   // 내 평단가·예약 트리거 가격선. 차트가 재생성돼도(심볼/봉 간격 전환) 다시 그린다.
   const positionLines = usePositionLines(symbol);
   const priceLinesRef = useRef<IPriceLine[]>([]);
@@ -230,13 +252,13 @@ export default function CandleChart({ symbol }: { symbol: string }) {
         time: entry.time,
         position: entry.side === "BUY" ? "belowBar" : "aboveBar",
         shape: entry.side === "BUY" ? "arrowUp" : "arrowDown",
-        color: entry.side === "BUY" ? UP : DOWN,
+        color: entry.side === "BUY" ? chartTheme().up : chartTheme().down,
         text: `${entry.side === "BUY" ? "매수" : "매도"} ${entry.qty.toLocaleString("ko-KR")}`,
         size: 1,
       }));
     if (!markersRef.current) markersRef.current = createSeriesMarkers(s.candle, markers);
     else markersRef.current.setMarkers(markers);
-  }, [myFills, interval, chartEpoch, indicators.fills]);
+  }, [myFills, interval, chartEpoch, indicators.fills, theme]);
 
   useEffect(() => {
     const s = seriesRef.current;
@@ -256,6 +278,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
 
   useEffect(() => {
     setIndicators(loadIndicatorState());
+    setAverages(loadAverages());
     setChartInterval(loadInterval());
   }, []);
 
@@ -263,8 +286,34 @@ export default function CandleChart({ symbol }: { symbol: string }) {
   useEffect(() => {
     const s = seriesRef.current;
     if (!s) return;
-    for (const ind of INDICATORS) s[ind.key].applyOptions({ visible: indicators[ind.key] });
+    s.volume.applyOptions({ visible: indicators.volume });
   }, [indicators, symbol]);
+
+  // Added/removed lines are applied to the existing chart, preserving zoom and scroll.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const series = averageSeriesRef.current;
+    const active = new Set(averages.map((item) => item.id));
+    for (const [id, line] of series) {
+      if (!active.has(id)) {
+        chart.removeSeries(line);
+        series.delete(id);
+      }
+    }
+    for (const item of averages) {
+      let line = series.get(item.id);
+      if (!line) {
+        line = chart.addSeries(LineSeries, {
+          lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          priceFormat: chartPriceFormat, color: item.color, visible: item.visible,
+        });
+        series.set(item.id, line);
+      }
+      line.applyOptions({ color: item.color, visible: item.visible });
+      line.setData(averageData(candlesRef.current, item));
+    }
+  }, [averages, chartEpoch]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -277,16 +326,17 @@ export default function CandleChart({ symbol }: { symbol: string }) {
     hoveredTimeRef.current = null;
     setHoveredCandle(null);
 
+    const colors = chartTheme();
     const chart = createChart(containerRef.current, {
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#94a3b8",
+        textColor: colors.text,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "rgba(255, 255, 255, 0.05)" },
-        horzLines: { color: "rgba(255, 255, 255, 0.05)" },
+        vertLines: { color: colors.grid },
+        horzLines: { color: colors.grid },
       },
       // lightweight-charts has no timezone support and renders a UTCTimestamp
       // as UTC. Rather than shifting the data (which would desynchronise the
@@ -296,23 +346,23 @@ export default function CandleChart({ symbol }: { symbol: string }) {
         // A daily bar's axis should read as dates, not 09:00 over and over.
         timeVisible: !isDaily,
         secondsVisible: false,
-        borderColor: "rgba(255, 255, 255, 0.10)",
+        borderColor: colors.border,
         tickMarkFormatter: (time: UTCTimestamp, tickMarkType: TickMarkType) =>
           formatChartTickMark(time, tickMarkType),
       },
       rightPriceScale: {
-        borderColor: "rgba(255, 255, 255, 0.10)",
+        borderColor: colors.border,
         scaleMargins: { top: 0.05, bottom: 0.25 },
       },
       crosshair: { mode: 0 },
     });
     const candle = chart.addSeries(CandlestickSeries, {
-      upColor: UP,
-      downColor: DOWN,
-      borderUpColor: UP,
-      borderDownColor: DOWN,
-      wickUpColor: UP,
-      wickDownColor: DOWN,
+      upColor: colors.up,
+      downColor: colors.down,
+      borderUpColor: colors.up,
+      borderDownColor: colors.down,
+      wickUpColor: colors.up,
+      wickDownColor: colors.down,
       priceFormat: chartPriceFormat,
     });
     // 거래량: 차트 하단 20%를 쓰는 별도 스케일의 히스토그램
@@ -324,28 +374,16 @@ export default function CandleChart({ symbol }: { symbol: string }) {
     });
     chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 
-    const lineOpts = {
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      priceFormat: chartPriceFormat,
-    } as const;
-    const sma50 = chart.addSeries(LineSeries, { ...lineOpts, color: "#34d399" });
-    const sma200 = chart.addSeries(LineSeries, { ...lineOpts, color: "#818cf8" });
-    const vwma100 = chart.addSeries(LineSeries, { ...lineOpts, color: "#cbd5e1" });
-
     chartRef.current = chart;
+    averageSeriesRef.current = new Map();
     priceLinesRef.current = [];
     markersRef.current = null;
     // 시리즈가 새로 만들어졌으니 가격선 effect를 다시 돌린다.
     setChartEpoch((value) => value + 1);
-    seriesRef.current = { candle, volume, sma50, sma200, vwma100 };
+    seriesRef.current = { candle, volume };
 
     // 현재 토글 상태 반영 (심볼 전환으로 차트가 재생성돼도 유지)
     const vis = indicatorsRef.current;
-    sma50.applyOptions({ visible: vis.sma50 });
-    sma200.applyOptions({ visible: vis.sma200 });
-    vwma100.applyOptions({ visible: vis.vwma100 });
     volume.applyOptions({ visible: vis.volume });
 
     const setCrosshairCandle = (next: HoveredCandle | null) => {
@@ -375,12 +413,11 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       const i = cs.length - 1;
       if (i < 0) return;
       const time = cs[i].time;
-      const s50 = smaAt(cs, i, 50);
-      const s200 = smaAt(cs, i, 200);
-      const v100 = vwmaAt(cs, i, 100);
-      if (s50 != null) sma50.update({ time, value: s50 });
-      if (s200 != null) sma200.update({ time, value: s200 });
-      if (v100 != null) vwma100.update({ time, value: v100 });
+      for (const item of averagesRef.current) {
+        const value = averageAt(cs, i, item.period, item.kind);
+        const line = averageSeriesRef.current.get(item.id);
+        if (line && value != null) line.update({ time, value });
+      }
       volume.update({ time, value: cs[i].volume, color: volumeColor(cs[i]) });
 
       // Keep the readout accurate when a user is holding the crosshair over the
@@ -407,14 +444,9 @@ export default function CandleChart({ symbol }: { symbol: string }) {
         candlesRef.current = cs;
         candle.setData(cs);
         volume.setData(cs.map((c) => ({ time: c.time, value: c.volume, color: volumeColor(c) })));
-        const line = (fn: typeof smaAt, w: number) =>
-          cs.flatMap((c, i) => {
-            const v = fn(cs, i, w);
-            return v != null ? [{ time: c.time, value: v }] : [];
-          });
-        sma50.setData(line(smaAt, 50));
-        sma200.setData(line(smaAt, 200));
-        vwma100.setData(line(vwmaAt, 100));
+        for (const item of averagesRef.current) {
+          averageSeriesRef.current.get(item.id)?.setData(averageData(cs, item));
+        }
         // A coarse timeframe early in a market's life has only a handful of
         // bars; keeping the fine-grained bar spacing would pin them to the
         // right edge as a sliver. Fit the view until there is enough history
@@ -453,6 +485,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
       chartRef.current = null;
       seriesRef.current = null;
+      averageSeriesRef.current = new Map();
       candlesRef.current = [];
       // lightweight-charts는 paint를 rAF로 미루므로, 동기적으로 remove()하면 이미 예약된
       // 프레임이 폐기된 캔버스를 그리다 "Object is disposed"를 던진다(StrictMode 이중 마운트,
@@ -460,7 +493,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       chart.chartElement().style.display = "none";
       window.requestAnimationFrame(() => chart.remove());
     };
-  }, [symbol, interval]);
+  }, [symbol, interval, theme]);
 
   function selectInterval(next: string) {
     try {
@@ -481,6 +514,25 @@ export default function CandleChart({ symbol }: { symbol: string }) {
     setIndicators(next);
   }
 
+  function saveAverages(next: MovingAverage[]) {
+    setAverages(next);
+    try {
+      localStorage.setItem(AVERAGES_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Private browsing can disable storage; the current chart still works.
+    }
+  }
+
+  function addAverage(event: React.FormEvent) {
+    event.preventDefault();
+    const period = Number(newPeriod);
+    if (!Number.isInteger(period) || period < 1 || period > CANDLE_LIMIT || averages.length >= 12) return;
+    saveAverages([...averages, {
+      id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+      kind: newKind, period, color: newColor, visible: true,
+    }]);
+  }
+
   return (
     <div className="glass flex flex-col overflow-hidden">
       <div className="panel-head flex-wrap gap-y-2">
@@ -494,7 +546,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
                 interval === timeframe.id
                   ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
-                  : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                  : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
               }`}
             >
               {timeframe.label}
@@ -523,10 +575,50 @@ export default function CandleChart({ symbol }: { symbol: string }) {
               {ind.label}
             </button>
           ))}
+          {/* 폰에서는 이평선 편집 줄이 차트를 아래로 밀어내므로 접어 두고 필요할 때만 연다. */}
+          <button
+            type="button"
+            onClick={() => setAverageEditorOpen((open) => !open)}
+            aria-expanded={averageEditorOpen}
+            className="rounded-full border border-hairline-soft px-2.5 py-0.5 text-[11px] font-medium text-ink-muted lg:hidden"
+          >
+            이평선 {averageEditorOpen ? "▴" : "▾"}
+          </button>
+        </div>
+      </div>
+      <div className={`border-t border-hairline-soft px-3 py-2 ${averageEditorOpen ? "" : "max-lg:hidden"}`}>
+        <div className="flex flex-wrap items-center gap-2" aria-label="이동평균선 설정">
+          <span className="mr-1 text-xs text-ink-muted">이평선</span>
+          {averages.map((item) => (
+            <div key={item.id} className="flex items-center gap-1 rounded-lg border border-hairline bg-surface-2/50 px-1.5 py-1 text-xs">
+              <button type="button" onClick={() => saveAverages(averages.map((value) => value.id === item.id ? { ...value, visible: !value.visible } : value))}
+                aria-pressed={item.visible} title={`${item.period} ${item.kind} 표시 켜기/끄기`}
+                className={item.visible ? "text-ink" : "text-ink-faint line-through"}>
+                {item.period} {item.kind}
+              </button>
+              <input type="color" value={item.color} aria-label={`${item.period} ${item.kind} 색상`}
+                onChange={(event) => saveAverages(averages.map((value) => value.id === item.id ? { ...value, color: event.target.value } : value))}
+                className="h-5 w-6 cursor-pointer border-0 bg-transparent p-0" />
+              <button type="button" aria-label={`${item.period} ${item.kind} 삭제`} title="이평선 삭제"
+                onClick={() => saveAverages(averages.filter((value) => value.id !== item.id))}
+                className="px-1 text-ink-faint hover:text-up">×</button>
+            </div>
+          ))}
+          <form onSubmit={addAverage} className="flex items-center gap-1.5">
+            <select aria-label="이평선 종류" value={newKind} onChange={(event) => setNewKind(event.target.value as AverageKind)}
+              className="field h-7 w-20 py-0 text-xs">
+              <option value="SMA">SMA</option><option value="EMA">EMA</option><option value="WMA">WMA</option><option value="VWMA">VWMA</option>
+            </select>
+            <input aria-label="이평선 기간" type="number" min={1} max={CANDLE_LIMIT} value={newPeriod}
+              onChange={(event) => setNewPeriod(event.target.value)} className="field num h-7 w-16 py-0 text-xs" />
+            <input aria-label="새 이평선 색상" type="color" value={newColor} onChange={(event) => setNewColor(event.target.value)}
+              className="h-6 w-7 cursor-pointer border-0 bg-transparent p-0" />
+            <button type="submit" disabled={averages.length >= 12} className="btn btn-sm">+ 추가</button>
+          </form>
         </div>
       </div>
       <div className="relative p-2">
-        <div ref={containerRef} className="h-[22rem] w-full lg:h-[26rem]" />
+        <div ref={containerRef} className="h-[20rem] w-full sm:h-[22rem] lg:h-[26rem]" />
         {hoveredCandle && <OhlcReadout candle={hoveredCandle} />}
       </div>
     </div>

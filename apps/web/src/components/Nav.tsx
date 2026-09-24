@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { clearSession, getUser, onSessionChange, type SessionUser } from "@/lib/api";
+import { loadSavedTheme, setTheme, useTheme } from "@/lib/theme";
 import NotificationBell from "./NotificationBell";
 
 /**
@@ -15,6 +16,8 @@ import NotificationBell from "./NotificationBell";
  * tools for operators. Do not re-add either route to this list, link to it
  * elsewhere in the customer UI, or extend those features without an explicit
  * product decision to reopen them.
+ *
+ * Below `sm` these links are replaced by the bottom tab bar (MobileTabBar).
  */
 const PRIMARY_NAV_LINKS = [
   { href: "/", label: "대시보드" },
@@ -28,6 +31,9 @@ export default function Nav() {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
+  const theme = useTheme();
+
+  useEffect(() => loadSavedTheme(), []);
 
   useEffect(() => {
     setUser(getUser());
@@ -59,7 +65,7 @@ export default function Nav() {
                 className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
                   active
                     ? "bg-sky/12 text-sky ring-1 ring-inset ring-sky/30"
-                    : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                    : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                 }`}
               >
                 {l.label}
@@ -69,6 +75,16 @@ export default function Nav() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            aria-label={theme === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
+            title={theme === "dark" ? "라이트 모드" : "다크 모드"}
+          >
+            <span aria-hidden="true">{theme === "dark" ? "☀" : "☾"}</span>
+            <span className="hidden sm:inline">{theme === "dark" ? "라이트" : "다크"}</span>
+          </button>
           {user ? (
             <>
               <NotificationBell accountId={user.accountId} />
@@ -105,27 +121,6 @@ export default function Nav() {
           )}
         </div>
       </nav>
-
-      {/* Mobile row — the pill tabs move below the brand bar instead of collapsing into a tray. */}
-      <div className="flex items-center gap-1 overflow-x-auto border-t border-hairline-soft px-3 py-1.5 sm:hidden">
-        {PRIMARY_NAV_LINKS.map((l) => {
-          const active = pathname === l.href;
-          return (
-            <Link
-              key={l.href}
-              href={l.href}
-              aria-current={active ? "page" : undefined}
-              className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors ${
-                active
-                  ? "bg-sky/12 text-sky ring-1 ring-inset ring-sky/30"
-                  : "text-ink-muted hover:bg-white/6 hover:text-ink"
-              }`}
-            >
-              {l.label}
-            </Link>
-          );
-        })}
-      </div>
     </header>
   );
 }

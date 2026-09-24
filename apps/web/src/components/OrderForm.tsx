@@ -33,14 +33,17 @@ export default function OrderForm({
   priceHint,
   lastPrice,
   onPlaced,
+  initialSide = "BUY",
 }: {
   symbol: string;
   /** 호가창 클릭. seq가 바뀔 때마다 가격을 넣고 방향도 맞춘다 (같은 값을 다시 눌러도 반영). */
   priceHint: { price: number; seq: number } | null;
   lastPrice: number | null;
   onPlaced?: () => void;
+  /** 폰 거래 화면의 매수/매도 버튼으로 열 때 처음 선택될 방향. */
+  initialSide?: "BUY" | "SELL";
 }) {
-  const [side, setSide] = useState<"BUY" | "SELL">("BUY");
+  const [side, setSide] = useState<"BUY" | "SELL">(initialSide);
   const [type, setType] = useState<"LIMIT" | "MARKET" | "STOP">("LIMIT");
   const [price, setPrice] = useState("");
   const [triggerPrice, setTriggerPrice] = useState("");
@@ -304,7 +307,7 @@ export default function OrderForm({
                     ? s === "BUY"
                       ? "bg-up/18 text-up ring-1 ring-inset ring-up/45"
                       : "bg-down/18 text-down ring-1 ring-inset ring-down/45"
-                    : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                    : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                 }`}
               >
                 {s === "BUY" ? "매수" : "매도"}
@@ -326,8 +329,8 @@ export default function OrderForm({
               aria-pressed={type === t}
               className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
                 type === t
-                  ? "bg-white/10 text-ink"
-                  : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                  ? "bg-surface-3/60 text-ink"
+                  : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
               }`}
             >
               {t === "LIMIT" ? "지정가" : t === "MARKET" ? "시장가" : "조건부"}
@@ -353,8 +356,8 @@ export default function OrderForm({
                   }
                   className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
                     stopMode === m
-                      ? "bg-white/10 text-ink"
-                      : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                      ? "bg-surface-3/60 text-ink"
+                      : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                   }`}
                 >
                   {m === "FIXED" ? "고정 가격" : "트레일링"}
@@ -412,8 +415,8 @@ export default function OrderForm({
                     aria-pressed={triggerDirection === d}
                     className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
                       triggerDirection === d
-                        ? "bg-white/10 text-ink"
-                        : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                        ? "bg-surface-3/60 text-ink"
+                        : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                     }`}
                   >
                     {d === "AT_OR_BELOW" ? "이하가 되면" : "이상이 되면"}
@@ -441,8 +444,8 @@ export default function OrderForm({
                       }
                       className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
                         stopExec === m
-                          ? "bg-white/10 text-ink"
-                          : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                          ? "bg-surface-3/60 text-ink"
+                          : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                       }`}
                     >
                       {m === "MARKET" ? "발동 시 시장가" : "발동 시 지정가"}

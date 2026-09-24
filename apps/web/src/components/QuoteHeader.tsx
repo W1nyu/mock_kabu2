@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, fmt } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
+import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 
 interface SessionStats {
   high: number;
@@ -13,6 +14,8 @@ interface SessionStats {
 }
 
 interface SummaryDto {
+  referencePrice: number | string | null;
+  sessionStart: number;
   high: number | string | null;
   low: number | string | null;
   volume: number | string | null;
@@ -34,7 +37,7 @@ interface QuoteHeaderProps {
   name?: string;
   /** REST 초기값. 체결이 들어오면 실시간 가격이 우선된다. */
   fallbackPrice: number | null;
-  /** 현재 모의 시장의 시드/기준 가격. */
+  /** REST 초기 기준가. 요약 응답으로 09:00 KST마다 갱신된다. */
   referencePrice: number | null;
 }
 
@@ -85,11 +88,12 @@ function parseTick(data: any): TradeTick | null {
 }
 
 /**
- * 거래 페이지 시세 요약. 당일 고가·저가·거래량은 서버의 KST 당일 체결 집계를 기준으로
+ * 거래 페이지 시세 요약. 고가·저가·거래량은 09:00 KST 시작 세션의 체결 집계를 기준으로
  * 하고, 해당 스냅샷 이후의 WebSocket tick만 더해 REST/실시간 갱신의 이중 집계를 막는다.
  */
 export default function QuoteHeader({ symbol, name, fallbackPrice, referencePrice }: QuoteHeaderProps) {
   const [livePrice, setLivePrice] = useState<number | null>(null);
+  const [sessionReferencePrice, setSessionReferencePrice] = useState<number | null>(null);
   const [stats, setStats] = useState<SessionStats | null>(null);
   const pendingTicksRef = useRef(new Map<string, TradeTick>());
   const summaryWatermarkRef = useRef<number | null>(null);
@@ -99,21 +103,25 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
     pendingTicksRef.current.clear();
     summaryWatermarkRef.current = null;
     setLivePrice(null);
+    setSessionReferencePrice(null);
     setStats(null);
 
     const loadSummary = () => {
       api<SummaryDto>(`/market/summary/${symbol}`, { auth: false })
         .then((summary) => {
           if (disposed) return;
+          if (summary.sessionStart < kstSessionStartMs()) return;
 
           const watermark = finiteNumber(summary.lastTradeTs) ?? Number.NEGATIVE_INFINITY;
+          const sessionStart = finiteNumber(summary.sessionStart) ?? kstSessionStartMs();
           const pendingAfterSnapshot: TradeTick[] = [];
           for (const [id, tick] of pendingTicksRef.current) {
-            if (tick.ts > watermark) pendingAfterSnapshot.push(tick);
+            if (tick.ts >= sessionStart && tick.ts > watermark) pendingAfterSnapshot.push(tick);
             else pendingTicksRef.current.delete(id);
           }
 
           summaryWatermarkRef.current = watermark;
+          setSessionReferencePrice(finiteNumber(summary.referencePrice));
           setStats(() => pendingAfterSnapshot.reduce(withTick, statsFromSummary(summary)));
         })
         .catch(() => {
@@ -123,9 +131,11 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
 
     loadSummary();
     const refreshTimer = window.setInterval(loadSummary, 30_000);
+    const stopSessionRefresh = onKstSessionOpen(loadSummary);
     const unsubscribe = subscribe([`trades:${symbol}`], ({ data }) => {
       const tick = parseTick(data);
       if (!tick) return;
+      if (tick.ts < kstSessionStartMs()) return;
 
       setLivePrice(tick.price);
       pendingTicksRef.current.set(tick.id, tick);
@@ -136,12 +146,13 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
     return () => {
       disposed = true;
       window.clearInterval(refreshTimer);
+      stopSessionRefresh();
       unsubscribe();
     };
   }, [symbol]);
 
   const price = livePrice ?? finiteNumber(fallbackPrice);
-  const reference = finiteNumber(referencePrice);
+  const reference = sessionReferencePrice ?? finiteNumber(referencePrice);
   const change = price != null && reference != null && reference > 0 ? price - reference : null;
   const changeRate = change != null && reference != null ? (change / reference) * 100 : null;
   const tone = change == null || change === 0 ? "text-ink" : change > 0 ? "text-up" : "text-down";
@@ -149,8 +160,9 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
   const executionStrength = stats && stats.sellVolume > 0 ? (stats.buyVolume / stats.sellVolume) * 100 : null;
 
   return (
+    // 폰(lg 미만)에서는 차트가 첫 화면에 들어오도록 카드를 줄인다: 지표는 한 줄 가로 스크롤, 설명 문구는 숨김.
     <section className="glass overflow-hidden">
-      <div className="flex flex-col gap-6 p-5 sm:p-6 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
+      <div className="flex flex-col gap-6 p-5 max-lg:gap-3 max-lg:p-4 sm:p-6 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
         <div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             <h1 className="text-xl font-semibold tracking-tight">
@@ -162,8 +174,8 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
               LIVE
             </span>
           </div>
-          <div className="num mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <p className="text-4xl font-semibold tracking-tight sm:text-5xl">
+          <div className="num mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 max-lg:mt-1.5">
+            <p className="text-3xl font-semibold tracking-tight sm:text-5xl">
               {price != null ? `${fmt.format(price)}원` : "—"}
             </p>
             {change != null && changeRate != null ? (
@@ -178,39 +190,39 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
           </div>
         </div>
 
-        <dl className="num grid grid-cols-2 gap-x-6 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
+        <dl className="num grid grid-cols-2 gap-x-6 gap-y-4 text-sm max-lg:flex max-lg:gap-x-0 max-lg:overflow-x-auto max-lg:text-[13px] max-lg:whitespace-nowrap sm:grid-cols-3 lg:grid-cols-5">
           <QuoteMetric
             label="기준가"
             value={reference != null ? `${fmt.format(reference)}원` : "—"}
-            title="현재 모의 시장의 시드·기준 가격입니다"
+            title="매일 09:00 KST 이후 첫 체결가입니다 (첫 체결 전에는 직전 체결가)"
           />
           <QuoteMetric
             label="당일 고가"
             value={stats ? `${fmt.format(stats.high)}원` : "—"}
             tone="up"
-            title="KST 당일 체결 기준 최고가입니다"
+            title="09:00 KST부터의 체결 기준 최고가입니다"
           />
           <QuoteMetric
             label="당일 저가"
             value={stats ? `${fmt.format(stats.low)}원` : "—"}
             tone="down"
-            title="KST 당일 체결 기준 최저가입니다"
+            title="09:00 KST부터의 체결 기준 최저가입니다"
           />
           <QuoteMetric
             label="당일 거래량"
             value={stats ? `${fmt.format(stats.volume)}주` : "—"}
-            title="KST 당일 누적 체결 수량입니다"
+            title="09:00 KST부터의 누적 체결 수량입니다"
           />
           <QuoteMetric
             label="체결강도"
             value={executionStrength != null ? `${executionStrength.toFixed(1)}%` : "—"}
             tone={executionStrength == null || executionStrength === 100 ? undefined : executionStrength > 100 ? "up" : "down"}
-            title="KST 당일 매수 체결량 ÷ 매도 체결량입니다. 100% 초과는 매수 우위, 미만은 매도 우위입니다."
+            title="09:00 KST부터의 매수 체결량 ÷ 매도 체결량입니다. 100% 초과는 매수 우위, 미만은 매도 우위입니다."
           />
         </dl>
       </div>
-      <p className="border-t border-hairline-soft px-5 py-2 text-[11px] text-ink-faint sm:px-6">
-        현재가는 체결마다 갱신 · 고가/저가/거래량은 KST 당일 체결 기준
+      <p className="border-t border-hairline-soft px-5 py-2 text-[11px] text-ink-faint max-lg:hidden sm:px-6">
+        현재가는 체결마다 갱신 · 고가/저가/거래량은 09:00 KST부터의 체결 기준
       </p>
     </section>
   );
@@ -231,7 +243,7 @@ function QuoteMetric({
   return (
     <div
       title={title}
-      className="min-w-24 border-l border-hairline-soft pl-4 first:border-l-0 first:pl-0 sm:border-l sm:pl-4"
+      className="min-w-24 border-l border-hairline-soft pl-4 first:border-l-0 first:pl-0 max-lg:min-w-0 max-lg:shrink-0 max-lg:pr-4 sm:border-l sm:pl-4"
     >
       <dt className="text-[11px] tracking-wide text-ink-muted uppercase">{label}</dt>
       <dd className={`mt-1 font-semibold ${valueColor}`}>{value}</dd>
