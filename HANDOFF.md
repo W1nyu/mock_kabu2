@@ -11,6 +11,7 @@
 - 봇 효과: 해당 방향 뉴스 비율(약 61/73/84%)·추가 종목 뉴스 스트림·방향 일치 뉴스 강도 최대 +30%·흐름 봇 기울기(`SCENARIO_FLOW_WEIGHT` 0.3). 시작·종료 최대 10분 램프. 가격을 직접 움직이지 않으므로 방향 보장은 없다.
 - 운영: pgBackRest diff `20260923-183013F_20260924-175719D`, 롤백 이미지 `mock-kabu2-app:pre-scenario-20260925`, 원본 소스 서버 `/tmp/src-before-scenario.tgz`. 마이그레이션 `20260925120000_market_scenarios` 적용 후 api/bots/web만 재생성. 10종목 양측 10단, `/health/ready` 정상, 외부에서 `/internal/scenarios/active` 404.
 - 확인: `docker logs mock-kabu2-prod-bots-1 | grep scenario` → 등록 시 `[scenario] active/upcoming: <id>`.
+- 후속(같은 날 운영 적용): 같은 종목에 시간이 겹치면 새 시나리오를 앞선 시나리오 종료 뒤로 미뤄 등록(`firstFreeStart`, advisory lock, 응답 `requestedStartsAt`). 취소·종료된 시나리오는 `DELETE /admin/market-scenarios/:id`로 삭제. api/web만 재생성, 롤백 `mock-kabu2-app:pre-scen2-20260925`. SAKU·DAON도 산 모양 호가(1호가 최소 20주), 롤백 `pre-hump2-20260925`.
 
 ## 2026-09-24 — 롤백 이미지 정리
 
