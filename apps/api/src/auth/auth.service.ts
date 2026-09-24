@@ -7,7 +7,7 @@ import {
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import type { PrismaClient } from "@mock-kabu/db";
-import { NICKNAME_RULE_MESSAGE, SIGNUP_BONUS, isValidNickname, normalizeNickname } from "@mock-kabu/shared";
+import { ADMIN_NICKNAME, NICKNAME_RULE_MESSAGE, SIGNUP_BONUS, isValidNickname, normalizeNickname } from "@mock-kabu/shared";
 import * as bcrypt from "bcryptjs";
 import { PRISMA } from "../core/tokens";
 
@@ -15,6 +15,7 @@ export interface JwtUser {
   userId: string;
   accountId: string;
   nickname: string;
+  isAdmin: boolean;
 }
 
 /** 로그인 식별자. 사용자는 닉네임, 봇·관리자 같은 시스템 계정은 내부 이메일로 들어온다. */
@@ -34,6 +35,7 @@ export class AuthService {
   async signup(nickname: string, password: string) {
     const name = normalizeNickname(nickname);
     if (!isValidNickname(name)) throw new BadRequestException(NICKNAME_RULE_MESSAGE);
+    if (name.toLowerCase() === ADMIN_NICKNAME) throw new ConflictException("사용할 수 없는 닉네임입니다");
     if (!password || password.length < 4) throw new BadRequestException("비밀번호는 4자 이상이어야 합니다");
     await this.assertNicknameFree(name);
 
@@ -59,7 +61,7 @@ export class AuthService {
       return { user, account };
     });
 
-    return this.issueToken({ userId: user.id, accountId: account.id, nickname: user.nickname });
+    return this.issueToken({ userId: user.id, accountId: account.id, nickname: user.nickname, isAdmin: false });
   }
 
   async login(identifier: LoginIdentifier, password: string) {
@@ -77,13 +79,16 @@ export class AuthService {
     const account = await this.prisma.account.findUnique({ where: { userId: user.id } });
     if (!account) throw new UnauthorizedException("계좌가 없습니다");
 
-    return this.issueToken({ userId: user.id, accountId: account.id, nickname: user.nickname });
+    return this.issueToken({ userId: user.id, accountId: account.id, nickname: user.nickname, isAdmin: user.isAdmin });
   }
 
   /** 닉네임 변경 = 로그인 ID 변경. 새 토큰을 발급해 클라이언트가 세션의 닉네임을 갱신할 수 있게 한다. */
   async updateNickname(userId: string, nickname: string) {
     const name = normalizeNickname(nickname);
     if (!isValidNickname(name)) throw new BadRequestException(NICKNAME_RULE_MESSAGE);
+    if (name.toLowerCase() === ADMIN_NICKNAME) throw new ConflictException("사용할 수 없는 닉네임입니다");
+    const current = await this.prisma.user.findUnique({ where: { id: userId }, select: { isAdmin: true } });
+    if (current?.isAdmin) throw new BadRequestException("관리자 닉네임은 변경할 수 없습니다");
     await this.assertNicknameFree(name, userId);
     const user = await this.prisma.user
       .update({ where: { id: userId }, data: { nickname: name } })
@@ -93,7 +98,7 @@ export class AuthService {
       });
     const account = await this.prisma.account.findUnique({ where: { userId: user.id } });
     if (!account) throw new UnauthorizedException("계좌가 없습니다");
-    return this.issueToken({ userId: user.id, accountId: account.id, nickname: user.nickname });
+    return this.issueToken({ userId: user.id, accountId: account.id, nickname: user.nickname, isAdmin: user.isAdmin });
   }
 
   /** 대소문자만 다른 닉네임도 막는다(유니크 인덱스는 정확히 같은 문자열만 잡는다). */
@@ -117,7 +122,7 @@ export class AuthService {
   }
 
   private issueToken(payload: JwtUser) {
-    const token = this.jwt.sign({ sub: payload.userId, ...payload });
+    const token = this.jwt.sign({ sub: payload.userId, ...payload }, payload.isAdmin ? { expiresIn: "1h" } : undefined);
     return { token, user: payload };
   }
 }

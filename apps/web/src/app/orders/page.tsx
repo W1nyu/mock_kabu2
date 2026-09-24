@@ -189,7 +189,7 @@ export default function OrdersPage() {
               className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
                 tab === t.id
                   ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
-                  : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                  : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
               }`}
             >
               {t.label}

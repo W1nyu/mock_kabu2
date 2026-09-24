@@ -190,7 +190,7 @@ export default function MyConditionalOrders({
             <li
               key={r.id}
               title={r.failReason ?? undefined}
-              className="flex items-center gap-2 border-t border-hairline-soft bg-white/2 px-4 py-1.5 text-ink-faint"
+              className="flex items-center gap-2 border-t border-hairline-soft bg-surface-3/15 px-4 py-1.5 text-ink-faint"
             >
               <span className={`w-8 shrink-0 ${tone}`}>{STATUS_LABEL[r.status]}</span>
               <span className="shrink-0">

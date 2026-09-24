@@ -173,7 +173,7 @@ export default function MyOpenOrders({
             >
               {/* Fill progress reads as a quiet bar under the row. */}
               <span
-                className="absolute inset-y-0 left-0 bg-white/4"
+                className="absolute inset-y-0 left-0 bg-surface-3/25"
                 style={{ width: `${pct}%` }}
                 aria-hidden
               />

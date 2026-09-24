@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
   transpilePackages: ["@mock-kabu/shared"],
   // NEXT_PUBLIC_* values are baked into the browser bundle at build time.
   // Keep the local default, while allowing the production image to point to

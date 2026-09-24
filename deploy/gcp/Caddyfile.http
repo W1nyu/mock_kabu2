@@ -1,0 +1,32 @@
+# Temporary IP-only validation before jobradar.my DNS is moved.
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	encode zstd gzip
+	log {
+		output stdout
+		format json
+	}
+	header {
+		-Server
+		-X-Powered-By
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+	@internal path /internal /internal/*
+	respond @internal "Not found" 404
+	@api {
+		path /auth /auth/* /account /account/* /orders /orders/* /market /market/* /admin /admin/* /replay /replay/* /health /health/* /socket.io /socket.io/*
+		not header Sec-Fetch-Dest document
+		not header RSC 1
+		not header Accept text/html*
+	}
+	reverse_proxy @api api:4100 {
+		header_down Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+	}
+	reverse_proxy web:3100
+}

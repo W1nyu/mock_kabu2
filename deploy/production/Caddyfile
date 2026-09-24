@@ -8,11 +8,18 @@
 
 	log {
 		output stdout
-		format console
+		format json
 	}
 
 	header {
 		-Server
+		-X-Powered-By
+		-X-Nextjs-Cache
+		-X-Nextjs-Prerender
+		-X-Nextjs-Stale-Time
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
@@ -36,7 +43,9 @@
 		not header RSC 1
 		not header Accept text/html*
 	}
-	reverse_proxy @api api:4100
+	reverse_proxy @api api:4100 {
+		header_down Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+	}
 
 	reverse_proxy web:3100
 }

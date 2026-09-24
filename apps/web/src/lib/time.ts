@@ -13,6 +13,39 @@ export const MARKET_TIME_ZONE_LABEL = "KST";
 /** UTC+9, in seconds. Used where a library can only render UTC. */
 export const MARKET_UTC_OFFSET_SECONDS = 9 * 60 * 60;
 
+const SESSION_DAY_MS = 24 * 60 * 60 * 1000;
+
+/** 09:00 KST는 UTC 자정이다. */
+export function kstSessionStartMs(now = Date.now()): number {
+  return Math.floor(now / SESSION_DAY_MS) * SESSION_DAY_MS;
+}
+
+/** 열린 화면이 매일 09:00 KST와 첫 체결 직후 새 기준가를 다시 읽는다. */
+export function onKstSessionOpen(refresh: () => void): () => void {
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const arm = (delay: number, callback: () => void) => {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      callback();
+    }, delay);
+    timers.add(timer);
+  };
+  const schedule = () => {
+    const untilOpen = kstSessionStartMs() + SESSION_DAY_MS - Date.now();
+    arm(untilOpen + 100, () => {
+      refresh();
+      schedule();
+    });
+    arm(untilOpen + 5_000, refresh);
+    arm(untilOpen + 15_000, refresh);
+  };
+  schedule();
+  return () => {
+    for (const timer of timers) clearTimeout(timer);
+    timers.clear();
+  };
+}
+
 // hourCycle rather than hour12: ko-KR with `hour12: false` renders midnight as
 // "24:05" on several engines, which reads as a bug on a trade tape.
 const HMS = new Intl.DateTimeFormat("ko-KR", {

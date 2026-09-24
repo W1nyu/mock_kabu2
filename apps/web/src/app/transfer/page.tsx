@@ -2,13 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { api, getToken, won } from "@/lib/api";
+import { api, getToken, getUser, won } from "@/lib/api";
 import { formatKstTime, MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 
 interface LedgerRow {
   id: number;
   delta: number;
+  deltaExact?: string;
   balanceAfter: number;
+  balanceAfterExact?: string;
   reason: string;
   createdAt: string;
 }
@@ -26,13 +28,20 @@ export default function TransferPage() {
   const router = useRouter();
   const [toNickname, setToNickname] = useState("");
   const [amount, setAmount] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [transferMode, setTransferMode] = useState<"one" | "all">("one");
+  const [bulkConfirmed, setBulkConfirmed] = useState(false);
+  const [bulkRequestId, setBulkRequestId] = useState<string | null>(null);
+  const [recipientCount, setRecipientCount] = useState(0);
+  const [recipients, setRecipients] = useState<{ id: string; nickname: string }[]>([]);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [available, setAvailable] = useState(0);
+  const [available, setAvailable] = useState("0");
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
 
   function refresh() {
-    api<{ available: number }>("/account").then((a) => setAvailable(a.available)).catch(() => {});
+    api<{ available: number; availableExact?: string }>("/account").then((a) => setAvailable(a.availableExact ?? String(a.available))).catch(() => {});
     api<LedgerRow[]>("/account/ledger?limit=30").then(setLedger).catch(() => {});
   }
 
@@ -41,24 +50,48 @@ export default function TransferPage() {
       router.push("/login");
       return;
     }
+    setIsAdmin(getUser()?.isAdmin === true);
     refresh();
   }, [router]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      api<{ total: number; rows: { id: string; nickname: string }[] }>(`/account/recipients?q=${encodeURIComponent(toNickname)}`)
+        .then((data) => { if (active) { setRecipients(data.rows); setRecipientCount(data.total); } })
+        .catch(() => { if (active) setRecipients([]); });
+    }, 200);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [isAdmin, toNickname]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setMessage(null);
     try {
-      await api("/account/transfer", {
-        method: "POST",
-        body: { toNickname: toNickname.trim(), amount: Number(amount) },
-      });
-      setMessage({ ok: true, text: "이체가 완료되었습니다" });
+      if (isAdmin && transferMode === "all") {
+        const requestId = bulkRequestId ?? crypto.randomUUID();
+        setBulkRequestId(requestId);
+        const result = await api<{ recipients: number; total: string }>("/account/transfer-all", {
+          method: "POST", body: { requestId, amountEach: Number(amount), adminPassword },
+        });
+        setMessage({ ok: true, text: `${result.recipients}명에게 총 ${won(BigInt(result.total))} 이체했습니다` });
+        setBulkRequestId(null);
+        setBulkConfirmed(false);
+      } else {
+        await api("/account/transfer", {
+          method: "POST",
+          body: { toNickname: toNickname.trim(), amount: Number(amount), ...(isAdmin ? { adminPassword } : {}) },
+        });
+        setMessage({ ok: true, text: "이체가 완료되었습니다" });
+      }
       setAmount("");
       refresh();
     } catch (err) {
       setMessage({ ok: false, text: err instanceof Error ? err.message : "이체 실패" });
     } finally {
+      setAdminPassword("");
       setBusy(false);
     }
   }
@@ -74,11 +107,17 @@ export default function TransferPage() {
         <form onSubmit={submit} className="glass overflow-hidden">
           <div className="panel-head">
             <span className="panel-title">이체 가능</span>
-            <span className="num text-sm font-semibold text-sky">{won(available)}</span>
+            <span className="num text-sm font-semibold text-sky">{won(BigInt(available))}</span>
           </div>
 
           <div className="space-y-4 p-4">
-            <div>
+            {isAdmin && <div className="flex gap-2" role="group" aria-label="이체 대상">
+              <button type="button" aria-pressed={transferMode === "one"} onClick={() => setTransferMode("one")}
+                className={`btn btn-sm ${transferMode === "one" ? "btn-primary" : ""}`}>한 명에게</button>
+              <button type="button" aria-pressed={transferMode === "all"} onClick={() => setTransferMode("all")}
+                className={`btn btn-sm ${transferMode === "all" ? "btn-primary" : ""}`}>전체 투자자에게</button>
+            </div>}
+            {transferMode === "one" && <div>
               <label className="label" htmlFor="transfer-to">
                 받는 사람 닉네임
               </label>
@@ -89,21 +128,41 @@ export default function TransferPage() {
                 value={toNickname}
                 onChange={(e) => setToNickname(e.target.value)}
                 placeholder="랭킹에 보이는 닉네임 그대로"
+                list={isAdmin ? "investor-recipients" : undefined}
               />
-            </div>
+              {isAdmin && <>
+                <datalist id="investor-recipients">{recipients.map((user) => <option key={user.id} value={user.nickname} />)}</datalist>
+                <p className="mt-1 text-xs text-ink-muted">전체 투자자 중 닉네임으로 검색해 선택할 수 있습니다.</p>
+              </>}
+            </div>}
+
+            {isAdmin && <div>
+              <label className="label" htmlFor="transfer-admin-password">관리자 비밀번호 재확인</label>
+              <input id="transfer-admin-password" className="field" type="password" autoComplete="off"
+                value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} />
+            </div>}
             <div>
               <label className="label" htmlFor="transfer-amount">
-                금액
+                {isAdmin && transferMode === "all" ? "1인당 금액" : "금액"}
               </label>
               <input
                 id="transfer-amount"
                 className="field num"
                 inputMode="numeric"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))}
+                onChange={(e) => { setAmount(e.target.value.replace(/[^0-9]/g, "")); setBulkConfirmed(false); setBulkRequestId(null); }}
                 placeholder="0"
               />
             </div>
+
+            {isAdmin && transferMode === "all" && <div className="rounded-control border border-warn/30 bg-warn/8 p-3 text-sm">
+              <p>봇·관리자·테스트 계정을 제외한 현재 투자자 {recipientCount}명에게 동일한 금액을 지급합니다.</p>
+              <p className="num mt-1">예상 총액: {won(BigInt(amount || "0") * BigInt(recipientCount))}</p>
+              <label className="mt-2 flex cursor-pointer items-center gap-2">
+                <input type="checkbox" checked={bulkConfirmed} onChange={(event) => setBulkConfirmed(event.target.checked)} />
+                전체 지급 대상과 예상 총액을 확인했습니다
+              </label>
+            </div>}
 
             {message && (
               <p
@@ -115,7 +174,10 @@ export default function TransferPage() {
               </p>
             )}
 
-            <button disabled={busy || !toNickname.trim() || !amount} className="btn btn-primary btn-block">
+            <button disabled={busy || !amount || !Number.isSafeInteger(Number(amount)) || Number(amount) <= 0 ||
+              (transferMode === "one" && !toNickname.trim()) ||
+              (isAdmin && !adminPassword) || (transferMode === "all" && (!bulkConfirmed || recipientCount === 0))}
+              className="btn btn-primary btn-block">
               {busy ? "이체 중…" : "이체하기"}
             </button>
           </div>
@@ -150,9 +212,9 @@ export default function TransferPage() {
                       className={`num text-right font-medium ${l.delta >= 0 ? "text-up" : "text-down"}`}
                     >
                       {l.delta >= 0 ? "+" : ""}
-                      {won(l.delta)}
+                      {won(BigInt(l.deltaExact ?? String(l.delta)))}
                     </td>
-                    <td className="num text-right text-ink-muted">{won(l.balanceAfter)}</td>
+                    <td className="num text-right text-ink-muted">{won(BigInt(l.balanceAfterExact ?? String(l.balanceAfter)))}</td>
                   </tr>
                 ))}
                 {ledger.length === 0 && (

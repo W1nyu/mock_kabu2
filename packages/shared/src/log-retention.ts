@@ -14,6 +14,7 @@ export const LOG_RETENTION = {
    * `account.processed_events`는 여기서 다루지 않는다 — 체결의 event id가 곧 trade id라서
    * 정합성 검사·복구 플래너가 "그 체결이 정산됐다"는 증거로 쓴다. 체결 행이 남아 있는 동안은
    * claim도 남아야 하며, 봇 체결을 지울 때 함께 지운다(packages/db/scripts/prune-history.ts).
+   * 같은 테이블의 order.closed claim은 체결 증거가 아니므로 별도 30일 보존 후 정리한다.
    */
   IDEMPOTENCY_CLAIM_MS: 7 * 24 * 60 * 60 * 1000,
   /** 정리 주기 */

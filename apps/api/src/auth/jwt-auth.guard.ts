@@ -24,6 +24,7 @@ export class JwtAuthGuard implements CanActivate {
         userId: payload.userId ?? payload.sub,
         accountId: payload.accountId,
         nickname: payload.nickname,
+        isAdmin: payload.isAdmin === true,
       } satisfies JwtUser;
       return true;
     } catch {

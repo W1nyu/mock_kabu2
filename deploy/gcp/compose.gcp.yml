@@ -1,0 +1,49 @@
+# Layer this on top of deploy/production/compose.production.yml.
+# APP_ORIGIN is the externally reachable URL; APP_DOMAIN is a placeholder in IP mode.
+name: ${COMPOSE_PROJECT_NAME:-mock-kabu2-prod}
+
+x-app-build: &app-build
+  context: ../..
+  dockerfile: deploy/production/Dockerfile
+  args:
+    NEXT_PUBLIC_API_URL: ${APP_ORIGIN:?APP_ORIGIN is required}
+
+services:
+  postgres:
+    environment:
+      PGBACKREST_PG1_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - pgbackrest-data:/var/lib/pgbackrest
+      - ../production/postgres/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+
+  migrate:
+    build: *app-build
+
+  seed:
+    build: *app-build
+
+  api:
+    build: *app-build
+    environment:
+      WEB_ORIGIN: ${APP_ORIGIN:?APP_ORIGIN is required}
+
+  matching-engine:
+    build: *app-build
+
+  settlement:
+    build: *app-build
+
+  bots:
+    build: *app-build
+
+  web:
+    build: *app-build
+    environment:
+      NEXT_PUBLIC_API_URL: ${APP_ORIGIN:?APP_ORIGIN is required}
+
+  caddy:
+    volumes:
+      - ${CADDYFILE:-../production/Caddyfile}:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config

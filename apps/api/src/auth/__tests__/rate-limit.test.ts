@@ -50,4 +50,24 @@ describe("rate limit", () => {
     const context = { switchToHttp: () => ({ getRequest: () => request() }) } as never;
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(HttpException);
   });
+
+  it("limits admin login attempts across changing client IPs", async () => {
+    const counts = new Map<string, number>();
+    const redis = {
+      incr: vi.fn(async (key: string) => {
+        const value = (counts.get(key) ?? 0) + 1;
+        counts.set(key, value);
+        return value;
+      }),
+      expire: vi.fn().mockResolvedValue(1),
+      ttl: vi.fn().mockResolvedValue(100),
+    };
+    const guard = new LoginRateLimitGuard(redis as never);
+    for (let i = 0; i < 10; i += 1) {
+      const context = { switchToHttp: () => ({ getRequest: () => request({ nickname: "admin" }, `1.2.3.${i}`) }) } as never;
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+    }
+    const context = { switchToHttp: () => ({ getRequest: () => request({ nickname: "admin" }, "9.9.9.9") }) } as never;
+    await expect(guard.canActivate(context)).rejects.toMatchObject({ status: 429 });
+  });
 });

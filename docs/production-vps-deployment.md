@@ -35,16 +35,17 @@ PostgreSQL, Redis, API, settlement, matching-engine, bots, web에는 호스트 �
 1. **프로세스가 스스로 지우는 것** (별도 설정 없음): API는 발행 1시간 지난 `order.outbox`, 매칭 엔진은
    발행된 `matching.outbox_events`와 7일 지난 `processed_order_events`·`closed_order_markers`를 1분마다
    배치(5,000행, 밀리면 최대 20배치)로 지운다. 자산 스냅샷은 API가 7일/90일 격자로 압축한다.
-2. **봇 이력 정리 스크립트** — 주 1회 cron 권장:
+2. **이력 정리 스크립트** — 봇이 상시 거래하는 서버는 매일 1회 실행:
    ```bash
    docker compose -f deploy/production/compose.production.yml run --rm api prune-history            # dry-run
    docker compose -f deploy/production/compose.production.yml run --rm api prune-history --apply --compact-bot-ledger
    ```
    봇 계정의 7일 지난 종결 주문, 30일 지난 봇↔봇 체결(그 실현손익·정산 claim 포함), 30일 지난 뉴스를
-   지우고 봇 원장을 계정당 한 행으로 압축한다. **사용자 계정이 한쪽이라도 낀 행은 절대 지우지 않는다.**
+   지우고 봇 원장을 계정당 한 행으로 압축한다. 주문 종료(`order.closed`) 정산 claim은 30일 뒤 정리한다.
+   체결 행의 정산 claim과 사용자 주문·체결·원장은 보존한다.
    실행 뒤 `run --rm api consistency`로 확인한다. 공간 회수는 autovacuum이 하며, 즉시 필요하면
    `VACUUM (FULL, ANALYZE)`를 해당 테이블에 실행한다(락 걸림 — 조용한 시간에).
-3. **지우면 안 되는 것**: `account.ledger_entries`(사용자), `account.processed_events`(체결 행이 있는 동안 —
+3. **지우면 안 되는 것**: `account.ledger_entries`(사용자), 체결의 `account.processed_events`(체결 행이 있는 동안 —
    체결의 정산 증거), `market.candles`, `account.realized_pnl`(사용자).
 
 ## 1. VPS 준비

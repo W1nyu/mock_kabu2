@@ -1,8 +1,13 @@
 [Unit]
-Description=mock-kabu2 pgBackRest backup (diff daily, full on Sunday)
+Description=mock-kabu2 pgBackRest backup (diff every six hours, full daily)
 After=docker.service
+StartLimitIntervalSec=2h
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
+Restart=on-failure
+RestartSec=15min
+TimeoutStartSec=30min
 WorkingDirectory=/opt/mock-kabu2
-ExecStart=/bin/sh -c 'if [ "$(date +%%u)" = 7 ]; then TYPE=full; else TYPE=diff; fi; docker compose --env-file deploy/production/.env.production -f deploy/production/compose.production.yml -f deploy/oci/compose.oci.yml exec -T postgres pgbackrest --stanza=mock-kabu --type=$TYPE backup'
+ExecStart=/bin/sh -c 'if [ "$(TZ=Asia/Seoul date +%%H)" = 03 ]; then TYPE=full; else TYPE=diff; fi; docker compose --env-file deploy/production/.env.production -f deploy/production/compose.production.yml -f deploy/oci/compose.oci.yml exec -T -u postgres postgres pgbackrest --stanza=mock-kabu --type=$TYPE backup'

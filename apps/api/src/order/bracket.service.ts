@@ -11,6 +11,7 @@ import {
 import type { PrismaClient } from "@mock-kabu/db";
 import { TRAIL_BPS_MAX, TRAIL_BPS_MIN, conditionMet, type BracketIntentDto } from "@mock-kabu/shared";
 import { BackgroundStatusRegistry } from "../core/background-status";
+import { maintenanceWindow } from "../common/maintenance-window";
 import { PRISMA } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
 import { ConditionalOrderService } from "./conditional-order.service";
@@ -108,6 +109,7 @@ export class BracketService implements OnModuleInit, OnModuleDestroy {
   }
 
   async sweep(): Promise<void> {
+    if (maintenanceWindow().active) return;
     if (this.sweeping) return;
     this.sweeping = true;
     try {

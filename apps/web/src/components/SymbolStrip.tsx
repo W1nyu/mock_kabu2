@@ -4,12 +4,14 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, fmt } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
+import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 
 interface SymbolRow {
   symbol: string;
   name: string;
   lastPrice: number;
-  initialPrice: number;
+  referencePrice: number;
+  sessionStart: number;
 }
 
 /**
@@ -22,13 +24,20 @@ export default function SymbolStrip({ current }: { current: string }) {
 
   useEffect(() => {
     let active = true;
-    api<SymbolRow[]>("/market/symbols", { auth: false })
-      .then((data) => {
-        if (active) setRows(data);
-      })
-      .catch(() => {});
+    const load = () => {
+      api<SymbolRow[]>("/market/symbols", { auth: false })
+        .then((data) => {
+          if (active && data.every((row) => row.sessionStart >= kstSessionStartMs())) setRows(data);
+        })
+        .catch(() => {});
+    };
+    load();
+    const refreshTimer = window.setInterval(load, 30_000);
+    const stopSessionRefresh = onKstSessionOpen(load);
     return () => {
       active = false;
+      window.clearInterval(refreshTimer);
+      stopSessionRefresh();
     };
   }, []);
 
@@ -51,7 +60,7 @@ export default function SymbolStrip({ current }: { current: string }) {
     <nav aria-label="종목 전환" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
       {rows.map((r) => {
         const price = live[r.symbol] ?? r.lastPrice;
-        const change = r.initialPrice > 0 ? ((price - r.initialPrice) / r.initialPrice) * 100 : 0;
+        const change = r.referencePrice > 0 ? ((price - r.referencePrice) / r.referencePrice) * 100 : 0;
         const tone = change > 0 ? "text-up" : change < 0 ? "text-down" : "text-ink-muted";
         const active = r.symbol === current;
         return (

@@ -1,0 +1,8 @@
+[Unit]
+Description=Resume mock-kabu trading bots after daily maintenance
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/mock-kabu2/scripts/ops/maintenance-bots.py resume

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, fmt, getToken, getUser } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
+import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 
 interface Level {
   price: number;
@@ -23,6 +24,7 @@ interface SessionExecutionStats {
 }
 
 interface SummaryDto {
+  sessionStart: number;
   buyVolume: number | string | null;
   sellVolume: number | string | null;
   lastTradeTs: number | string | null;
@@ -171,11 +173,13 @@ export default function Orderbook({
       api<SummaryDto>(`/market/summary/${symbol}`, { auth: false })
         .then((summary) => {
           if (disposed) return;
+          if (summary.sessionStart < kstSessionStartMs()) return;
 
           const watermark = finiteNumber(summary.lastTradeTs) ?? Number.NEGATIVE_INFINITY;
+          const sessionStart = finiteNumber(summary.sessionStart) ?? kstSessionStartMs();
           const pendingAfterSnapshot: TradeTick[] = [];
           for (const [id, tick] of pendingTicksRef.current) {
-            if (tick.ts > watermark) pendingAfterSnapshot.push(tick);
+            if (tick.ts >= sessionStart && tick.ts > watermark) pendingAfterSnapshot.push(tick);
             else pendingTicksRef.current.delete(id);
           }
 
@@ -189,6 +193,7 @@ export default function Orderbook({
 
     loadSummary();
     const refreshTimer = window.setInterval(loadSummary, 30_000);
+    const stopSessionRefresh = onKstSessionOpen(loadSummary);
     const flushOrderbook = () => {
       orderbookFlushTimerRef.current = null;
       orderbookBatchStartedAtRef.current = null;
@@ -223,7 +228,7 @@ export default function Orderbook({
     const unsubscribe = subscribe([`orderbook:${symbol}`, `trades:${symbol}`], ({ channel, data }) => {
       if (channel === `trades:${symbol}`) {
         const tick = parseTick(data);
-        if (tick) {
+        if (tick && tick.ts >= kstSessionStartMs()) {
           pendingTicksRef.current.set(tick.id, tick);
           const watermark = summaryWatermarkRef.current;
           if (watermark == null || tick.ts > watermark) {
@@ -237,6 +242,7 @@ export default function Orderbook({
     return () => {
       disposed = true;
       window.clearInterval(refreshTimer);
+      stopSessionRefresh();
       unsubscribe();
       if (flashTimerRef.current != null) window.clearTimeout(flashTimerRef.current);
       if (orderbookFlushTimerRef.current != null) window.clearTimeout(orderbookFlushTimerRef.current);
@@ -275,7 +281,7 @@ export default function Orderbook({
         <span className="panel-title">호가창</span>
         <span
           className={`num text-[11px] font-semibold ${executionStrengthTone}`}
-          title="체결강도 = (KST 당일 매수 체결량 ÷ 매도 체결량) × 100입니다. 100% 초과는 매수 우위, 미만은 매도 우위입니다."
+          title="체결강도 = (09:00 KST부터의 매수 체결량 ÷ 매도 체결량) × 100입니다. 100% 초과는 매수 우위, 미만은 매도 우위입니다."
         >
           체결강도 {executionStrength != null ? `${executionStrength.toFixed(1)}%` : "—"}
         </span>
@@ -301,7 +307,7 @@ export default function Orderbook({
           )}
         </div>
 
-        <div className="my-1 flex items-baseline justify-center gap-2 border-y border-hairline-soft bg-white/3 px-4 py-2">
+        <div className="my-1 flex items-baseline justify-center gap-2 border-y border-hairline-soft bg-surface-3/20 px-4 py-2">
           <span className="text-[10px] tracking-wide text-ink-faint uppercase">체결가</span>
           <span className="text-base font-semibold">
             {snap?.lastPrice != null ? fmt.format(snap.lastPrice) : "—"}
@@ -339,7 +345,7 @@ export default function Orderbook({
             </span>
             <span className="text-down">매도 잔량 {fmt.format(askDepth)}</span>
           </div>
-          <div className="mt-1 flex h-1 w-full overflow-hidden rounded-full bg-white/6">
+          <div className="mt-1 flex h-1 w-full overflow-hidden rounded-full bg-surface-3/35">
             <div className="bg-up/70 transition-[width] duration-300" style={{ width: `${bidShare * 100}%` }} />
             <div className="bg-down/70 transition-[width] duration-300" style={{ width: `${(1 - bidShare) * 100}%` }} />
           </div>
@@ -377,7 +383,7 @@ function Row({
   const width = Math.max(2, (level.qty / maxQty) * 100);
   return (
     <button
-      className={`group relative flex w-full items-center justify-between px-4 py-1 transition-colors hover:bg-white/6 ${
+      className={`group relative flex w-full items-center justify-between px-4 py-1 transition-colors hover:bg-surface-3/45 ${
         change === "decrease" ? "bg-warn/12" : change === "increase" ? "bg-ok/10" : ""
       }`}
       onClick={() => onClick?.(level.price)}

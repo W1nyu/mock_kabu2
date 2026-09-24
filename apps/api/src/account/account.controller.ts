@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { JwtUser } from "../auth/auth.service";
+import { TransferRateLimitGuard } from "../auth/login-rate-limit.guard";
 import { AccountService, type LeaderboardPeriod } from "./account.service";
 import { EquitySnapshotService, type EquityRange } from "./equity-snapshot.service";
 
@@ -49,6 +50,11 @@ export class AccountController {
     return this.account.getLeaderboard(user.accountId, limit ? Number(limit) : undefined, normalized);
   }
 
+  @Get("recipients")
+  recipients(@CurrentUser() user: JwtUser, @Query("q") query?: string) {
+    return this.account.adminRecipients(user.userId, query);
+  }
+
   /** KST 일별 성과 (종가 자산·전일 대비·실현손익). 최신순. */
   @Get("daily")
   getDaily(@CurrentUser() user: JwtUser, @Query("days") days?: string) {
@@ -61,10 +67,18 @@ export class AccountController {
   }
 
   @Post("transfer")
+  @UseGuards(TransferRateLimitGuard)
   transfer(
     @CurrentUser() user: JwtUser,
-    @Body() body: { toNickname: string; amount: number },
+    @Body() body: { toNickname: string; amount: number; adminPassword?: string },
   ) {
-    return this.account.transfer(user.accountId, body.toNickname, Number(body.amount));
+    return this.account.transfer(user.accountId, body.toNickname, Number(body.amount), user.userId, body.adminPassword);
+  }
+
+  @Post("transfer-all")
+  @UseGuards(TransferRateLimitGuard)
+  transferAll(@CurrentUser() user: JwtUser,
+    @Body() body: { amountEach: number; adminPassword: string; requestId: string }) {
+    return this.account.transferAll(user.accountId, user.userId, Number(body.amountEach), body.adminPassword, body.requestId);
   }
 }

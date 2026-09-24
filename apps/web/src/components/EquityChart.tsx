@@ -11,6 +11,7 @@ import {
 } from "lightweight-charts";
 import { api, getToken, won } from "@/lib/api";
 import { formatKstHm, formatKstMonthDay, formatKstTime } from "@/lib/time";
+import { chartTheme, useTheme } from "@/lib/theme";
 
 interface EquityPoint {
   ts: number;
@@ -51,6 +52,7 @@ function tickMark(time: UTCTimestamp, type: TickMarkType): string {
  * 면적 차트로 그린다. 첫 점 대비 증감이 색을 정한다(상승=빨강, 하락=파랑).
  */
 export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
+  const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState<Range>("1d");
   const [points, setPoints] = useState<EquityPoint[] | null>(null);
@@ -88,18 +90,18 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
     if (!containerRef.current || !points || points.length === 0) return;
     const first = points[0].equity;
     const last = points[points.length - 1].equity;
-    const tone = last > first ? "#ff5a6e" : last < first ? "#6e8aff" : "#38bdf8";
-
+    const colors = chartTheme();
+    const tone = last > first ? colors.up : last < first ? colors.down : colors.sky;
     const chart = createChart(containerRef.current, {
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#94a3b8",
+        textColor: colors.text,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "rgba(255, 255, 255, 0.05)" },
-        horzLines: { color: "rgba(255, 255, 255, 0.05)" },
+        vertLines: { color: colors.grid },
+        horzLines: { color: colors.grid },
       },
       localization: {
         timeFormatter: (time: UTCTimestamp) =>
@@ -109,11 +111,11 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
       timeScale: {
         timeVisible: range !== "all",
         secondsVisible: false,
-        borderColor: "rgba(255, 255, 255, 0.10)",
+        borderColor: colors.border,
         tickMarkFormatter: tickMark,
       },
       rightPriceScale: {
-        borderColor: "rgba(255, 255, 255, 0.10)",
+        borderColor: colors.border,
         scaleMargins: { top: 0.12, bottom: 0.08 },
       },
       crosshair: { mode: 0 },
@@ -159,7 +161,7 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
       chart.chartElement().style.display = "none";
       window.requestAnimationFrame(() => chart.remove());
     };
-  }, [points, range]);
+  }, [points, range, theme]);
 
   function selectRange(next: Range) {
     setRange(next);
@@ -214,7 +216,7 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
                 className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
                   range === r.id
                     ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
-                    : "text-ink-muted hover:bg-white/6 hover:text-ink"
+                    : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                 }`}
               >
                 {r.label}

@@ -10,7 +10,7 @@
 | Always Free 자원 | 이 프로젝트가 쓰는 방식 |
 |---|---|
 | Ampere A1.Flex 합계 4 OCPU / 24GB | VM 1대(권장 4/24, 최소 2/12)에 컨테이너 8개. 한도 합계 ≈ 4GB, 평상시 사용 ≈ 1.5GB |
-| 블록 스토리지 200GB | 부트 볼륨 100GB. DB는 보존 정책(주 1회 `prune-history`) 덕에 수 GB 안에서 머문다 |
+| 블록 스토리지 200GB | 부트 볼륨 100GB. DB는 보존 정책(매일 `prune-history`)으로 오래된 봇 이력을 정리한다 |
 | Object Storage 20GB | pgBackRest 백업 저장소(S3 호환 API) — 선택 |
 | Autonomous Database 2개 × 20GB | **주 DB로는 쓰지 않는다**(아래 "왜") — 아카이브·분석 스키마로 사용 — 선택 |
 | 아웃바운드 10TB/월 | 무의미할 만큼 넉넉 |
@@ -51,6 +51,12 @@ nano /opt/mock-kabu2/deploy/production/.env.production
 #   없으면 자동으로 APP_DOMAIN=localhost(자리표시자), APP_ORIGIN=http://공인IP, CADDYFILE=../oci/Caddyfile.http (HTTP 전용)
 /opt/mock-kabu2/deploy/oci/scripts/bootstrap.sh      # 빌드(A1에서 5~10분) → 기동 → 타이머 등록
 ```
+- 처음 `ubuntu` 공개키 접속을 확인한 뒤 SSH를 축소할 수 있다. `deploy/oci/sshd-hardening.conf`는 root SSH 로그인과 X11 포워딩을 끈다. 적용 전 현재 SSH 세션을 유지하고, 구문 검사 후 reload한 다음 새 터미널에서 `ubuntu` 재접속을 확인한다.
+  ```bash
+  sudo install -m 0644 /opt/mock-kabu2/deploy/oci/sshd-hardening.conf /etc/ssh/sshd_config.d/99-mock-kabu-hardening.conf
+  sudo /usr/sbin/sshd -t && sudo systemctl reload ssh
+  sudo /usr/sbin/sshd -T | grep -E '^(permitrootlogin|x11forwarding|passwordauthentication) '
+  ```
 - 도메인을 쓰면 A 레코드를 공인 IP로 가리키고 80/443이 열려 있으면 Caddy가 Let's Encrypt 인증서를 받는다.
   IP만 쓰는 HTTP 모드에서는 브라우저 시스템 알림(Notification API)이 동작하지 않는다.
 - 업데이트: `bootstrap.sh --update` (git pull → 빌드 → migrate → 재기동).
@@ -59,18 +65,25 @@ nano /opt/mock-kabu2/deploy/production/.env.production
 ### 등록되는 systemd 타이머
 | 타이머 | 주기 | 하는 일 |
 |---|---|---|
-| `mock-kabu-backup` | 매일 03:30 KST | pgBackRest diff(일요일 full) — 로컬 볼륨 또는 Object Storage |
-| `mock-kabu-prune` | 일요일 04:10 KST | `prune-history --apply --compact-bot-ledger` 후 `consistency` |
+| `mock-kabu-backup` | 03:30·09:30·15:30·21:30 KST | 03:30 full, 나머지 diff — 로컬 볼륨 또는 Object Storage |
+| `mock-kabu-maintenance-start/end` | 매일 04:10/04:20 KST | 새 주문 차단 시간 동안 봇 정지/재개. 디스크 보호 장치가 작동 중이면 재개하지 않음 |
+| `mock-kabu-prune` | 매일 04:11 KST | 오래된 봇 이력·주문 종료 정산 claim 정리 후 `consistency` |
+| `mock-kabu-build-cache-prune` | 매일 04:12 KST | 사용하지 않는 빌드 캐시를 2GB만 남기고 정리, 태그 없는 미사용 이미지 정리 |
 | `mock-kabu-oracle-sync` | 매시 | ADB 동기화 (`.env`에 `ORACLE_ORDS_URL`이 있을 때만 활성) |
 
 `systemctl list-timers 'mock-kabu-*'`, 로그는 `journalctl -u mock-kabu-prune`.
+
+로컬 저장소는 full 2개·diff 6개를 보관하며 연속 복구 WAL은 최신 diff부터 유지한다.
+이전 백업 자체의 시점 복원은 가능하지만 그 사이 임의 시점 복구는 보장하지 않는다.
+배포는 stanza 초기화를 확인하고 빌드 캐시를 2GB만 남긴다.
+디스크 고갈 복구 및 원인: [장애 기록](../../docs/incidents/2026-09-22-disk-full.md).
 
 ## 4. 백업을 Object Storage로 (선택)
 1. 콘솔 > Object Storage > 버킷 `mock-kabu2-backup` 생성(Private).
 2. 프로필 > 고객 비밀 키(Customer Secret Keys) 생성 → Access/Secret.
 3. `deploy/oci/pgbackrest.s3.conf`의 `REPLACE_NAMESPACE`(버킷 정보의 네임스페이스)와 리전을 채운다.
 4. `.env.production`에 `OCI_S3_ACCESS_KEY`, `OCI_S3_SECRET_KEY`, `PGBACKREST_CONF=../oci/pgbackrest.s3.conf` 를 넣고
-   `bootstrap.sh --update`. 첫 백업: `docker compose … exec postgres pgbackrest --stanza=mock-kabu stanza-create` 후
+   `bootstrap.sh --update`. 첫 백업: `docker compose … exec -u postgres postgres pgbackrest --stanza=mock-kabu stanza-create` 후
    `… --type=full backup`.
 
 ## 5. Autonomous Database 아카이브 (선택)

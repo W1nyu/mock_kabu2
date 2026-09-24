@@ -13,6 +13,7 @@
  *  - order.orders            봇 계정의 종결(FILLED/CANCELED/REJECTED) 주문, 7일
  *  - order.conditional_orders 봇 계정의 비대기(TRIGGERED/CANCELED/FAILED) 행, 7일
  *  - matching.trades          양쪽 모두 봇인 체결, 30일  (+ 그 실현손익 행, + 정산 claim account.processed_events)
+ *  - account.processed_events 30일 지난 비체결(order.closed) 정산 claim. 체결 claim은 체결 행이 남는 한 유지.
  *  - market.news_items        30일
  *  - account.ledger_entries   (--compact-bot-ledger) 봇 계정의 7일 지난 원장을 계정당 1행(COMPACTED)으로 압축.
  *                             sum(delta) == balance 불변식은 그대로 유지된다.
@@ -23,6 +24,7 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 const BATCH = 5_000;
+const CLOSED_EVENT_CLAIM_DAYS = 30;
 
 interface Options {
   apply: boolean;
@@ -138,7 +140,27 @@ async function main() {
     console.log(`  deleted ${removedTrades} trades, ${removedPnl} realized rows, ${removedClaims} settlement claims`);
   }
 
-  // 4) 오래된 뉴스
+  // 4) order.closed 정산 claim. 정산 스트림은 ACK된 이벤트만 trim하고,
+  // 이미 발행된 outbox는 별도로 정리한다. 30일 이후 비체결 claim만 지우며,
+  // 체결 claim은 matching.trades의 증거이므로 그 체결이 남아 있는 동안 보존한다.
+  const closedClaimsBefore = daysAgo(CLOSED_EVENT_CLAIM_DAYS);
+  const closedClaimsWhere = `WHERE p.processed_at < $1 AND NOT EXISTS (
+    SELECT 1 FROM matching.trades t WHERE t.id = p.event_id
+  )`;
+  console.log(`non-trade settlement claims (>${CLOSED_EVENT_CLAIM_DAYS}d): ${await count(
+    `SELECT COUNT(*) AS n FROM account.processed_events p ${closedClaimsWhere}`,
+    closedClaimsBefore,
+  )}`);
+  if (options.apply) {
+    const removed = await deleteBatched(
+      `DELETE FROM account.processed_events WHERE event_id IN (
+         SELECT p.event_id FROM account.processed_events p ${closedClaimsWhere} LIMIT ${BATCH})`,
+      closedClaimsBefore,
+    );
+    console.log(`  deleted ${removed}`);
+  }
+
+  // 5) 오래된 뉴스
   const newsBefore = daysAgo(options.newsDays);
   console.log(`news items (>${options.newsDays}d): ${await count(`SELECT COUNT(*) AS n FROM market.news_items WHERE created_at < $1`, newsBefore)}`);
   if (options.apply) {
@@ -149,7 +171,7 @@ async function main() {
     console.log(`  deleted ${removed}`);
   }
 
-  // 5) 봇 원장 압축 (opt-in). 계정별로 오래된 행을 한 줄로 합친다 — 합계·마지막 잔액 보존.
+  // 6) 봇 원장 압축 (opt-in). 계정별로 오래된 행을 한 줄로 합친다 — 합계·마지막 잔액 보존.
   if (options.compactBotLedger) {
     const ledgerBefore = daysAgo(options.ledgerDays);
     const candidates = await prisma.$queryRawUnsafe<{ account_id: string; n: bigint }[]>(

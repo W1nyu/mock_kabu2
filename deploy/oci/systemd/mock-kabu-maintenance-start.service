@@ -1,0 +1,8 @@
+[Unit]
+Description=Pause mock-kabu trading bots for daily maintenance
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/mock-kabu2/scripts/ops/maintenance-bots.py pause

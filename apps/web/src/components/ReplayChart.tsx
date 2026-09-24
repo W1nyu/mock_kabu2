@@ -14,6 +14,7 @@ import {
   type PriceFormatCustom,
   type UTCTimestamp,
 } from "lightweight-charts";
+import { chartTheme, useTheme } from "@/lib/theme";
 
 /** A source candle for the standalone replay chart. `time` may be epoch seconds, epoch milliseconds, or a date string. */
 export interface ReplayChartCandle {
@@ -53,8 +54,6 @@ interface HoveredCandle {
   close: number;
 }
 
-const UP = "#ff5a6e";
-const DOWN = "#6e8aff";
 const STORAGE_KEY = "mock-kabu2:replay:chart:indicators";
 const INDICATORS = [
   { key: "sma50", label: "50 SMA", color: "#34d399" },
@@ -189,6 +188,7 @@ export default function ReplayChart({
   currentPrice = null,
   className,
 }: ReplayChartProps) {
+  const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const priceLineRef = useRef<IPriceLine | null>(null);
@@ -228,28 +228,29 @@ export default function ReplayChart({
     const container = containerRef.current;
     if (!container) return;
 
+    const colors = chartTheme();
     const chart = createChart(container, {
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#94a3b8",
+        textColor: colors.text,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "rgba(255, 255, 255, 0.05)" },
-        horzLines: { color: "rgba(255, 255, 255, 0.05)" },
+        vertLines: { color: colors.grid },
+        horzLines: { color: colors.grid },
       },
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor: "rgba(255, 255, 255, 0.10)" },
-      rightPriceScale: { borderColor: "rgba(255, 255, 255, 0.10)", scaleMargins: { top: 0.05, bottom: 0.25 } },
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: colors.border },
+      rightPriceScale: { borderColor: colors.border, scaleMargins: { top: 0.05, bottom: 0.25 } },
       crosshair: { mode: 0 },
     });
     const candle = chart.addSeries(CandlestickSeries, {
-      upColor: UP,
-      downColor: DOWN,
-      borderUpColor: UP,
-      borderDownColor: DOWN,
-      wickUpColor: UP,
-      wickDownColor: DOWN,
+      upColor: colors.up,
+      downColor: colors.down,
+      borderUpColor: colors.up,
+      borderDownColor: colors.down,
+      wickUpColor: colors.up,
+      wickDownColor: colors.down,
       priceLineVisible: false,
       lastValueVisible: false,
       priceFormat: chartPriceFormat,
@@ -307,7 +308,7 @@ export default function ReplayChart({
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
       chart.remove();
     };
-  }, []);
+  }, [theme]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -360,7 +361,7 @@ export default function ReplayChart({
     } else if (visibleCandles.length > 0) {
       chart.timeScale().scrollToRealTime();
     }
-  }, [activeCandle, currentPrice, visibleCandles]);
+  }, [activeCandle, currentPrice, visibleCandles, theme]);
 
   function toggleIndicator(key: IndicatorKey) {
     const next = { ...indicatorsRef.current, [key]: !indicatorsRef.current[key] };

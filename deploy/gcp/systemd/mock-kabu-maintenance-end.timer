@@ -1,0 +1,10 @@
+[Unit]
+Description=End mock-kabu maintenance daily at 04:20 KST
+
+[Timer]
+OnCalendar=*-*-* 04:20:00 Asia/Seoul
+Persistent=false
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

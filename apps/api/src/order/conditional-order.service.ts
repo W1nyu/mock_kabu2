@@ -29,6 +29,7 @@ import {
 import type Redis from "ioredis";
 import { randomUUID } from "node:crypto";
 import { BackgroundStatusRegistry } from "../core/background-status";
+import { maintenanceWindow } from "../common/maintenance-window";
 import { PRISMA, REDIS_SUB } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
 import { OrderService } from "./order.service";
@@ -321,6 +322,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
 
   /** 체결가 하나로 해당 종목의 대기 주문을 검사한다. 발동 대상은 즉시 인덱스에서 제거된다. */
   onTick(symbol: string, price: number): void {
+    if (maintenanceWindow().active) return;
     const rows = this.waiting.get(symbol);
     if (!rows || rows.size === 0) return;
     for (const row of [...rows.values()]) {
@@ -356,6 +358,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async trigger(row: WaitingRow, price: number): Promise<void> {
+    if (maintenanceWindow().active) return;
     const label = describeCondition(row.direction, row.side);
     try {
       const claimed = await this.prisma.conditionalOrder.updateMany({

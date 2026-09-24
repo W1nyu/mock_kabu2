@@ -87,7 +87,7 @@ export default function NotificationBell({ accountId }: { accountId: string }) {
       {open && (
         <div
           className="glass absolute right-0 z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden shadow-2xl"
-          style={{ background: "rgba(9, 10, 15, 0.97)" }}
+          style={{ background: "var(--color-surface)" }}
         >
           <div className="panel-head">
             <span className="panel-title">알림</span>
@@ -114,12 +114,12 @@ export default function NotificationBell({ accountId }: { accountId: string }) {
                 </>
               );
               const className = `flex items-start gap-2 border-b border-hairline-soft px-4 py-2 last:border-b-0 ${
-                item.ts > readAt ? "bg-white/3" : ""
+                item.ts > readAt ? "bg-surface-3/20" : ""
               }`;
               return (
                 <li key={item.id}>
                   {item.href ? (
-                    <Link href={item.href} onClick={() => setOpen(false)} className={`${className} transition-colors hover:bg-white/6`}>
+                    <Link href={item.href} onClick={() => setOpen(false)} className={`${className} transition-colors hover:bg-surface-3/45`}>
                       {body}
                     </Link>
                   ) : (

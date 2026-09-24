@@ -83,6 +83,18 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.releaseAccountChannel(socket);
   }
 
+  connectionSnapshot() {
+    const sockets = [...(this.server?.sockets.sockets.values() ?? [])];
+    const accounts = new Set(sockets.map((socket) => socket.data.accountId).filter(Boolean));
+    return {
+      connectedSockets: sockets.length,
+      authenticatedSockets: sockets.filter((socket) => socket.data.accountId).length,
+      uniqueAuthenticatedAccounts: accounts.size,
+      anonymousSockets: sockets.filter((socket) => !socket.data.accountId).length,
+      scope: "this API process; sockets include multiple tabs; accounts reflect handshake authentication",
+    };
+  }
+
   @SubscribeMessage("join")
   join(@ConnectedSocket() socket: Socket, @MessageBody() channels: unknown) {
     for (const ch of this.allowedChannels(socket, channels)) {

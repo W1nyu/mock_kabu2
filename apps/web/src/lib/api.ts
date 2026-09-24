@@ -15,6 +15,7 @@ export interface SessionUser {
   userId: string;
   accountId: string;
   nickname: string;
+  isAdmin?: boolean;
 }
 
 export function getToken(): string | null {
@@ -58,8 +59,9 @@ export async function api<T = unknown>(
   options: { method?: string; body?: unknown; auth?: boolean; headers?: Record<string, string> } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json", ...(options.headers ?? {}) };
+  let token: string | null = null;
   if (options.auth !== false) {
-    const token = getToken();
+    token = getToken();
     if (token) headers.authorization = `Bearer ${token}`;
   }
   const res = await fetch(`${API_URL}${path}`, {
@@ -68,6 +70,10 @@ export async function api<T = unknown>(
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   if (!res.ok) {
+    if (res.status === 401 && token && getToken() === token) {
+      clearSession();
+      window.location.replace("/login");
+    }
     let message = `요청 실패 (${res.status})`;
     try {
       const body = await res.json();
@@ -88,4 +94,4 @@ export function newIdempotencyKey(): string {
 }
 
 export const fmt = new Intl.NumberFormat("ko-KR");
-export const won = (n: number | bigint) => `${fmt.format(Number(n))}원`;
+export const won = (n: number | bigint) => `${fmt.format(n)}원`;

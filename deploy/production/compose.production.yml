@@ -215,7 +215,10 @@ services:
       # api+postgres; 500ms halves it while the book still refills within a
       # second, and slowing the flow bots scales matching/settlement load with it.
       BOT_QUOTE_RECONCILE_MS: ${BOT_QUOTE_RECONCILE_MS:-500}
-      BOT_FLOW_DELAY_SCALE: ${BOT_FLOW_DELAY_SCALE:-1.5}
+      # Ordinary one-tick recentering creates durable place/cancel events.
+      # Keep fill replenishment fast, but pace price drift on a small disk.
+      BOT_ORDINARY_RECENTER_MS: ${BOT_ORDINARY_RECENTER_MS:-15000}
+      BOT_FLOW_DELAY_SCALE: ${BOT_FLOW_DELAY_SCALE:-1.2}
       NODE_OPTIONS: --max-old-space-size=192
     depends_on:
       api:

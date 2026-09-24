@@ -14,6 +14,7 @@ import {
 } from "@nestjs/common";
 import { CurrentUser, JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { JwtUser } from "../auth/auth.service";
+import { assertTradingOpen } from "../common/maintenance-window";
 import { BracketService, type BracketSpec } from "./bracket.service";
 import { OrderService, type PlaceOrderDto } from "./order.service";
 
@@ -35,6 +36,7 @@ export class OrderController {
     @Body() body: PlaceOrderDto & { bracket?: BracketSpec },
     @Headers("idempotency-key") idempotencyKey?: string,
   ) {
+    assertTradingOpen();
     const spec = body.bracket ? BracketService.validateSpec(body.bracket) : null;
     if (spec && body.side !== "BUY") throw new BadRequestException("자동 손절/익절은 매수 주문에만 붙일 수 있습니다");
     // Idempotency-Key 헤더(1~128자)가 있으면 재시도가 두 번째 주문을 만들지 않는다.
@@ -53,17 +55,20 @@ export class OrderController {
 
   @Delete("bracket/:id")
   cancelBracket(@CurrentUser() user: JwtUser, @Param("id") id: string) {
+    assertTradingOpen();
     return this.bracket.cancel(user.accountId, id);
   }
 
   @Delete(":id")
   cancel(@CurrentUser() user: JwtUser, @Param("id") id: string) {
+    assertTradingOpen();
     return this.orders.cancel(user.accountId, id);
   }
 
   /** 지정가 정정(취소 후 남은 수량 재접수). body: { price?, qty? } — qty는 새 남은 수량. */
   @Patch(":id")
   amend(@CurrentUser() user: JwtUser, @Param("id") id: string, @Body() body: { price?: number; qty?: number }) {
+    assertTradingOpen();
     return this.orders.amend(user.accountId, id, body);
   }
 

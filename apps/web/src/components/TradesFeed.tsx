@@ -116,7 +116,7 @@ export default function TradesFeed({ symbol }: { symbol: string }) {
         {ticks.map((t) => (
           <li
             key={t.tradeId}
-            className={`grid ${tradeGridColumns} items-center gap-x-2 px-4 py-1 transition-colors hover:bg-white/4`}
+            className={`grid ${tradeGridColumns} items-center gap-x-2 px-4 py-1 transition-colors hover:bg-surface-3/30`}
           >
             <span className={`font-medium ${t.takerSide === "BUY" ? "text-up" : "text-down"}`}>
               {fmt.format(t.price)}

@@ -127,7 +127,7 @@ function FilterChip({
       className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
         active
           ? "bg-sky/12 text-sky ring-1 ring-inset ring-sky/30"
-          : "text-ink-muted hover:bg-white/6 hover:text-ink"
+          : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
       }`}
     >
       {label}

@@ -246,7 +246,7 @@ export default function MyPosition({
       {protecting && (
         <form
           onSubmit={submitProtect}
-          className="num flex flex-wrap items-end gap-3 border-t border-hairline-soft bg-white/2 px-5 py-3 text-xs"
+          className="num flex flex-wrap items-end gap-3 border-t border-hairline-soft bg-surface-3/15 px-5 py-3 text-xs"
         >
           <ProtectField
             id={`protect-stop-${symbol}`}

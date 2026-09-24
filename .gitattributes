@@ -1,0 +1,3 @@
+deploy/oci/pgbackrest-wrapper.sh text eol=lf
+deploy/oci/scripts/bootstrap.sh text eol=lf
+deploy/gcp/scripts/*.sh text eol=lf

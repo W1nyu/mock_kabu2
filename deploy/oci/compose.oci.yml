@@ -42,6 +42,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - pgbackrest-data:/var/lib/pgbackrest
       - ${PGBACKREST_CONF:-../production/postgres/pgbackrest.conf}:/etc/pgbackrest/pgbackrest.conf:ro
+      - ../oci/pgbackrest-wrapper.sh:/usr/local/bin/pgbackrest:ro
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -49,6 +50,7 @@ services:
       POSTGRES_INITDB_ARGS: --data-checksums
       PGDATA: /var/lib/postgresql/data/pgdata
       PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_REPO1_CIPHER_PASS:?PGBACKREST_REPO1_CIPHER_PASS is required}
+      PGBACKREST_PG1_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       # S3 호환 저장소를 쓸 때 pgBackRest가 읽는 값 (설정 파일의 %env 참조)
       PGBACKREST_REPO1_S3_KEY: ${OCI_S3_ACCESS_KEY:-}
       PGBACKREST_REPO1_S3_KEY_SECRET: ${OCI_S3_SECRET_KEY:-}

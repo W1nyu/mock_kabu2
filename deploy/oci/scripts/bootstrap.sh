@@ -19,10 +19,17 @@ compose() {
 
 if [[ "${1:-}" == "--update" ]]; then
   git pull --ff-only
+  chmod 755 deploy/oci/pgbackrest-wrapper.sh
   compose build
+  docker builder prune -af --reserved-space 2GB
+  compose up -d --wait postgres
+  compose exec -T -u postgres postgres pgbackrest --stanza=mock-kabu stanza-create
   compose run --rm migrate
   compose up -d --remove-orphans
   compose ps
+  sudo install -m 0644 deploy/oci/systemd/mock-kabu-storage-guard.service deploy/oci/systemd/mock-kabu-storage-guard.timer deploy/oci/systemd/mock-kabu-backup.service deploy/oci/systemd/mock-kabu-prune.service deploy/oci/systemd/mock-kabu-prune.timer deploy/oci/systemd/mock-kabu-build-cache-prune.service deploy/oci/systemd/mock-kabu-build-cache-prune.timer deploy/oci/systemd/mock-kabu-maintenance-start.service deploy/oci/systemd/mock-kabu-maintenance-start.timer deploy/oci/systemd/mock-kabu-maintenance-end.service deploy/oci/systemd/mock-kabu-maintenance-end.timer /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now mock-kabu-storage-guard.timer mock-kabu-prune.timer mock-kabu-build-cache-prune.timer mock-kabu-maintenance-start.timer mock-kabu-maintenance-end.timer
   exit 0
 fi
 
@@ -71,16 +78,26 @@ for key in APP_ORIGIN POSTGRES_PASSWORD JWT_SECRET ADMIN_EMAIL; do
   grep -qE "^$key=.+" "$ENV_FILE" || { echo "$ENV_FILE 에 $key 가 비어 있습니다"; exit 1; }
 done
 
+chmod 755 deploy/oci/pgbackrest-wrapper.sh
 compose build
+docker builder prune -af --reserved-space 2GB
+compose up -d --wait postgres
+compose exec -T -u postgres postgres pgbackrest --stanza=mock-kabu stanza-create
 compose up -d
 compose ps
 
 # 정리·백업 타이머 (systemd). 실패해도 서비스에는 영향 없다.
 sudo install -m 0644 deploy/oci/systemd/mock-kabu-prune.service deploy/oci/systemd/mock-kabu-prune.timer \
   deploy/oci/systemd/mock-kabu-backup.service deploy/oci/systemd/mock-kabu-backup.timer \
+  deploy/oci/systemd/mock-kabu-build-cache-prune.service deploy/oci/systemd/mock-kabu-build-cache-prune.timer \
+  deploy/oci/systemd/mock-kabu-maintenance-start.service deploy/oci/systemd/mock-kabu-maintenance-start.timer \
+  deploy/oci/systemd/mock-kabu-maintenance-end.service deploy/oci/systemd/mock-kabu-maintenance-end.timer \
   deploy/oci/systemd/mock-kabu-oracle-sync.service deploy/oci/systemd/mock-kabu-oracle-sync.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now mock-kabu-prune.timer mock-kabu-backup.timer
+sudo systemctl enable --now mock-kabu-prune.timer mock-kabu-backup.timer mock-kabu-build-cache-prune.timer mock-kabu-maintenance-start.timer mock-kabu-maintenance-end.timer
+sudo install -m 0644 deploy/oci/systemd/mock-kabu-storage-guard.service deploy/oci/systemd/mock-kabu-storage-guard.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mock-kabu-storage-guard.timer
 if grep -qE "^ORACLE_ORDS_URL=https" "$ENV_FILE"; then
   sudo systemctl enable --now mock-kabu-oracle-sync.timer
 fi

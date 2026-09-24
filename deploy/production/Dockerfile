@@ -4,6 +4,10 @@
 # seed, consistency and recovery scripts.
 FROM node:22-bookworm-slim AS build
 
+# Prisma selects its engine variant from the installed OpenSSL version.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
@@ -38,6 +42,9 @@ RUN test -n "$NEXT_PUBLIC_API_URL"
 RUN DATABASE_URL=postgresql://build:build@localhost:5432/build pnpm build
 
 FROM node:22-bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1

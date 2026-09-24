@@ -1,0 +1,9 @@
+[Unit]
+Description=mock-kabu2 daily history prune + consistency check
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/mock-kabu2
+ExecStart=/usr/bin/docker compose --env-file deploy/production/.env.production -f deploy/production/compose.production.yml -f deploy/gcp/compose.gcp.yml run --rm --no-deps api prune-history --apply --compact-bot-ledger
+ExecStartPost=/usr/bin/docker compose --env-file deploy/production/.env.production -f deploy/production/compose.production.yml -f deploy/gcp/compose.gcp.yml run --rm --no-deps api consistency

@@ -1,0 +1,10 @@
+[Unit]
+Description=mock-kabu disk and backup guard (pause bots before exhaustion)
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/mock-kabu2
+ExecStart=/usr/bin/python3 scripts/ops/storage-guard.py --apply
+TimeoutStartSec=150
+UMask=0077

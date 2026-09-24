@@ -50,11 +50,47 @@ export class LoginRateLimitGuard implements CanActivate {
     keyOf: (request) =>
       `${clientIp(request)}:${loginIdentifierOf(request.body).toLowerCase().slice(0, 200)}`,
   };
+  static readonly accountRule: RateLimitRule = {
+    scope: "login-account",
+    windowSeconds: 900,
+    maxAttempts: 30,
+    keyOf: (request) => loginIdentifierOf(request.body).toLowerCase().slice(0, 200),
+  };
+  static readonly adminRule: RateLimitRule = {
+    scope: "login-admin",
+    windowSeconds: 900,
+    maxAttempts: 10,
+    keyOf: () => "admin",
+  };
 
   constructor(@Inject(REDIS) private redis: Redis) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    await enforceRateLimit(this.redis, LoginRateLimitGuard.rule, context.switchToHttp().getRequest<Request>());
+    const request = context.switchToHttp().getRequest<Request>();
+    await enforceRateLimit(this.redis, LoginRateLimitGuard.rule, request);
+    await enforceRateLimit(this.redis, LoginRateLimitGuard.accountRule, request);
+    const identifier = loginIdentifierOf(request.body).toLowerCase();
+    if (identifier === "admin" || identifier.startsWith("admin@")) {
+      await enforceRateLimit(this.redis, LoginRateLimitGuard.adminRule, request);
+    }
+    return true;
+  }
+}
+
+/** Bound password rechecks on transfers by signed account identity, independent of client IP. */
+@Injectable()
+export class TransferRateLimitGuard implements CanActivate {
+  static readonly rule: RateLimitRule = {
+    scope: "transfer",
+    windowSeconds: 60,
+    maxAttempts: 10,
+    keyOf: (request) => (request as Request & { user?: { userId?: string } }).user?.userId ?? "anonymous",
+  };
+
+  constructor(@Inject(REDIS) private redis: Redis) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    await enforceRateLimit(this.redis, TransferRateLimitGuard.rule, context.switchToHttp().getRequest<Request>());
     return true;
   }
 }

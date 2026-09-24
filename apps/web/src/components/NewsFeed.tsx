@@ -12,7 +12,7 @@ export function NewsRow({
   showSymbol?: boolean;
 }) {
   return (
-    <li className="border-b border-hairline-soft px-4 py-3 transition-colors last:border-b-0 hover:bg-white/3">
+    <li className="border-b border-hairline-soft px-4 py-3 transition-colors last:border-b-0 hover:bg-surface-3/25">
       <div className="flex items-baseline gap-3">
         <span className="num shrink-0 text-xs text-ink-faint">{formatNewsTime(item.ts)}</span>
 

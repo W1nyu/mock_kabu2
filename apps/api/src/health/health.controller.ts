@@ -1,10 +1,17 @@
 import { Controller, Get, Header, HttpStatus, Res } from "@nestjs/common";
 import type { Response } from "express";
+import { maintenanceWindow } from "../common/maintenance-window";
 import { HealthService } from "./health.service";
 
 @Controller("health")
 export class HealthController {
   constructor(private readonly health: HealthService) {}
+
+  @Get("maintenance")
+  @Header("Cache-Control", "no-store")
+  maintenance() {
+    return maintenanceWindow();
+  }
 
   /** Default platform health check: only route traffic when data stores are ready. */
   @Get()
