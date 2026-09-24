@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SymbolDef } from "@mock-kabu/shared";
-import type { LiveOrder } from "../client";
+import { ApiError, type LiveOrder } from "../client";
 import {
   buildGuardAwareLiquidityLadder,
   buildLiquidityLadder,
@@ -30,6 +30,8 @@ import {
   moveGuardedQuoteCenter,
   quoteCenterFromMarketPrice,
   remapActiveQuotesForPlan,
+  retryStaleRetiringCancels,
+  OneSidedQuoteWatchdog,
   sideMatchesPlan,
   type ManagedQuote,
   retireRetirableQuotesWhenPlanIsSufficient,
@@ -329,6 +331,30 @@ test("a one-tick recenter normalizes a reused best wall when it becomes a smalle
   assert.ok(oldBestBid.qty > nextOuterBid.qty);
   assert.equal(reused.needsNormalization, true);
   assert.equal(isQuoteSufficient(reused, nextOuterBid), false);
+});
+
+test("ordinary one-tick drift reuses most rows while preserved depth keeps exact budgeting", () => {
+  const original = buildLiquidityLadder(KABU, 120_000);
+  const next = buildLiquidityLadder(KABU, 120_100);
+  const asActive = () =>
+    new Map<string, ManagedQuote>(
+      original.map((quote) => [`${quote.side}:${quote.level}`, { ...quote, id: `${quote.side}:${quote.level}` }]),
+    );
+
+  const ordinary = asActive();
+  assert.equal(remapActiveQuotesForPlan(ordinary, next).length, 2);
+  assert.ok([...ordinary.values()].filter((quote) => quote.needsNormalization).length <= 4);
+
+  const guarded = asActive();
+  remapActiveQuotesForPlan(guarded, next, new Set(["BUY"]));
+  assert.ok(
+    [...guarded.values()].filter((quote) => quote.side === "BUY" && quote.needsNormalization).length >
+      [...ordinary.values()].filter((quote) => quote.side === "BUY" && quote.needsNormalization).length,
+  );
+  assert.equal(
+    [...guarded.values()].filter((quote) => quote.side === "SELL" && quote.needsNormalization).length,
+    [...ordinary.values()].filter((quote) => quote.side === "SELL" && quote.needsNormalization).length,
+  );
 });
 
 test("only a one-tick ladder recenter may overlap existing maker quotes", () => {
@@ -813,4 +839,111 @@ test("keeps full OPEN duplicates until the normalized ladder is complete, then r
   assert.equal(adopted!.retirable.size, 0);
   assert.equal(retiring.size, 1);
   assert.equal(retiring.has(partialGuard.id), false);
+});
+
+// 2026-09-24 운영 사고: KABU가 SELL 먼저 재배치하던 중 API가 재시작돼 옛 매도 취소가
+// "fetch failed"로 실패했다. 그 주문은 retiring에 남은 채 다시 취소되지 않았고,
+// 재배치는 "옛 매도 종료 대기"에서 2시간 멈춰 매수 호가가 모두 사라졌다.
+test("a cancel lost during an API restart is re-sent so a staged relocation cannot stall", async () => {
+  const oldCenter = 113_800;
+  const targetCenter = 114_500;
+  const targetPlan = buildLiquidityLadder(KABU, targetCenter);
+  const active = new Map<string, ManagedQuote>();
+  const live = new Map<string, { side: "BUY" | "SELL"; price: number; qty: number }>();
+  for (const quote of buildLiquidityLadder(KABU, oldCenter)) {
+    const id = `old-${quote.side}-${quote.level}`;
+    active.set(`${quote.side}:${quote.level}`, { ...quote, id });
+    live.set(id, { side: quote.side, price: quote.price, qty: quote.qty });
+  }
+  const retiring = new Map<string, ManagedQuote>();
+  let apiDown = true;
+  let placed = 0;
+  const client = {
+    placeOrder: async (order: { side: "BUY" | "SELL"; price?: number; qty: number }) => {
+      const id = `new-${placed++}`;
+      live.set(id, { side: order.side, price: order.price!, qty: order.qty });
+      return { id };
+    },
+    cancelOrder: async (id: string) => {
+      // undici fetch가 연결 거부 시 던지는 것과 같은 오류 — ApiError(거절)가 아니다.
+      if (apiDown) throw new TypeError("fetch failed");
+      live.delete(id);
+      return {};
+    },
+  };
+  // 운영의 reconcileQuotes()처럼 계정 API가 본 live 목록으로 retiring을 정리한다.
+  const reconcile = () => {
+    for (const id of [...retiring.keys()]) if (!live.has(id)) retiring.delete(id);
+  };
+  const advance = () =>
+    advanceStagedQuoteMigration(client as any, KABU.symbol, targetPlan, migration!, active, retiring, new Map(), new Map());
+
+  const migration = beginStagedQuoteMigration(KABU, oldCenter, targetCenter);
+  assert.equal(migration!.firstSide, "SELL");
+  assert.equal(await advance(), "STAGING_FIRST_SIDE");
+  reconcile();
+  const stuck = [...retiring.keys()];
+  assert.ok(stuck.length > 0, "the failed cancels leave old asks retiring");
+  assert.equal(await advance(), "WAITING_FOR_FIRST_SIDE_RETIREMENT");
+
+  apiDown = false;
+  const attempts = new Map<string, number>();
+  // 처음 본 시점은 기록만 하고, 재시도 간격이 지나기 전에는 다시 보내지 않는다.
+  assert.equal(await retryStaleRetiringCancels(client as any, retiring, attempts, 10_000, 2_000), 0);
+  assert.equal(await retryStaleRetiringCancels(client as any, retiring, attempts, 11_000, 2_000), 0);
+  assert.equal(await retryStaleRetiringCancels(client as any, retiring, attempts, 12_000, 2_000), stuck.length);
+  reconcile();
+  assert.equal(retiring.size, 0);
+
+  assert.equal(await advance(), "STAGING_SECOND_SIDE");
+  assert.ok(sideMatchesPlan(active, targetPlan, "BUY"), "bids are restored");
+  assert.equal(await advance(), "COMPLETE");
+});
+
+test("retrying retiring cancels tolerates rejections and transport errors", async () => {
+  const quote = (id: string): ManagedQuote => ({ id, side: "SELL", level: 0, price: 120_100, qty: 10 });
+  const retiring = new Map<string, ManagedQuote>([
+    ["gone", quote("gone")],
+    ["flaky", quote("flaky")],
+  ]);
+  const attempts = new Map<string, number>([
+    ["gone", 0],
+    ["flaky", 0],
+    ["stale", 0],
+  ]);
+  const sent: string[] = [];
+  const client = {
+    cancelOrder: async (id: string) => {
+      sent.push(id);
+      // 이미 종결된 주문 취소는 422 — 정상 경로다.
+      if (id === "gone") throw new ApiError(422, "already closed");
+      throw new TypeError("fetch failed");
+    },
+  };
+  assert.equal(await retryStaleRetiringCancels(client as any, retiring, attempts, 5_000, 2_000), 2);
+  assert.deepEqual(sent.sort(), ["flaky", "gone"]);
+  // 전송 실패도 루프를 멈추지 않고, 다음 간격에 다시 시도하도록 시각만 갱신한다.
+  assert.equal(attempts.get("flaky"), 5_000);
+  assert.equal(attempts.has("stale"), false, "entries no longer retiring are pruned");
+  assert.equal(retiring.size, 2, "only reconciliation may drop a retiring guard");
+});
+
+// 원인과 무관한 최후 안전장치: 한쪽 자기 호가가 계속 0이면 MM을 다시 띄운다.
+test("the one-sided quote watchdog fires only after a side stays empty for the limit", () => {
+  const watchdog = new OneSidedQuoteWatchdog(60_000);
+  const both = [{ side: "BUY" as const }, { side: "SELL" as const }];
+  const asksOnly = [{ side: "SELL" as const }];
+
+  assert.equal(watchdog.observe(both, 0), null);
+  assert.equal(watchdog.observe(asksOnly, 1_000), null);
+  assert.equal(watchdog.observe(asksOnly, 60_999), null);
+  assert.equal(watchdog.observe(asksOnly, 61_000), "BUY");
+
+  // 한 번이라도 다시 걸리면 시계가 초기화된다 — 정상적인 순간 공백은 재시작 사유가 아니다.
+  watchdog.reset();
+  assert.equal(watchdog.observe(asksOnly, 100_000), null);
+  assert.equal(watchdog.observe(both, 130_000), null);
+  assert.equal(watchdog.observe(asksOnly, 140_000), null);
+  assert.equal(watchdog.observe(asksOnly, 199_999), null);
+  assert.equal(watchdog.observe([], 200_000), "BUY");
 });

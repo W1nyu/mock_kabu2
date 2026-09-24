@@ -45,6 +45,37 @@ export interface MarketMakerOptions {
 
 /** Raised only when an inherited account cannot clear its legacy live orders. */
 export class MarketMakerStartupBlockedError extends Error {}
+/** Thrown out of runMarketMaker so the caller restarts it from a clean state. */
+export class MarketMakerStalledError extends Error {}
+
+/**
+ * Last-resort self-heal, independent of *why* a side went missing: if this
+ * maker's own live quotes on one side stay at zero for `limitMs`, report that
+ * side. A normal sweep or staged relocation refills within about a second.
+ */
+export class OneSidedQuoteWatchdog {
+  private readonly emptySince = new Map<OrderSide, number>();
+
+  constructor(private readonly limitMs: number) {}
+
+  observe(orders: Iterable<{ side: OrderSide }>, now: number): OrderSide | null {
+    const present = new Set<OrderSide>();
+    for (const order of orders) present.add(order.side);
+    for (const side of ["BUY", "SELL"] as const) {
+      if (present.has(side)) this.emptySince.delete(side);
+      else if (!this.emptySince.has(side)) this.emptySince.set(side, now);
+    }
+    for (const side of ["BUY", "SELL"] as const) {
+      const since = this.emptySince.get(side);
+      if (since != null && now - since >= this.limitMs) return side;
+    }
+    return null;
+  }
+
+  reset(): void {
+    this.emptySince.clear();
+  }
+}
 
 // The reserve owns twelve levels per side, while the REST snapshot exposes
 // ten.  Reconcile substantially faster than the visible cushion can be
@@ -58,13 +89,19 @@ const QUOTE_RECONCILE_MS = numericRuntimeEnv("BOT_QUOTE_RECONCILE_MS", 250, { mi
 /** Snapshot depth is a budget hint, not a trading dependency. */
 const PRESERVED_DEPTH_REFRESH_MS = 500;
 const STARTUP_CANCEL_TIMEOUT_MS = 5_000;
+/** A still-live cancellation-pending quote gets its DELETE re-sent at this interval. */
+const RETIRING_CANCEL_RETRY_MS = 2_000;
+const STAGED_STALL_WARN_MS = 30_000;
+const ONE_SIDED_RESTART_MS = numericRuntimeEnv("BOT_MM_ONE_SIDED_RESTART_MS", 60_000, { min: 10_000 });
 const MIN_ADOPTABLE_LEVELS_PER_SIDE = 8;
 /** A partial rung is topped up only after material depletion, not every fill. */
 const REFILL_LOW_WATER_RATIO = 0.45;
 /** A six-tick sweep is large enough to require a fresh wall, not a slow one-tick slide. */
 const FAST_REPRICE_MIN_TICKS = 6;
-/** Ordinary one-tick quote drift is deliberately paced to avoid cancel/requote churn. */
-const ORDINARY_RECENTER_MIN_INTERVAL_MS = 750;
+/** Ordinary price drift must not turn every small model tick into dozens of durable orders. */
+const ORDINARY_RECENTER_MIN_INTERVAL_MS = numericRuntimeEnv("BOT_ORDINARY_RECENTER_MS", 5_000, { min: 750 });
+/** Reused depth within this margin is preferable to a cancel/repost for every one-tick slide. */
+const REUSED_QUOTE_MAX_EXCESS_RATIO = 1.25;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -222,6 +259,7 @@ export function isQuoteSufficient(current: ManagedQuote | undefined, desired: Li
 export function remapActiveQuotesForPlan(
   active: Map<string, ManagedQuote>,
   plan: LiquidityQuote[],
+  strictSides: ReadonlySet<OrderSide> = new Set(),
 ): RetirableQuote[] {
   const bySideAndPrice = new Map<string, ManagedQuote[]>();
   for (const quote of active.values()) {
@@ -239,12 +277,14 @@ export function remapActiveQuotesForPlan(
       remapped.set(quoteKey(desired), {
         ...current,
         level: desired.level,
-        // A formerly inner/best quote can land on a smaller outer rung after
-        // a one-tick slide. Reusing its identity is safe, but reusing the
-        // oversized quantity would permanently inflate visible notional.
-        // Existing normalisation requests (including inherited fixed-size
-        // rows) must survive every re-key as well.
-        needsNormalization: current.needsNormalization || current.qty > desired.qty || undefined,
+        // A one-tick slide makes most reused rungs slightly oversized. Replacing
+        // every one writes millions of otherwise unnecessary orders and WAL.
+        // Cap the excess, while preserving strict budgeting around a durable
+        // partial and outstanding startup normalisation requests.
+        needsNormalization:
+          (current.needsNormalization && current.qty > desired.qty) ||
+          current.qty > Math.floor(desired.qty * (strictSides.has(desired.side) ? 1 : REUSED_QUOTE_MAX_EXCESS_RATIO)) ||
+          undefined,
       });
     }
   }
@@ -657,6 +697,46 @@ function reconcileQuotes(
   }
 }
 
+/**
+ * Re-send DELETE for cancellation-pending quotes the account API still reports
+ * live. A cancel lost to a transport failure (e.g. `fetch failed` while the API
+ * restarts during a deploy) used to leave its order live and in `retiring`
+ * forever; a staged relocation then waited on it indefinitely and never posted
+ * the opposite side (2026-09-24: KABU had no bids for two hours).
+ *
+ * Call only right after reconcileQuotes(), so `retiring` holds verified-live
+ * rows. The first sighting just starts the clock — the original DELETE may
+ * still be in flight. Only reconciliation may drop a retiring guard.
+ */
+export async function retryStaleRetiringCancels(
+  client: Pick<ApiClient, "cancelOrder">,
+  retiring: ReadonlyMap<string, ManagedQuote>,
+  lastAttemptAt: Map<string, number>,
+  now: number,
+  retryAfterMs = RETIRING_CANCEL_RETRY_MS,
+): Promise<number> {
+  for (const id of [...lastAttemptAt.keys()]) if (!retiring.has(id)) lastAttemptAt.delete(id);
+  let sent = 0;
+  for (const id of retiring.keys()) {
+    const last = lastAttemptAt.get(id);
+    if (last == null) {
+      lastAttemptAt.set(id, now);
+      continue;
+    }
+    if (now - last < retryAfterMs) continue;
+    lastAttemptAt.set(id, now);
+    sent++;
+    try {
+      await client.cancelOrder(id);
+    } catch (error) {
+      // A rejection means the row already closed; reconciliation drops it.
+      // A transport failure is retried on the next interval.
+      if (!isRejection(error)) continue;
+    }
+  }
+  return sent;
+}
+
 function matchesPlan(active: Map<string, ManagedQuote>, plan: LiquidityQuote[]): boolean {
   return (
     active.size === plan.length &&
@@ -966,6 +1046,8 @@ export async function runMarketMaker(
 ): Promise<void> {
   const active = new Map<string, ManagedQuote>();
   const retiring = new Map<string, ManagedQuote>();
+  const retiringCancelAttempts = new Map<string, number>();
+  const oneSidedWatchdog = new OneSidedQuoteWatchdog(ONE_SIDED_RESTART_MS);
   const preserved = new Map<string, PreservedOrderGuard>();
   const budgetedPreserved = new Map<string, PreservedOrderGuard>();
   const retirable = new Map<string, RetirableQuote>();
@@ -976,6 +1058,8 @@ export async function runMarketMaker(
   let lastOrdinaryCenterMoveAt = 0;
   let observedMarketLastPrice: number | null = null;
   let stagedMigration: StagedQuoteMigration | null = null;
+  let stagedMigrationStartedAt = 0;
+  let stagedMigrationStallWarned = false;
 
   while (true) {
     try {
@@ -1132,6 +1216,16 @@ export async function runMarketMaker(
           // `/orders?status=live` and `/market/orderbook` polling calls.
           const state = await client.quoteState(def.symbol);
           reconcileQuotes(state.orders, active, retiring, preserved, retirable, budgetedPreserved);
+          const missingSide = oneSidedWatchdog.observe(state.orders, now);
+          if (missingSide) {
+            throw new MarketMakerStalledError(
+              `[mm:${def.symbol}] no own ${missingSide} quote for ${Math.round(ONE_SIDED_RESTART_MS / 1000)}s; restarting maker`,
+            );
+          }
+          const resent = await retryStaleRetiringCancels(client, retiring, retiringCancelAttempts, now);
+          if (resent > 0) {
+            console.warn(`[mm:${def.symbol}] re-sent cancel for ${resent} still-live retiring quote(s)`);
+          }
           const lastPrice = state.orderbook.lastPrice;
           if (typeof lastPrice === "number" && Number.isSafeInteger(lastPrice) && lastPrice > 0) {
             observedMarketLastPrice = lastPrice;
@@ -1169,6 +1263,8 @@ export async function runMarketMaker(
       const targetCenter = guardedQuoteCenter(def, requestedCenter, preserved.values()) ?? quoteCenter;
       if (!stagedMigration && retiring.size === 0 && retirable.size === 0) {
         stagedMigration = beginStagedQuoteMigration(def, quoteCenter, targetCenter);
+        stagedMigrationStartedAt = now;
+        stagedMigrationStallWarned = false;
         if (stagedMigration) {
           console.log(
             `[mm:${def.symbol}] staged ${stagedMigration.firstSide}-first relocation ${quoteCenter} -> ${stagedMigration.targetCenter}`,
@@ -1187,6 +1283,14 @@ export async function runMarketMaker(
           preserved,
           retirable,
         );
+        // A relocation normally completes in about a second. Log a stall so a
+        // one-sided book is visible in `docker logs` instead of silent.
+        if (progress !== "COMPLETE" && !stagedMigrationStallWarned && now - stagedMigrationStartedAt >= STAGED_STALL_WARN_MS) {
+          stagedMigrationStallWarned = true;
+          console.warn(
+            `[mm:${def.symbol}] staged relocation stalled for ${Math.round((now - stagedMigrationStartedAt) / 1000)}s at ${progress} (retiring=${retiring.size})`,
+          );
+        }
         if (progress === "COMPLETE") {
           quoteCenter = stagedMigration.targetCenter;
           console.log(`[mm:${def.symbol}] staged relocation complete at ${quoteCenter}`);
@@ -1199,10 +1303,11 @@ export async function runMarketMaker(
       }
 
       const currentPlan = buildMarketMakerPlan(def, quoteCenter, budgetedPreserved);
+      const strictSides = new Set([...budgetedPreserved.values()].map((quote) => quote.side));
       // A durable partial can be filled between passes. Re-map even when the
       // center is unchanged so an old fresh wall that is now too large is
       // safely normalised rather than permanently stacking with the guard.
-      for (const quote of remapActiveQuotesForPlan(active, currentPlan)) {
+      for (const quote of remapActiveQuotesForPlan(active, currentPlan, strictSides)) {
         retirable.set(quote.id, quote);
       }
       const previousCenter = quoteCenter;
@@ -1227,7 +1332,7 @@ export async function runMarketMaker(
       const centerDirection = Math.sign(quoteCenter - previousCenter);
       const desiredPlan = buildMarketMakerPlan(def, quoteCenter, budgetedPreserved);
       if (quoteCenter !== previousCenter) {
-        for (const quote of remapActiveQuotesForPlan(active, desiredPlan)) {
+        for (const quote of remapActiveQuotesForPlan(active, desiredPlan, strictSides)) {
           retirable.set(quote.id, quote);
         }
       }
@@ -1252,6 +1357,9 @@ export async function runMarketMaker(
       // provider from taking over this symbol. Normal transport failures still
       // retry on the same provider.
       if (!initialized && error instanceof MarketMakerStartupBlockedError) throw error;
+      // The caller re-provisions the reserve and starts a fresh maker, whose
+      // startup path adopts or retires whatever this instance left live.
+      if (error instanceof MarketMakerStalledError) throw error;
       console.error(`[mm:${def.symbol}]`, error instanceof Error ? error.message : error);
     }
     await sleep(80 + Math.random() * 50);
