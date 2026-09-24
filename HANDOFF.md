@@ -1,5 +1,10 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-25 — MM 호가 산 모양 분포 (GCP 운영 적용)
+
+- `LIQUIDITY_LEVEL_WEIGHTS` [100,120,140,155,150,135,115,95,80,65,55,45](4호가 최대), 일반 1호가 최소 80주(기존 160). 인접 단 비율 ≤1.25(재사용 한도). 고가 종목(SAKU·DAON)은 `HIGH_PRICE_LEVEL_WEIGHTS`로 기존 앞쪽 집중 유지.
+- 운영: bots만 재생성, 롤백 이미지 `mock-kabu2-app:pre-hump-20260925`, 원본 `/tmp/liquidity.ts.orig-prod`. 재기동 직후 옛 주문을 채택해 점진 정규화 중이며, 화면 잔량에는 다른 봇 주문·PARTIAL 가드가 섞인다.
+
 ## 2026-09-25 — 관리자 시장 시나리오 (GCP 운영 적용)
 
 - 관리자 전용 `/ops`(메뉴 미노출): 종목 복수·방향(UP/DOWN)·강도 1~3·시작(KST)·기간 5분~24시간. API `/admin/market-scenarios`(비관리자 404), 봇은 `/internal/scenarios/active`를 30초마다 폴링. 테이블 `market.scenarios`.
