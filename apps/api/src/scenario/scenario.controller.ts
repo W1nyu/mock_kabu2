@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Headers, Param, Post, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { JwtUser } from "../auth/auth.service";
 import { ScenarioService, type CreateScenarioDto } from "./scenario.service";
@@ -22,6 +22,12 @@ export class AdminScenarioController {
   @Post(":id/cancel")
   cancel(@CurrentUser() user: JwtUser, @Param("id") id: string) {
     return this.scenarios.cancel(user.userId, id);
+  }
+
+  /** 취소했거나 종료된 시나리오만 지운다. */
+  @Delete(":id")
+  remove(@CurrentUser() user: JwtUser, @Param("id") id: string) {
+    return this.scenarios.remove(user.userId, id);
   }
 }
 

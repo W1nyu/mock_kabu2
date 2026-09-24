@@ -112,7 +112,7 @@ export default function OpsPage() {
     setBusy(true);
     setMessage(null);
     try {
-      await api("/admin/market-scenarios", {
+      const created = await api<Scenario & { requestedStartsAt: string | null }>("/admin/market-scenarios", {
         method: "POST",
         body: {
           symbols,
@@ -122,7 +122,12 @@ export default function OpsPage() {
           endsAt: new Date(start + duration * 60_000).toISOString(),
         },
       });
-      setMessage({ ok: true, text: "시나리오를 등록했습니다" });
+      setMessage({
+        ok: true,
+        text: created.requestedStartsAt
+          ? `같은 종목의 앞선 시나리오와 겹쳐 ${when(created.startsAt)} ~ ${when(created.endsAt)}로 미뤄 등록했습니다`
+          : "시나리오를 등록했습니다",
+      });
       setSymbols([]);
       setNow(Date.now());
       refresh();
@@ -143,6 +148,15 @@ export default function OpsPage() {
     }
   }
 
+  async function remove(id: string) {
+    try {
+      await api(`/admin/market-scenarios/${id}`, { method: "DELETE" });
+      setScenarios((current) => current.filter((scenario) => scenario.id !== id));
+    } catch (error) {
+      setMessage({ ok: false, text: error instanceof Error ? error.message : "삭제하지 못했습니다" });
+    }
+  }
+
   if (!ready) return null;
 
   const start = kstInputToMs(startsAt);
@@ -156,6 +170,7 @@ export default function OpsPage() {
           <p className="mt-1 text-sm text-ink-muted">
             정한 시간 동안 고른 종목에 호재 또는 악재가 더 자주, 더 세게 나오고 봇 주문이 그쪽으로 기웁니다.
             가격을 직접 움직이지는 않으며, 시작·종료 10분 동안 서서히 켜지고 꺼집니다. 사용자에게는 보이지 않습니다.
+            같은 종목에 이미 잡힌 시나리오와 시간이 겹치면, 새 시나리오는 그 시나리오가 끝난 뒤로 미뤄 등록됩니다.
           </p>
         </div>
 
@@ -310,9 +325,13 @@ export default function OpsPage() {
                         {when(scenario.startsAt)} ~ {when(scenario.endsAt)}
                       </td>
                       <td className="text-right">
-                        {cancellable && (
+                        {cancellable ? (
                           <button type="button" className="btn btn-ghost btn-sm" onClick={() => cancel(scenario.id)}>
                             {now >= Date.parse(scenario.startsAt) ? "중단" : "취소"}
+                          </button>
+                        ) : (
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(scenario.id)}>
+                            삭제
                           </button>
                         )}
                       </td>

@@ -45,6 +45,14 @@ export interface ScenarioDto {
   createdAt: string;
 }
 
+/** 겹쳐서 뒤로 밀렸다면 원래 요청한 시작 시각을 함께 돌려준다. */
+export interface CreatedScenarioDto extends ScenarioDto {
+  requestedStartsAt: string | null;
+}
+
+/** 시나리오 등록을 직렬화하는 pg advisory lock 키 (임의의 고정값). */
+const SCENARIO_LOCK_KEY = 725_300_001;
+
 /** 봇이 받는 최소 형태. 누가 만들었는지는 봇에 필요 없다. */
 export interface InternalScenarioDto {
   id: string;
@@ -87,13 +95,52 @@ export class ScenarioService {
     return rows.map(toDto);
   }
 
-  async create(userId: string, nickname: string, dto: CreateScenarioDto, nowMs = Date.now()): Promise<ScenarioDto> {
+  /**
+   * A symbol runs at most one scenario at a time. A new scenario that would
+   * overlap a pending or running one on any of its symbols keeps its duration
+   * and starts when the last conflicting one ends. The advisory lock makes two
+   * simultaneous submissions queue instead of both claiming the same slot.
+   */
+  async create(userId: string, nickname: string, dto: CreateScenarioDto, nowMs = Date.now()): Promise<CreatedScenarioDto> {
     await this.assertAdmin(userId);
     const input = parseScenario(dto, nowMs);
-    const row = await this.prisma.marketScenario.create({
-      data: { ...input, createdBy: nickname },
+    const durationMs = input.endsAt.getTime() - input.startsAt.getTime();
+
+    const row = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SCENARIO_LOCK_KEY})`;
+      const conflicts = await tx.marketScenario.findMany({
+        where: { canceledAt: null, endsAt: { gt: input.startsAt }, symbols: { hasSome: input.symbols } },
+        orderBy: { startsAt: "asc" },
+        select: { startsAt: true, endsAt: true },
+      });
+      const startsAtMs = firstFreeStart(input.startsAt.getTime(), durationMs, conflicts);
+      if (startsAtMs > nowMs + MAX_SCENARIO_LEAD_MS) {
+        throw new BadRequestException("앞선 시나리오 뒤로 미루면 7일을 넘습니다");
+      }
+      return tx.marketScenario.create({
+        data: {
+          ...input,
+          startsAt: new Date(startsAtMs),
+          endsAt: new Date(startsAtMs + durationMs),
+          createdBy: nickname,
+        },
+      });
     });
-    return toDto(row);
+
+    const shifted = row.startsAt.getTime() !== input.startsAt.getTime();
+    return { ...toDto(row), requestedStartsAt: shifted ? input.startsAt.toISOString() : null };
+  }
+
+  /** Only a canceled or finished scenario can be removed; a pending or live one must be canceled first. */
+  async remove(userId: string, id: string, nowMs = Date.now()): Promise<{ id: string }> {
+    await this.assertAdmin(userId);
+    const existing = await this.prisma.marketScenario.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("없는 시나리오입니다");
+    if (!existing.canceledAt && existing.endsAt.getTime() > nowMs) {
+      throw new BadRequestException("취소했거나 종료된 시나리오만 삭제할 수 있습니다");
+    }
+    await this.prisma.marketScenario.delete({ where: { id } });
+    return { id };
   }
 
   async cancel(userId: string, id: string): Promise<ScenarioDto> {
@@ -133,6 +180,25 @@ export class ScenarioService {
     const caller = await this.prisma.user.findUnique({ where: { id: userId }, select: { isAdmin: true } });
     if (!caller?.isAdmin) throw new NotFoundException();
   }
+}
+
+/**
+ * Earliest start at or after `requestedMs` whose window overlaps none of
+ * `taken`. `taken` must be sorted by start; one pass suffices because the
+ * candidate only moves later.
+ */
+export function firstFreeStart(
+  requestedMs: number,
+  durationMs: number,
+  taken: readonly { startsAt: Date; endsAt: Date }[],
+): number {
+  let start = requestedMs;
+  for (const window of taken) {
+    const windowStart = window.startsAt.getTime();
+    const windowEnd = window.endsAt.getTime();
+    if (windowStart < start + durationMs && windowEnd > start) start = windowEnd;
+  }
+  return start;
 }
 
 export function parseScenario(dto: CreateScenarioDto, nowMs: number) {
