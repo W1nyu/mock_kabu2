@@ -20,10 +20,25 @@ import {
 // still retains the required eight executable levels until the fast refill
 // loop observes the fill.
 export const LIQUIDITY_DISTANCE_TICKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
-/** Relative distribution only; actual share quantities depend on price. */
-export const LIQUIDITY_LEVEL_WEIGHTS = [160, 140, 120, 100, 85, 70, 60, 50, 45, 40, 35, 30] as const;
-/** Small ordinary market orders should not exhaust the best quote by default. */
-export const LIQUIDITY_MIN_BEST_QTY = 160;
+/**
+ * Relative distribution only; actual share quantities depend on price.
+ *
+ * Hump-shaped like a real book: the executable best is thinner, depth peaks
+ * at the 4th price and thins again outward. Neighbouring weights differ by at
+ * most 1.25x (REUSED_QUOTE_MAX_EXCESS_RATIO), so a one-tick slide can keep
+ * reusing rows at their new level instead of cancelling and reposting them.
+ */
+export const LIQUIDITY_LEVEL_WEIGHTS = [100, 120, 140, 155, 150, 135, 115, 95, 80, 65, 55, 45] as const;
+/**
+ * High-price listings keep the front-loaded shape. Their whole side is only a
+ * few hundred shares, so a hump would leave a near-empty executable best.
+ */
+export const HIGH_PRICE_LEVEL_WEIGHTS = [160, 140, 120, 100, 85, 70, 60, 50, 45, 40, 35, 30] as const;
+/**
+ * Small ordinary market orders (1..48 shares) should not exhaust the best
+ * quote. Low enough that the hump holds even for KABU's compact ladder.
+ */
+export const LIQUIDITY_MIN_BEST_QTY = 80;
 /**
  * The executable edge is replenished before a bounded taker can walk it.
  * At KABU's reference price the 160-share wall remains above the ₩12m bot
@@ -43,7 +58,10 @@ export function isHighPriceListing(def: SymbolDef): boolean {
 }
 /** Normalise legacy 80-share SAKU best walls promptly without replacing after every small fill. */
 export const SAKU_BEST_REFILL_LOW_WATER_RATIO = 0.9;
-const LIQUIDITY_WEIGHT_TOTAL = LIQUIDITY_LEVEL_WEIGHTS.reduce((sum, weight) => sum + weight, 0);
+
+export function liquidityLevelWeights(def: SymbolDef): readonly number[] {
+  return isHighPriceListing(def) ? HIGH_PRICE_LEVEL_WEIGHTS : LIQUIDITY_LEVEL_WEIGHTS;
+}
 /** The REST/UI order book exposes the nearest ten price levels per side. */
 export const VISIBLE_LIQUIDITY_LEVELS = 10;
 /** Bound fresh opposite-side expansion when a historical partial is extreme. */
@@ -95,8 +113,10 @@ function liquidityQtyByLevelForProfile(
   total: number,
   minimumBestQty: number,
   preserveNearDepth = false,
+  weights: readonly number[] = LIQUIDITY_LEVEL_WEIGHTS,
 ): number[] {
-  const raw = LIQUIDITY_LEVEL_WEIGHTS.map((weight) => (weight / LIQUIDITY_WEIGHT_TOTAL) * total);
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const raw = weights.map((weight) => (weight / weightTotal) * total);
   const quantities = raw.map((value) => Math.floor(value));
   let remainder = total - quantities.reduce((sum, qty) => sum + qty, 0);
 
@@ -151,6 +171,7 @@ export function liquidityQtyByLevelForSymbol(def: SymbolDef, centerPrice: number
     liquidityTotalQty(centerPrice),
     highPrice ? SAKU_MIN_BEST_QTY : LIQUIDITY_MIN_BEST_QTY,
     highPrice,
+    liquidityLevelWeights(def),
   );
 }
 
@@ -326,12 +347,13 @@ function guardAwareSideQuantities(
   // distribute just the remaining notional instead of scaling a second full
   // weighted ladder on top of it.
   const remainingBudget = Math.max(0, freshVisibleBudget - minimumVisibleNotional);
+  const weights = liquidityLevelWeights(def);
   const weightedNotional = visiblePrices.reduce(
-    (sum, price, level) => sum + Math.max(def.tickSize, price) * LIQUIDITY_LEVEL_WEIGHTS[level],
+    (sum, price, level) => sum + Math.max(def.tickSize, price) * weights[level],
     0,
   );
   const rawExtras = visiblePrices.map((_, level) =>
-    weightedNotional > 0 ? (LIQUIDITY_LEVEL_WEIGHTS[level] * remainingBudget) / weightedNotional : 0,
+    weightedNotional > 0 ? (weights[level] * remainingBudget) / weightedNotional : 0,
   );
   for (let level = 0; level < VISIBLE_LIQUIDITY_LEVELS; level++) {
     quantities[level] += Math.floor(rawExtras[level]);

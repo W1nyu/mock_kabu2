@@ -9,6 +9,8 @@ import {
   canLaddersCoexist,
   GUARD_AWARE_VISIBLE_TARGET_CAP_MULTIPLIER,
   LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO,
+  LIQUIDITY_LEVEL_WEIGHTS,
+  LIQUIDITY_MIN_BEST_QTY,
   SAKU_MIN_BEST_QTY,
   liquidityBestWallQty,
   liquidityMinimumBestQty,
@@ -101,8 +103,8 @@ test("liquidity ladder has dense, substantial depth on both sides", () => {
   assert.equal(asks.length, 12);
   assert.equal(bids[0].price, 119_900);
   assert.equal(asks[0].price, 120_100);
-  assert.ok(bids[0].qty >= 160);
-  assert.ok(asks[0].qty >= 160);
+  assert.ok(bids[0].qty >= LIQUIDITY_MIN_BEST_QTY);
+  assert.ok(asks[0].qty >= LIQUIDITY_MIN_BEST_QTY);
   assert.equal(bids[0].refillLowWaterRatio, LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO);
   assert.equal(asks[0].refillLowWaterRatio, LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO);
   assert.equal(bids[11].price, 118_800);
@@ -114,6 +116,22 @@ test("liquidity ladder has dense, substantial depth on both sides", () => {
   for (let index = 1; index < bids.length; index++) {
     assert.ok(bids[index - 1].price > bids[index].price);
     assert.ok(asks[index - 1].price < asks[index].price);
+  }
+});
+
+test("an ordinary ladder is hump-shaped: thinner best, peak at the 4th price, thinning outward", () => {
+  const bids = buildLiquidityLadder(KABU, 120_000).filter((quote) => quote.side === "BUY");
+  const qty = bids.map((quote) => quote.qty);
+  const peak = qty.indexOf(Math.max(...qty));
+  assert.equal(peak, 3);
+  for (let level = 1; level <= peak; level++) assert.ok(qty[level] > qty[level - 1], `rising at ${level}`);
+  for (let level = peak + 1; level < qty.length; level++) assert.ok(qty[level] < qty[level - 1], `falling at ${level}`);
+});
+
+test("neighbouring weights stay inside the reuse margin so one-tick slides do not repost", () => {
+  for (let level = 1; level < LIQUIDITY_LEVEL_WEIGHTS.length; level++) {
+    const [a, b] = [LIQUIDITY_LEVEL_WEIGHTS[level - 1], LIQUIDITY_LEVEL_WEIGHTS[level]];
+    assert.ok(Math.max(a, b) / Math.min(a, b) <= 1.25, `levels ${level - 1}/${level}`);
   }
 });
 
