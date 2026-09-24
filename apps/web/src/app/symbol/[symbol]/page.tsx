@@ -17,6 +17,7 @@ import TradesFeed from "@/components/TradesFeed";
 import { api, getToken } from "@/lib/api";
 import { COMPACT_TRADE_QUERY, useMediaQuery } from "@/lib/media";
 import { subscribe } from "@/lib/socket";
+import { formatKstHm } from "@/lib/time";
 
 // 캔들차트(lightweight-charts)는 클라이언트에서만 렌더하고 코드도 따로 싣는다.
 const CandleChart = dynamic(() => import("@/components/CandleChart"), {
@@ -36,6 +37,8 @@ interface MaintenanceStatus {
   startAt: string;
   endAt: string;
   timezone: string;
+  manual?: boolean;
+  message?: string | null;
 }
 
 type MobileTab = "orders" | "trades" | "news";
@@ -125,10 +128,17 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
         <section className="glass flex min-h-[24rem] flex-col items-center justify-center gap-4 px-6 py-12 text-center" role="status" aria-live="polite">
           <span className="rounded-full border border-warn/40 bg-warn/10 px-4 py-1 text-sm font-semibold text-warn">거래 점검 중</span>
           <h1 className="text-2xl font-bold text-ink">잠시 주식 거래를 멈췄습니다</h1>
-          <p className="max-w-lg text-sm leading-7 text-ink-muted">
-            매일 04:10~04:20(한국 시간)에는 주문과 시세 화면을 잠시 멈추고 서버를 정리합니다.
-            기존 주문과 잔고는 유지됩니다. 오전 4시 20분부터 다시 이용할 수 있습니다.
-          </p>
+          {maintenance.manual ? (
+            <p className="max-w-lg text-sm leading-7 text-ink-muted">
+              {maintenance.message} 기존 주문과 잔고는 유지됩니다.{" "}
+              {formatKstHm(Date.parse(maintenance.endAt))}쯤 다시 이용할 수 있습니다.
+            </p>
+          ) : (
+            <p className="max-w-lg text-sm leading-7 text-ink-muted">
+              매일 04:10~04:20(한국 시간)에는 주문과 시세 화면을 잠시 멈추고 서버를 정리합니다.
+              기존 주문과 잔고는 유지됩니다. 오전 4시 20분부터 다시 이용할 수 있습니다.
+            </p>
+          )}
         </section>
       ) : (
       <>

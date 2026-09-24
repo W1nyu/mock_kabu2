@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { indexLevel } from "@mock-kabu/shared";
-import { planRelistIndex } from "../relist-plan";
+import { planAddIndexMembers, planRelistIndex } from "../relist-plan";
 
 const shares = new Map([
   ["MOCK", 24_000_000],
@@ -85,5 +85,29 @@ test("an index that already has later epochs is refused", () => {
       shares,
       relistAt: 1_000,
     }),
+  );
+});
+
+test("new listings join the index without moving it, then count by market-cap weight", () => {
+  const withNew = new Map(lastPrices).set("BORI", 4_000).set("DAON", 400_000);
+  const newShares = new Map(shares).set("BORI", 300_000_000).set("DAON", 3_000_000);
+  const { next, level } = planAddIndexMembers({
+    current: plan.next,
+    newSymbols: ["BORI", "DAON"],
+    lastPrices: withNew,
+    shares: newShares,
+    at: 2_000,
+  });
+  const sharesOfNew = (s: string) => newShares.get(s)!;
+  assert.ok(Math.abs(indexLevel(next, (s) => withNew.get(s)!, sharesOfNew) - level) < 1e-9);
+  assert.deepEqual(next.members, ["BORI", "DAON", "KABU", "MOCK", "NEKO", "SAKU", "TANU"]);
+  // 편입 직후 신규 종목 비중 = 상장 시총 ÷ 전체 시총
+  const moved = new Map(withNew).set("DAON", 440_000); // +10%
+  const cap = [...next.members].reduce((sum, s) => sum + withNew.get(s)! * sharesOfNew(s), 0);
+  const weight = (400_000 * 3_000_000) / cap;
+  const change = indexLevel(next, (s) => moved.get(s)!, sharesOfNew) / level - 1;
+  assert.ok(Math.abs(change - 0.1 * weight) < 1e-12);
+  assert.throws(() =>
+    planAddIndexMembers({ current: next, newSymbols: ["DAON"], lastPrices: withNew, shares: newShares, at: 3_000 }),
   );
 });

@@ -66,6 +66,46 @@ export const COMPANY_PROFILES: readonly CompanyProfile[] = [
     macroBeta: { RATE: -0.6, FX: 0.6, OIL: 0.8, COMMODITY: 0.95, GLOBAL: 0.8 },
     plants: ["부산", "인천", "광양"],
   },
+  {
+    symbol: "BORI",
+    sector: "FOOD",
+    capEok: 6_000,
+    // Imports grain and sugar in dollars: a weak won and firm commodities squeeze margins.
+    macroBeta: { RATE: -0.4, FX: -0.5, OIL: -0.4, COMMODITY: -0.6, GLOBAL: 0.3 },
+    plants: ["이천", "음성", "김해"],
+  },
+  {
+    symbol: "BJAY",
+    sector: "AIRLINE",
+    capEok: 15_000,
+    // Jet fuel and aircraft leases are paid in dollars, so crude and a weak won both hurt.
+    macroBeta: { RATE: -0.6, FX: -1.0, OIL: -1.3, COMMODITY: -0.2, GLOBAL: 1.0 },
+    plants: ["인천공항", "김포", "제주"],
+  },
+  {
+    symbol: "SKYL",
+    sector: "TELECOM",
+    capEok: 30_000,
+    // A defensive, debt-funded network operator: rates matter, the cycle much less.
+    macroBeta: { RATE: -0.9, FX: -0.2, OIL: -0.1, COMMODITY: -0.1, GLOBAL: 0.4 },
+    plants: ["판교", "대전", "광주"],
+  },
+  {
+    symbol: "PIXL",
+    sector: "GAME",
+    capEok: 20_000,
+    // Growth stock with overseas revenue: rate cuts and a weak won both help.
+    macroBeta: { RATE: -1.0, FX: 0.6, OIL: 0, COMMODITY: 0, GLOBAL: 1.1 },
+    plants: ["판교", "성수"],
+  },
+  {
+    symbol: "DAON",
+    sector: "SEMICONDUCTOR",
+    capEok: 90_000,
+    // Chip exporter riding the global cycle.
+    macroBeta: { RATE: -0.8, FX: 1.0, OIL: -0.3, COMMODITY: -0.4, GLOBAL: 1.4 },
+    plants: ["평택", "청주", "용인"],
+  },
 ];
 
 const PROFILES_BY_SYMBOL = new Map(COMPANY_PROFILES.map((profile) => [profile.symbol, profile]));

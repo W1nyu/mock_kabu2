@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import MaintenanceBanner from "@/components/MaintenanceBanner";
 import MobileTabBar from "@/components/MobileTabBar";
 import Nav from "@/components/Nav";
 import Toaster from "@/components/Toaster";
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
           href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
         />
+        <MaintenanceBanner />
         <Nav />
         {/* 폰에서는 하단 탭(약 3.5rem)에 내용이 가리지 않게 아래 여백을 더 둔다. */}
         <main className="mx-auto w-full max-w-[1400px] px-4 pt-4 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-8">

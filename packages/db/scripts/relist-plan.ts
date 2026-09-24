@@ -60,3 +60,36 @@ export function planRelistIndex(input: RelistPlanInput): RelistPlan {
   const next: IndexEpoch = { startsAt: input.relistAt, divisor: continuingDivisor(capAfter, level), members };
   return { history: [history], next, level };
 }
+
+export interface AddMembersInput {
+  /** 지금 적용 중인 구간 (가장 최근). */
+  current: IndexEpoch;
+  /** 새로 편입할 종목 — 편입 순간 가격은 상장가. */
+  newSymbols: readonly string[];
+  lastPrices: ReadonlyMap<string, number>;
+  shares: ReadonlyMap<string, number>;
+  at: number;
+}
+
+/**
+ * 신규 상장 종목을 지수에 넣는 새 구간. 편입 직전 수준이 그대로 이어지도록 제수를 정하므로
+ * 편입 자체로는 지수가 움직이지 않고, 이후 신규 종목의 가격 변화가 시가총액 비중만큼 반영된다.
+ */
+export function planAddIndexMembers(input: AddMembersInput): { next: IndexEpoch; level: number } {
+  const { current, newSymbols, shares, lastPrices } = input;
+  if (newSymbols.length === 0) throw new Error("nothing to add");
+  if (input.at <= current.startsAt) throw new Error("new epoch must start after the current one");
+  const duplicate = newSymbols.find((s) => current.members.includes(s));
+  if (duplicate) throw new Error(`${duplicate} is already an index member`);
+  const need = (map: ReadonlyMap<string, number>, s: string, what: string) => {
+    const value = map.get(s);
+    if (!value || value <= 0) throw new Error(`missing ${what} for ${s}`);
+    return value;
+  };
+  const priceOf = (s: string) => need(lastPrices, s, "price");
+  const sharesOf = (s: string) => need(shares, s, "listed shares");
+  const level = indexLevel(current, priceOf, sharesOf);
+  const members = [...current.members, ...newSymbols].sort();
+  const capAfter = members.reduce((sum, s) => sum + priceOf(s) * sharesOf(s), 0);
+  return { next: { startsAt: input.at, divisor: continuingDivisor(capAfter, level), members }, level };
+}

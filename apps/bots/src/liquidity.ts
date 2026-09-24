@@ -32,6 +32,15 @@ export const LIQUIDITY_MIN_BEST_QTY = 160;
 export const LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO = 0.9;
 /** SAKU keeps more of its existing side budget at the executable price. */
 export const SAKU_MIN_BEST_QTY = 180;
+/**
+ * 상장가가 이 이상인 고가 종목(SAKU 300,000원, DAON 400,000원)은 가격에 비례해 줄어든 수량을
+ * 체결 가능한 가까운 호가에 모은다. 원래 SAKU 전용이던 규칙을 가격 기준으로 넓혔다.
+ */
+export const HIGH_PRICE_LISTING_MIN = 200_000;
+
+export function isHighPriceListing(def: SymbolDef): boolean {
+  return def.initialPrice >= HIGH_PRICE_LISTING_MIN;
+}
 /** Normalise legacy 80-share SAKU best walls promptly without replacing after every small fill. */
 export const SAKU_BEST_REFILL_LOW_WATER_RATIO = 0.9;
 const LIQUIDITY_WEIGHT_TOTAL = LIQUIDITY_LEVEL_WEIGHTS.reduce((sum, weight) => sum + weight, 0);
@@ -137,17 +146,17 @@ export function liquidityQtyByLevel(centerPrice: number): number[] {
 
 /** SAKU concentrates its unchanged side budget at the executable near-price rungs. */
 export function liquidityQtyByLevelForSymbol(def: SymbolDef, centerPrice: number): number[] {
-  const isSaku = def.symbol === "SAKU";
+  const highPrice = isHighPriceListing(def);
   return liquidityQtyByLevelForProfile(
     liquidityTotalQty(centerPrice),
-    isSaku ? SAKU_MIN_BEST_QTY : LIQUIDITY_MIN_BEST_QTY,
-    isSaku,
+    highPrice ? SAKU_MIN_BEST_QTY : LIQUIDITY_MIN_BEST_QTY,
+    highPrice,
   );
 }
 
 /** The required best-wall size is profile-aware so taker sizing and quotes agree. */
 export function liquidityMinimumBestQty(def: SymbolDef): number {
-  return def.symbol === "SAKU" ? SAKU_MIN_BEST_QTY : LIQUIDITY_MIN_BEST_QTY;
+  return isHighPriceListing(def) ? SAKU_MIN_BEST_QTY : LIQUIDITY_MIN_BEST_QTY;
 }
 
 /** The executable best-wall quantity for price-scaled taker flow. */
@@ -197,7 +206,7 @@ function liquidityQuote(
     ...(level === 0
       ? {
           refillLowWaterRatio:
-            def.symbol === "SAKU" ? SAKU_BEST_REFILL_LOW_WATER_RATIO : LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO,
+            isHighPriceListing(def) ? SAKU_BEST_REFILL_LOW_WATER_RATIO : LIQUIDITY_BEST_REFILL_LOW_WATER_RATIO,
         }
       : {}),
   };

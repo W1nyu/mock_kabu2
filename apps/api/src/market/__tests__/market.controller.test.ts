@@ -76,9 +76,11 @@ describe("market index session level", () => {
       $queryRaw: query,
     } as any, {} as any, new MemoCache());
 
+    // 첫 종목만 920(09:00 시가) → 940, 나머지는 직전 종가 900을 이어받는다.
+    const n = SYMBOLS.length;
     const expected = [
-      { ts: open.getTime(), value: 904 },
-      { ts: open.getTime() + 60_000, value: 908 },
+      { ts: open.getTime(), value: Math.round(((920 + 900 * (n - 1)) / n) * 100) / 100 },
+      { ts: open.getTime() + 60_000, value: Math.round(((940 + 900 * (n - 1)) / n) * 100) / 100 },
     ];
     expect(await controller.marketIndex("1d")).toEqual(expected);
     expect(await controller.marketIndex("1w")).toEqual(expected);

@@ -1,6 +1,6 @@
 import { Controller, Get, Header, HttpStatus, Res } from "@nestjs/common";
 import type { Response } from "express";
-import { maintenanceWindow } from "../common/maintenance-window";
+import { maintenanceWindow, upcomingManualMaintenance } from "../common/maintenance-window";
 import { HealthService } from "./health.service";
 
 @Controller("health")
@@ -10,7 +10,14 @@ export class HealthController {
   @Get("maintenance")
   @Header("Cache-Control", "no-store")
   maintenance() {
-    return maintenanceWindow();
+    const upcoming = upcomingManualMaintenance();
+    return {
+      ...maintenanceWindow(),
+      // 아직 시작 전인 임시 점검 — 웹이 미리 배너로 알린다.
+      upcoming: upcoming
+        ? { startAt: new Date(upcoming.startAt).toISOString(), endAt: new Date(upcoming.endAt).toISOString(), message: upcoming.message }
+        : null,
+    };
   }
 
   /** Default platform health check: only route traffic when data stores are ready. */

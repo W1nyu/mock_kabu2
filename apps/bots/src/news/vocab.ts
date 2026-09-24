@@ -124,6 +124,21 @@ export const SECTOR_VOCAB: Readonly<
   BIO: {
     product: ["차세대 항암 신약", "자가면역 치료제", "항체-약물 접합체", "경구용 대사질환 치료제"],
   },
+  FOOD: {
+    product: ["저당 음료 라인업", "간편식 브랜드", "프리미엄 빙과", "식물성 단백질 식품", "해외 전용 스낵", "건강기능식품"],
+  },
+  AIRLINE: {
+    product: ["장거리 신규 노선", "화물 전용기", "차세대 협동체 항공기", "지속가능 항공유", "항공 정비 사업", "저비용 자회사"],
+  },
+  TELECOM: {
+    product: ["5G 단독모드망", "기업용 클라우드", "위성 인터넷 서비스", "AI 데이터센터", "알뜰폰 요금제", "해저 케이블"],
+  },
+  GAME: {
+    product: ["신작 MMORPG", "모바일 수집형 RPG", "콘솔 액션 게임", "글로벌 퍼블리싱 계약", "e스포츠 리그", "클라우드 게임 서비스"],
+  },
+  SEMICONDUCTOR: {
+    product: ["3나노 파운드리 공정", "HBM 패키징", "AI 추론 칩", "차량용 반도체", "전력 반도체", "EUV 공정 라인"],
+  },
 };
 
 export function vocabList(key: VocabKey, sector: SectorTag | null): readonly string[] {

@@ -1,5 +1,14 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-24 — 서버 e2-standard-4 업그레이드·신규 5종목 상장·임시 점검 배너 (GCP 운영 적용)
+
+- **서버**: `mock-kabu-prod`를 e2-standard-2 → **e2-standard-4 (vCPU 4, 16GB)**. 콘솔에서 중지 → 머신 유형 변경 → 시작, 다운타임 약 3.5분(20:28~20:32 KST). 고정 IP·디스크·타이머·컨테이너 자동 기동 확인. 10종목 기동 직후 CPU 약 30~45%.
+- **신규 종목**(상장 시가총액 각 1.2조): BORI 보리식품 4,000원(3억 주)·BJAY 블루제이항공 20,000원(6,000만)·SKYL 스카이링크 40,000원(3,000만)·PIXL 픽셀게임즈 60,000원(2,000만)·DAON 다온반도체 400,000원(300만). 뉴스 섹터 FOOD/AIRLINE/TELECOM/GAME/SEMICONDUCTOR와 회사 프로필 추가. 상장가 20만 원 이상은 SAKU와 같은 집중 호가(`isHighPriceListing`). MM 예약 계정 bot21~25.
+- **지수 편입**: `packages/db/scripts/add-index-members.ts`(컨테이너 `index-add-members`, 기본 dry run, `--apply`) — 현재 구간에 없는 종목을 상장가로 편입하고 수준이 이어지는 새 구간 추가. 운영 11:32:44 UTC 적용, 지수 936.87 유지.
+- **임시 점검**: Redis `mock-kabu2:maintenance:manual` → API가 주문 차단, 웹 `MaintenanceBanner`가 예고/진행 배너 표시(절차 `docs/daily-maintenance.md`). 운영에서 20:26~21:06 예고 후 20:26 시작, 작업 완료 뒤 20:33에 조기 해제.
+- 순서: api/web 먼저 교체 → 점검 예고 → 시작 시 봇 정지·pgBackRest diff `20260923-183013F_20260924-112611D` → 머신 변경 → `compose run --rm seed`(종목·봇 보유) → `index-add-members --apply` → 엔진·정산 교체 → 점검 해제 → 봇 시작. 롤백 이미지 `mock-kabu2-app:pre-add5-20260924`, 원본 소스 서버 `/tmp/src-before-add5.tgz`. 10종목 양측 10단, 정합성 검사 전 항목 통과.
+- 로컬에서 같은 절차를 먼저 리허설했다(10종목 양측 호가·봇 오류 없음·정합성 통과).
+
 ## 2026-09-24 — 투자자 랭킹 정리 (GCP 운영 적용)
 
 - `Leaderboard.tsx`: 상위 10등(`TOP_N`)만 표시 — API가 순위 밖 내 행을 덧붙여도 화면에서는 뺀다. '지수 대비' 열과 그 설명 문구 제거. API 응답의 `indexRate/alpha` 필드는 그대로 둔다. web만 재빌드·재생성, 롤백 이미지 `mock-kabu2-app:pre-leaderboard-20260924`.

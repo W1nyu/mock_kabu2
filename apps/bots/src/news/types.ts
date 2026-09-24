@@ -15,7 +15,18 @@ export type NewsCategory =
   | "MACRO"
   | "SEQUEL";
 
-export type SectorTag = "ELECTRONICS" | "BROKER" | "TRADING" | "HEAVY" | "MATERIALS" | "BIO";
+export type SectorTag =
+  | "ELECTRONICS"
+  | "BROKER"
+  | "TRADING"
+  | "HEAVY"
+  | "MATERIALS"
+  | "BIO"
+  | "FOOD"
+  | "AIRLINE"
+  | "TELECOM"
+  | "GAME"
+  | "SEMICONDUCTOR";
 
 /**
  * The macro axis a market-wide story moves along. Each symbol has a signed beta on it.

@@ -82,6 +82,7 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/health`, `/health/live` | 프로세스 생존 |
 | GET | `/health/ready` | DB·Redis + 워커 heartbeat + `background`(조건부 감시자·자산 스냅샷·브래킷) |
 | GET | `/health/trading` | ready + 매칭·정산 워커가 모두 up일 때만 ok |
+| GET | `/health/maintenance` | 점검 상태 `{active, startAt, endAt, timezone, manual, message, upcoming}` — 매일 04:10~04:20 KST 또는 운영자 임시 점검(Redis `maintenance:manual`). `upcoming`은 시작 전 임시 점검 예고 (캐시 없음) |
 | GET | `/admin/lock-info` | 락 전략·충돌/재시도 카운터 |
 | GET | `/internal/operations` | API 컨테이너 loopback 전용 소켓 동접·프로세스 메모리 (공개 프록시에서 404) |
 | POST | `/internal/liquidity/ensure`, `/internal/news/publish` | 봇 프로세스 전용(부트스트랩 토큰) |

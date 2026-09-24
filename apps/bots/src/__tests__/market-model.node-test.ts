@@ -24,6 +24,7 @@ const KABU: SymbolDef = {
   name: "테스트",
   initialPrice: 1000,
   tickSize: 10,
+  listedShares: 1_000_000,
 };
 
 const MOCK: SymbolDef = {
@@ -31,6 +32,7 @@ const MOCK: SymbolDef = {
   name: "다른 테스트",
   initialPrice: 2_000,
   tickSize: 10,
+  listedShares: 1_000_000,
 };
 
 test("latest matching trade wins over the persisted cache on restart", () => {

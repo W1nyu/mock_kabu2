@@ -80,6 +80,12 @@ describe("LiquidityService.ensureReserves", () => {
       ["TANU", "bot18@bots.local"],
       ["SAKU", "bot19@bots.local"],
       ["NEKO", "bot20@bots.local"],
+      // 2026-09-24 추가 상장 — 기존 예약 계정 번호는 그대로, 뒤에 이어 붙는다.
+      ["BORI", "bot21@bots.local"],
+      ["BJAY", "bot22@bots.local"],
+      ["SKYL", "bot23@bots.local"],
+      ["PIXL", "bot24@bots.local"],
+      ["DAON", "bot25@bots.local"],
     ]);
   });
 

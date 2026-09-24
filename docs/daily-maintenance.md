@@ -20,3 +20,19 @@ sudo cat /var/lib/mock-kabu-maintenance/bots.json  # 점검 중에만 존재
 ```
 
 `bots.json`이 04:20 이후에도 남아 있으면 `sudo systemctl start mock-kabu-maintenance-end.service`로 재개를 재시도한다. 스토리지 가드의 `bots-paused.json`이 있으면 가드 경보를 먼저 해결한다.
+
+## 임시 점검 (서버 교체·종목 추가 등)
+
+Redis 키 `mock-kabu2:maintenance:manual`에 `{startAt, endAt, message}`(ISO 시각)를 넣으면 API가 2초 안에 읽는다.
+
+- 시작 전: `/health/maintenance`의 `upcoming`으로 모든 화면 상단에 "HH:MM~HH:MM 서버 점검 예정" 배너가 뜬다.
+- 시작~종료: 주문·예약·취소·정정이 매일 점검과 같이 503으로 막히고, 배너와 종목 화면에 `message`가 나온다.
+- 값이 잘못되면 무시한다(점검 없음). Redis AOF에 남아 VM 재부팅 뒤에도 유지된다.
+
+```bash
+VALUE='{"startAt":"2026-09-24T11:26:00Z","endAt":"2026-09-24T12:06:00Z","message":"서버 업그레이드 중입니다."}'
+sudo docker exec -e VALUE="$VALUE" mock-kabu2-prod-redis-1 sh -c 'redis-cli --no-auth-warning -a "$REDIS_PASSWORD" SET mock-kabu2:maintenance:manual "$VALUE" EX 7200'
+sudo docker exec mock-kabu2-prod-redis-1 sh -c 'redis-cli --no-auth-warning -a "$REDIS_PASSWORD" DEL mock-kabu2:maintenance:manual'   # 조기 종료
+```
+
+봇은 점검 중 주문이 막히므로 `compose stop bots`로 먼저 멈추고, 점검을 끈 직후 다시 띄운다.

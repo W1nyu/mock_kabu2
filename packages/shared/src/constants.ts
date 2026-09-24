@@ -17,13 +17,19 @@ export interface SymbolDef {
   listedShares: number;
 }
 
-/** 가상 종목 5개 */
+/** 가상 종목 10개 */
 export const SYMBOLS: SymbolDef[] = [
   { symbol: "MOCK", name: "모의전자", initialPrice: 50_000, tickSize: 50, listedShares: 24_000_000 },
   { symbol: "KABU", name: "카부증권", initialPrice: 120_000, tickSize: 100, listedShares: 10_000_000 },
   { symbol: "TANU", name: "타누키상사", initialPrice: 8_000, tickSize: 10, listedShares: 150_000_000 },
   { symbol: "SAKU", name: "사쿠라중공업", initialPrice: 300_000, tickSize: 500, listedShares: 4_000_000 },
   { symbol: "NEKO", name: "네코물산", initialPrice: 25_000, tickSize: 50, listedShares: 48_000_000 },
+  // 2026-09-24 추가 상장 — 상장 시가총액은 기존과 같은 1.2조 원
+  { symbol: "BORI", name: "보리식품", initialPrice: 4_000, tickSize: 5, listedShares: 300_000_000 },
+  { symbol: "BJAY", name: "블루제이항공", initialPrice: 20_000, tickSize: 50, listedShares: 60_000_000 },
+  { symbol: "SKYL", name: "스카이링크", initialPrice: 40_000, tickSize: 50, listedShares: 30_000_000 },
+  { symbol: "PIXL", name: "픽셀게임즈", initialPrice: 60_000, tickSize: 100, listedShares: 20_000_000 },
+  { symbol: "DAON", name: "다온반도체", initialPrice: 400_000, tickSize: 500, listedShares: 3_000_000 },
 ];
 
 /** 지수 시작 수준. 첫 구간의 제수는 상장 시가총액 합 ÷ INDEX_BASE_LEVEL이다. */
@@ -140,6 +146,8 @@ export const KEYS = {
   loginAttempts: (source: string) => redisKey(`ratelimit:login:${source}`),
   /** 주문 멱등 키 → 주문 ID (24시간 TTL) */
   orderIdempotency: (accountId: string, key: string) => redisKey(`idempotency:order:${accountId}:${key}`),
+  /** 운영자가 거는 임시 점검 JSON `{startAt, endAt, message}` — 주문 차단·화면 배너 */
+  manualMaintenance: () => redisKey("maintenance:manual"),
 } as const;
 
 /** Names used for worker heartbeats and operational health reports. */

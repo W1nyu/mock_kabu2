@@ -44,6 +44,7 @@ const KABU: SymbolDef = {
   name: "test",
   initialPrice: 120_000,
   tickSize: 100,
+  listedShares: 1_000_000,
 };
 
 const TANU: SymbolDef = {
@@ -51,6 +52,7 @@ const TANU: SymbolDef = {
   name: "test",
   initialPrice: 8_000,
   tickSize: 10,
+  listedShares: 1_000_000,
 };
 
 const SAKU: SymbolDef = {
@@ -58,6 +60,7 @@ const SAKU: SymbolDef = {
   name: "test",
   initialPrice: 300_000,
   tickSize: 500,
+  listedShares: 1_000_000,
 };
 
 const PENNY: SymbolDef = {
@@ -65,6 +68,7 @@ const PENNY: SymbolDef = {
   name: "test",
   initialPrice: 100,
   tickSize: 1,
+  listedShares: 1_000_000,
 };
 
 const TEN_THOUSAND: SymbolDef = {
@@ -72,6 +76,7 @@ const TEN_THOUSAND: SymbolDef = {
   name: "test",
   initialPrice: 10_000,
   tickSize: 10,
+  listedShares: 1_000_000,
 };
 
 function liveLadder(def: SymbolDef, center: number): LiveOrder[] {
