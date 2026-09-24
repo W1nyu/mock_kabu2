@@ -1,14 +1,16 @@
 import { Controller, Get, Inject, NotFoundException, Optional, Param, Query } from "@nestjs/common";
-import type { PrismaClient } from "@mock-kabu/db";
+import { Prisma, type PrismaClient } from "@mock-kabu/db";
 import {
   BASE_CANDLE_INTERVAL,
   candleIntervalSeconds,
   DEFAULT_CANDLE_INTERVAL,
+  epochAt,
+  indexLevel,
   KEYS,
   SYMBOLS,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
-import { koreaDayStart } from "../common/market-time";
+import { koreaSessionStart } from "../common/market-time";
 import { MemoCache } from "../core/memo-cache";
 import { PRISMA, REDIS } from "../core/tokens";
 
@@ -20,6 +22,9 @@ import { PRISMA, REDIS } from "../core/tokens";
 const SUMMARY_TTL_MS = 2_000;
 const AGGREGATE_CANDLE_TTL_MS = 5_000;
 const INDEX_TTL_MS = { "1d": 15_000, "1w": 60_000, all: 120_000 } as const;
+const INDEX_META_TTL_MS = 10_000;
+/** 재상장 전 체결은 시세에서 뺀다 (listed_at이 없으면 전체). */
+const LISTED_SINCE = Prisma.sql`COALESCE(s.listed_at, '-infinity'::timestamp)`;
 
 const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
 const BASE_CANDLE_SECONDS = candleIntervalSeconds(BASE_CANDLE_INTERVAL) ?? 60;
@@ -34,25 +39,49 @@ export class MarketController {
 
   @Get("symbols")
   symbols() {
-    return this.prisma.marketSymbol.findMany({
-      where: { symbol: { in: [...ACTIVE_SYMBOLS] } },
-      orderBy: { symbol: "asc" },
-    });
+    return this.symbolsForSession(koreaSessionStart());
+  }
+
+  private symbolsForSession(sessionStart: Date) {
+    const nextSessionStart = new Date(sessionStart.getTime() + 24 * 60 * 60 * 1000);
+    return this.cache.getOrCompute(`symbols:${sessionStart.getTime()}`, SUMMARY_TTL_MS, () =>
+      this.prisma.$queryRaw<
+        { symbol: string; name: string; initialPrice: number; tickSize: number; lastPrice: number; referencePrice: number }[]
+      >`
+        SELECT s.symbol, s.name, s.initial_price AS "initialPrice", s.tick_size AS "tickSize",
+               s.last_price AS "lastPrice", COALESCE(opening.price, previous.price, s.initial_price) AS "referencePrice"
+        FROM market.symbols s
+        LEFT JOIN LATERAL (
+          SELECT t.price FROM matching.trades t
+          WHERE t.symbol = s.symbol AND t.created_at >= ${sessionStart} AND t.created_at < ${nextSessionStart}
+            AND t.created_at >= ${LISTED_SINCE}
+          ORDER BY t.created_at ASC, t.id ASC LIMIT 1
+        ) opening ON true
+        LEFT JOIN LATERAL (
+          SELECT t.price FROM matching.trades t
+          WHERE t.symbol = s.symbol AND t.created_at < ${sessionStart}
+            AND t.created_at >= ${LISTED_SINCE}
+          ORDER BY t.created_at DESC, t.id DESC LIMIT 1
+        ) previous ON true
+        WHERE s.symbol IN (${Prisma.join([...ACTIVE_SYMBOLS])})
+        ORDER BY s.symbol ASC
+      `.then((rows) => rows.map((row) => ({ ...row, sessionStart: sessionStart.getTime() }))),
+    );
   }
 
   /**
-   * 전 종목 시세 + 당일 요약을 한 번에. 대시보드가 `/symbols` + 종목별 `/summary` 6번을 부르던 것을
+   * 전 종목 시세 + 09:00 KST 시작 세션 요약을 한 번에. 대시보드가 `/symbols` + 종목별 `/summary` 6번을 부르던 것을
    * 요청 1번·쿼리 1번(GROUP BY symbol)으로 줄인다. 2초 캐시.
    */
   @Get("overview")
   overview() {
-    return this.cache.getOrCompute("overview", SUMMARY_TTL_MS, () => this.computeOverview());
+    const sessionStart = koreaSessionStart();
+    return this.cache.getOrCompute(`overview:${sessionStart.getTime()}`, SUMMARY_TTL_MS, () => this.computeOverview(sessionStart));
   }
 
-  private async computeOverview() {
-    const sessionStart = koreaDayStart();
+  private async computeOverview(sessionStart: Date) {
     const [symbols, stats] = await Promise.all([
-      this.prisma.marketSymbol.findMany({ where: { symbol: { in: [...ACTIVE_SYMBOLS] } }, orderBy: { symbol: "asc" } }),
+      this.symbolsForSession(sessionStart),
       this.prisma.$queryRaw<
         {
           symbol: string;
@@ -66,17 +95,18 @@ export class MarketController {
         }[]
       >`
         SELECT
-          symbol,
-          MAX(price) AS high,
-          MIN(price) AS low,
-          COALESCE(SUM(qty), 0) AS volume,
-          COALESCE(SUM(price::bigint * qty), 0) AS turnover,
-          COALESCE(SUM(qty) FILTER (WHERE taker_side = 'BUY'), 0) AS buy_volume,
-          COALESCE(SUM(qty) FILTER (WHERE taker_side = 'SELL'), 0) AS sell_volume,
-          MAX(created_at) AS last_trade_ts
-        FROM matching.trades
-        WHERE created_at >= ${sessionStart}
-        GROUP BY symbol
+          t.symbol,
+          MAX(t.price) AS high,
+          MIN(t.price) AS low,
+          COALESCE(SUM(t.qty), 0) AS volume,
+          COALESCE(SUM(t.price::bigint * t.qty), 0) AS turnover,
+          COALESCE(SUM(t.qty) FILTER (WHERE t.taker_side = 'BUY'), 0) AS buy_volume,
+          COALESCE(SUM(t.qty) FILTER (WHERE t.taker_side = 'SELL'), 0) AS sell_volume,
+          MAX(t.created_at) AS last_trade_ts
+        FROM matching.trades t
+        JOIN market.symbols s ON s.symbol = t.symbol
+        WHERE t.created_at >= ${sessionStart} AND t.created_at >= ${LISTED_SINCE}
+        GROUP BY t.symbol
       `,
     ]);
     const bySymbol = new Map(stats.map((row) => [row.symbol, row]));
@@ -87,7 +117,8 @@ export class MarketController {
         name: marketSymbol.name,
         tickSize: marketSymbol.tickSize,
         initialPrice: marketSymbol.initialPrice,
-        referencePrice: marketSymbol.initialPrice,
+        referencePrice: marketSymbol.referencePrice,
+        sessionStart: sessionStart.getTime(),
         lastPrice: marketSymbol.lastPrice,
         high: row?.high ?? null,
         low: row?.low ?? null,
@@ -100,17 +131,19 @@ export class MarketController {
     });
   }
 
-  /** KST 당일 체결 기준 시세 요약. 캔들 개수 제한과 무관하게 하루 전체를 집계한다. */
+  /** 09:00 KST부터의 체결 기준 시세 요약. 캔들 개수 제한과 무관하게 세션 전체를 집계한다. */
   @Get("summary/:symbol")
   summary(@Param("symbol") symbol: string) {
     this.assertActiveSymbol(symbol);
-    return this.cache.getOrCompute(`summary:${symbol}`, SUMMARY_TTL_MS, () => this.computeSummary(symbol));
+    const sessionStart = koreaSessionStart();
+    return this.cache.getOrCompute(`summary:${symbol}:${sessionStart.getTime()}`, SUMMARY_TTL_MS, () =>
+      this.computeSummary(symbol, sessionStart),
+    );
   }
 
-  private async computeSummary(symbol: string) {
-    const sessionStart = koreaDayStart();
-    const [marketSymbol, [stats]] = await Promise.all([
-      this.prisma.marketSymbol.findUnique({ where: { symbol } }),
+  private async computeSummary(symbol: string, sessionStart: Date) {
+    const [symbols, [stats]] = await Promise.all([
+      this.symbolsForSession(sessionStart),
       this.prisma.$queryRaw<
         {
           high: number | null;
@@ -123,22 +156,25 @@ export class MarketController {
         }[]
       >`
         SELECT
-          MAX(price) AS high,
-          MIN(price) AS low,
-          COALESCE(SUM(qty), 0) AS volume,
-          COALESCE(SUM(price::bigint * qty), 0) AS turnover,
-          COALESCE(SUM(qty) FILTER (WHERE taker_side = 'BUY'), 0) AS buy_volume,
-          COALESCE(SUM(qty) FILTER (WHERE taker_side = 'SELL'), 0) AS sell_volume,
-          MAX(created_at) AS last_trade_ts
-        FROM matching.trades
-        WHERE symbol = ${symbol} AND created_at >= ${sessionStart}
+          MAX(t.price) AS high,
+          MIN(t.price) AS low,
+          COALESCE(SUM(t.qty), 0) AS volume,
+          COALESCE(SUM(t.price::bigint * t.qty), 0) AS turnover,
+          COALESCE(SUM(t.qty) FILTER (WHERE t.taker_side = 'BUY'), 0) AS buy_volume,
+          COALESCE(SUM(t.qty) FILTER (WHERE t.taker_side = 'SELL'), 0) AS sell_volume,
+          MAX(t.created_at) AS last_trade_ts
+        FROM matching.trades t
+        JOIN market.symbols s ON s.symbol = t.symbol
+        WHERE t.symbol = ${symbol} AND t.created_at >= ${sessionStart} AND t.created_at >= ${LISTED_SINCE}
       `,
     ]);
+    const marketSymbol = symbols.find((row) => row.symbol === symbol);
     if (!marketSymbol) throw new NotFoundException(`없는 종목: ${symbol}`);
 
     return {
       symbol,
-      referencePrice: marketSymbol.initialPrice,
+      referencePrice: marketSymbol.referencePrice,
+      sessionStart: sessionStart.getTime(),
       lastPrice: marketSymbol.lastPrice,
       high: stats?.high ?? null,
       low: stats?.low ?? null,
@@ -152,7 +188,8 @@ export class MarketController {
   }
 
   /**
-   * 모의 시장 지수 — 5종목 동일가중, 각 종목 종가/기준가(initial_price)의 평균 × 1000.
+   * 모의 시장 지수 — 시가총액 가중: Σ(종가 × 발행주식수) ÷ 제수. 제수와 편입 종목은
+   * market.index_epochs 구간이 정한다(상장 시 1,000, 재상장 등 편입 변경 시 수준이 이어지게 조정).
    * 1분 봉을 구간에 맞는 버킷으로 묶고, 버킷 안에 봉이 없는 종목은 직전 값을 이어 쓴다.
    * 자산 추이와 나란히 놓고 "시장을 이겼는지" 볼 때 쓴다.
    */
@@ -164,25 +201,58 @@ export class MarketController {
     );
   }
 
+  /** 현재 지수 구간 — 웹이 실시간 체결가로 현재 지수를 같은 식으로 계산할 때 쓴다. */
+  @Get("index/meta")
+  indexMeta() {
+    return this.cache.getOrCompute("index:meta", INDEX_META_TTL_MS, async () => {
+      const [epoch, symbols] = await Promise.all([
+        this.prisma.indexEpoch.findFirst({ orderBy: { startsAt: "desc" } }),
+        this.prisma.marketSymbol.findMany({ where: { symbol: { in: [...ACTIVE_SYMBOLS] } } }),
+      ]);
+      if (!epoch) throw new NotFoundException("지수 구간이 없습니다");
+      const shares = new Map(symbols.map((row) => [row.symbol, Number(row.listedShares)]));
+      return {
+        startsAt: epoch.startsAt.getTime(),
+        divisor: epoch.divisor,
+        members: epoch.members.map((symbol) => ({ symbol, listedShares: shares.get(symbol) ?? 0 })),
+      };
+    });
+  }
+
   private async computeMarketIndex(range: "1d" | "1w" | "all") {
     const bucketSeconds = range === "all" ? 3_600 : range === "1w" ? 600 : 60;
     const rangeMs = range === "all" ? null : range === "1w" ? 7 * 24 * 3_600_000 : 24 * 3_600_000;
     const since = rangeMs == null ? new Date(0) : new Date(Date.now() - rangeMs);
-    const symbols = await this.prisma.marketSymbol.findMany({ where: { symbol: { in: [...ACTIVE_SYMBOLS] } } });
-    const rows = await this.prisma.$queryRaw<{ bucket: Date; symbol: string; close: number }[]>`
-      SELECT DISTINCT ON (bucket, symbol) bucket, symbol, close
+    const [symbols, epochRows] = await Promise.all([
+      this.prisma.marketSymbol.findMany({ where: { symbol: { in: [...ACTIVE_SYMBOLS] } } }),
+      this.prisma.indexEpoch.findMany({ orderBy: { startsAt: "asc" } }),
+    ]);
+    const epochs = epochRows.map((row) => ({ startsAt: row.startsAt.getTime(), divisor: row.divisor, members: row.members }));
+    const shares = new Map(symbols.map((s) => [s.symbol, Number(s.listedShares)]));
+    const prior = range === "all" ? [] : await this.prisma.$queryRaw<{ symbol: string; close: number | null }[]>`
+      SELECT s.symbol, (
+        SELECT c.close FROM market.candles c
+        WHERE c.symbol = s.symbol AND c.interval = ${BASE_CANDLE_INTERVAL} AND c.ts < ${since}
+        ORDER BY c.ts DESC LIMIT 1
+      ) AS close
+      FROM market.symbols s WHERE s.symbol IN (${Prisma.join([...ACTIVE_SYMBOLS])})
+    `;
+    const rows = await this.prisma.$queryRaw<{ bucket: Date; symbol: string; open: number; close: number }[]>`
+      SELECT DISTINCT ON (bucket, symbol) bucket, symbol,
+        FIRST_VALUE(open) OVER (PARTITION BY bucket, symbol ORDER BY ts ASC) AS open,
+        close
       FROM (
         SELECT
           to_timestamp(floor(extract(epoch FROM ts) / ${bucketSeconds}) * ${bucketSeconds}) AS bucket,
-          symbol, ts, close
+            symbol, ts, open, close
         FROM market.candles
         WHERE interval = ${BASE_CANDLE_INTERVAL} AND ts >= ${since}
       ) c
       ORDER BY bucket ASC, symbol ASC, ts DESC
     `;
     const initial = new Map(symbols.map((s) => [s.symbol, s.initialPrice]));
-    const last = new Map<string, number>();
-    const buckets = new Map<number, Map<string, number>>();
+      const last = new Map<string, number>(prior.filter((row) => row.close != null).map((row) => [row.symbol, row.close!]));
+      const buckets = new Map<number, Map<string, { open: number; close: number }>>();
     for (const row of rows) {
       const ts = row.bucket.getTime();
       let bucket = buckets.get(ts);
@@ -190,23 +260,22 @@ export class MarketController {
         bucket = new Map();
         buckets.set(ts, bucket);
       }
-      bucket.set(row.symbol, row.close);
+        bucket.set(row.symbol, { open: row.open, close: row.close });
     }
     const points: { ts: number; value: number }[] = [];
     for (const ts of [...buckets.keys()].sort((a, b) => a - b)) {
       const bucket = buckets.get(ts)!;
-      for (const [symbol, close] of bucket) last.set(symbol, close);
-      // 아직 한 번도 거래되지 않은 종목은 기준가(=1.0)로 본다.
-      let sum = 0;
-      let count = 0;
-      for (const [symbol, base] of initial) {
-        const close = last.get(symbol) ?? base;
-        if (base > 0) {
-          sum += close / base;
-          count += 1;
-        }
-      }
-      if (count > 0) points.push({ ts, value: Math.round((sum / count) * 1000 * 100) / 100 });
+        for (const [symbol, candle] of bucket) last.set(symbol, candle.close);
+      const epoch = epochAt(epochs, ts);
+      if (!epoch || epoch.divisor <= 0) continue;
+      // 09:00 점은 해당 1분봉의 시가다. 나머지 시간은 종가로 이어지며 09:00에 체결이 없는 종목은
+      // 직전 가격을, 아직 한 번도 거래되지 않은(재상장 직후 포함) 종목은 상장가를 쓴다.
+      const priceOf = (symbol: string) => {
+        const base = initial.get(symbol) ?? 0;
+        return ts % 86_400_000 === 0 ? (bucket.get(symbol)?.open ?? last.get(symbol) ?? base) : (last.get(symbol) ?? base);
+      };
+      const value = indexLevel(epoch, priceOf, (symbol) => shares.get(symbol) ?? 0);
+      points.push({ ts, value: Math.round(value * 100) / 100 });
     }
     return points;
   }
@@ -293,10 +362,11 @@ export class MarketController {
   }
 
   @Get("trades/:symbol")
-  trades(@Param("symbol") symbol: string, @Query("limit") limit = "50") {
+  async trades(@Param("symbol") symbol: string, @Query("limit") limit = "50") {
     this.assertActiveSymbol(symbol);
+    const listed = await this.prisma.marketSymbol.findUnique({ where: { symbol }, select: { listedAt: true } });
     return this.prisma.trade.findMany({
-      where: { symbol },
+      where: { symbol, ...(listed?.listedAt ? { createdAt: { gte: listed.listedAt } } : {}) },
       orderBy: { createdAt: "desc" },
       take: Math.min(Number(limit) || 50, 200),
     });
@@ -306,4 +376,3 @@ export class MarketController {
     if (!ACTIVE_SYMBOLS.has(symbol)) throw new NotFoundException(`없는 종목: ${symbol}`);
   }
 }
-

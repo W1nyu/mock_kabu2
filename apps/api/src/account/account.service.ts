@@ -1,14 +1,17 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
   Optional,
   UnprocessableEntityException,
+  UnauthorizedException,
 } from "@nestjs/common";
 import type { BalanceMutator } from "@mock-kabu/concurrency";
 import { Prisma, type PrismaClient } from "@mock-kabu/db";
 import { ADMIN_NICKNAME, SYMBOLS } from "@mock-kabu/shared";
+import * as bcrypt from "bcryptjs";
 import { koreaDayStart } from "../common/market-time";
 import { MemoCache } from "../core/memo-cache";
 import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
@@ -34,8 +37,10 @@ export class AccountService {
     return {
       id: acc.id,
       balance: acc.balance,
+      balanceExact: acc.balance.toString(),
       holdAmount: acc.holdAmount,
       available: acc.balance - acc.holdAmount,
+      availableExact: (acc.balance - acc.holdAmount).toString(),
     };
   }
 
@@ -238,6 +243,8 @@ export class AccountService {
         realized: bigint;
         joined_at: Date;
         index_ratio: number | null;
+        index_current: number | null;
+        index_base: number | null;
         base_equity: bigint | null;
         base_ts: Date | null;
         period_flows: bigint;
@@ -253,33 +260,49 @@ export class AccountService {
         b.equity AS base_equity,
         b.ts AS base_ts,
         COALESCE(f.flows, 0) AS period_flows,
-        -- 기준 시점(가입 또는 기간 시작 중 늦은 쪽) 대비 시장 지수 배율:
-        -- 종목별 현재가 / 기준 직전 1분봉 종가(없으면 기준가)의 평균
-        (
-          SELECT AVG(s.last_price::double precision / COALESCE(c.close, s.initial_price))
-          FROM market.symbols s
-          LEFT JOIN LATERAL (
-            SELECT close FROM market.candles c
-            WHERE c.symbol = s.symbol AND c.interval = '1m' AND c.ts <= GREATEST(u.created_at, ${since})
-            ORDER BY c.ts DESC LIMIT 1
-          ) c ON true
-          WHERE s.symbol IN (${Prisma.join(SYMBOLS.map((symbol) => symbol.symbol))})
-        ) AS index_ratio
+        idx.current_level / NULLIF(idx.base_level, 0) AS index_ratio,
+        idx.current_level AS index_current,
+        idx.base_level AS index_base
       FROM account.accounts a
+      -- 봇·관리자·스모크 테스트 계정은 순위에서 뺀다.
+      JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false AND u.is_admin = false
+        AND u.nickname <> ${ADMIN_NICKNAME} AND u.nickname NOT LIKE 'smoke-%'
       LEFT JOIN LATERAL (
         SELECT equity, ts FROM account.equity_snapshots e
         WHERE e.account_id = a.id AND e.ts >= ${since}
         ORDER BY e.ts ASC LIMIT 1
       ) b ON ${period !== "all"}
+      -- /market/index와 같은 시가총액 가중 지수: 그 시각의 구간(index_epochs)의 편입 종목을
+      -- Σ(가격 × 발행주식수) ÷ 제수로 합산한다. 기간 랭킹은 기준 자산 스냅샷 시각을 쓴다.
+      LEFT JOIN LATERAL (
+          SELECT cur.level AS current_level, base.level AS base_level
+          FROM (
+            SELECT SUM(s.last_price::double precision * s.listed_shares) / MAX(e.divisor) AS level
+            FROM (SELECT divisor, members FROM market.index_epochs ORDER BY starts_at DESC LIMIT 1) e
+            JOIN market.symbols s ON s.symbol = ANY(e.members)
+          ) cur,
+          LATERAL (
+            SELECT SUM(COALESCE(c.close, s.initial_price)::double precision * s.listed_shares) / MAX(e.divisor) AS level
+            FROM (
+              SELECT divisor, members FROM market.index_epochs
+              WHERE starts_at <= ${period === "all" ? Prisma.sql`u.created_at` : Prisma.sql`COALESCE(b.ts, GREATEST(u.created_at, ${since}))`}
+              ORDER BY starts_at DESC LIMIT 1
+            ) e
+            JOIN market.symbols s ON s.symbol = ANY(e.members)
+            LEFT JOIN LATERAL (
+              SELECT close FROM market.candles c
+              WHERE c.symbol = s.symbol AND c.interval = '1m'
+                AND c.ts <= ${period === "all" ? Prisma.sql`u.created_at` : Prisma.sql`COALESCE(b.ts, GREATEST(u.created_at, ${since}))`}
+              ORDER BY c.ts DESC LIMIT 1
+            ) c ON true
+          ) base
+      ) idx ON true
       LEFT JOIN LATERAL (
         SELECT SUM(delta) AS flows FROM account.ledger_entries l
         WHERE l.account_id = a.id
           AND l.reason IN ('SIGNUP_BONUS', 'SEED', 'TRANSFER_IN', 'TRANSFER_OUT')
           AND l.created_at > COALESCE(b.ts, ${since})
       ) f ON ${period !== "all"}
-      -- 봇·관리자(시드 계정, 자금 무한)·스모크 테스트(pnpm smoke) 임시 계정은 순위에서 뺀다.
-      JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false
-        AND u.nickname <> ${ADMIN_NICKNAME} AND u.nickname NOT LIKE 'smoke-%'
       LEFT JOIN (
         SELECT h.account_id, SUM(h.qty::bigint * s.last_price) AS stock_value
         FROM account.holdings h
@@ -319,6 +342,8 @@ export class AccountService {
           returnRate,
           /** 가입 이후 시장 지수 등락률과 그 대비 초과수익(알파) */
           indexRate,
+          indexCurrent: row.index_current,
+          indexBase: row.index_base,
           alpha: returnRate != null && indexRate != null ? returnRate - indexRate : null,
           realized: Number(row.realized),
           joinedAt: row.joined_at.toISOString(),
@@ -335,17 +360,116 @@ export class AccountService {
   }
 
   async getLedger(accountId: string, limit = 50) {
-    return this.prisma.ledgerEntry.findMany({
+    const rows = await this.prisma.ledgerEntry.findMany({
       where: { accountId },
       orderBy: { id: "desc" },
       take: Math.min(limit, 200),
     });
+    return rows.map((row) => ({ ...row, deltaExact: row.delta.toString(), balanceAfterExact: row.balanceAfter.toString() }));
+  }
+
+  /** Only the seeded admin may browse recipients; searching covers the entire investor table. */
+  async adminRecipients(userId: string, query = "") {
+    const caller = await this.prisma.user.findUnique({ where: { id: userId }, select: { isAdmin: true } });
+    if (!caller?.isAdmin) throw new ForbiddenException("관리자만 조회할 수 있습니다");
+    const q = typeof query === "string" ? query.trim().slice(0, 50) : "";
+    const eligible = { isBot: false, isAdmin: false, NOT: { nickname: { startsWith: "smoke-" } } } as const;
+    const [total, rows] = await Promise.all([
+      this.prisma.user.count({ where: eligible }),
+      this.prisma.user.findMany({
+        where: { ...eligible, nickname: { contains: q, mode: "insensitive" } },
+        select: { id: true, nickname: true },
+        orderBy: { nickname: "asc" },
+        take: 50,
+      }),
+    ]);
+    return { total, rows };
+  }
+
+  /** Atomic equal-amount distribution to every non-bot investor at commit time. */
+  async transferAll(fromAccountId: string, userId: string, amountEach: number, adminPassword: string, requestId: string) {
+    if (!Number.isSafeInteger(amountEach) || amountEach <= 0) {
+      throw new BadRequestException("1인당 이체 금액은 안전한 양의 정수여야 합니다");
+    }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId ?? "")) {
+      throw new BadRequestException("유효한 이체 요청 ID가 필요합니다");
+    }
+    if (this.mutator.strategy !== "pessimistic") {
+      throw new UnprocessableEntityException("일괄 이체에는 비관적 계좌 잠금이 필요합니다");
+    }
+    const caller = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!caller?.isAdmin) throw new ForbiddenException("관리자만 이체할 수 있습니다");
+    if (!(await bcrypt.compare(adminPassword ?? "", caller.passwordHash))) {
+      throw new ForbiddenException("관리자 비밀번호가 올바르지 않습니다");
+    }
+
+    const each = BigInt(amountEach);
+    const result = await this.prisma.$transaction(async (tx) => {
+      // A committed request ID can be replayed safely after a network timeout.
+      const inserted = await tx.$executeRaw`
+        INSERT INTO account.admin_distributions (request_id, account_id, amount_each)
+        VALUES (${requestId}::uuid, ${fromAccountId}, ${each})
+        ON CONFLICT (request_id) DO NOTHING
+      `;
+      if (inserted === 0) {
+        const previous = await tx.adminDistribution.findUnique({ where: { requestId } });
+        if (!previous || previous.accountId !== fromAccountId || previous.amountEach !== each) {
+          throw new BadRequestException("이미 다른 이체에 사용한 요청 ID입니다");
+        }
+        return { ok: true, requestId, recipients: previous.recipientCount, total: previous.total.toString(), replay: true, recipientIds: [] as string[] };
+      }
+
+      await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '3000ms'");
+      const rows = await tx.$queryRaw<{ id: string; balance: bigint; hold_amount: bigint }[]>`
+        SELECT a.id, a.balance, a.hold_amount
+        FROM account.accounts a JOIN auth.users u ON u.id = a.user_id
+        WHERE a.id = ${fromAccountId} OR (u.is_bot = false AND u.is_admin = false AND u.nickname NOT LIKE 'smoke-%')
+        ORDER BY a.id FOR UPDATE OF a
+      `;
+      const sender = rows.find((row) => row.id === fromAccountId);
+      if (!sender) throw new NotFoundException("관리자 계좌가 없습니다");
+      const recipientIds = rows.filter((row) => row.id !== fromAccountId).map((row) => row.id);
+      if (recipientIds.length === 0) throw new UnprocessableEntityException("이체할 투자자가 없습니다");
+      const total = each * BigInt(recipientIds.length);
+      if (sender.balance - sender.hold_amount < total) throw new UnprocessableEntityException("잔액이 부족합니다");
+
+      await tx.account.update({ where: { id: fromAccountId }, data: { balance: { decrement: total }, version: { increment: 1 } } });
+      await tx.ledgerEntry.create({ data: {
+        accountId: fromAccountId, delta: -total, balanceAfter: sender.balance - total,
+        reason: "TRANSFER_OUT", refId: requestId,
+      } });
+      await tx.$executeRaw`
+        UPDATE account.accounts SET balance = balance + ${each}, version = version + 1
+        WHERE id IN (${Prisma.join(recipientIds)})
+      `;
+      await tx.$executeRaw`
+        INSERT INTO account.ledger_entries (account_id, delta, balance_after, reason, ref_id)
+        SELECT id, ${each}, balance, 'TRANSFER_IN', ${requestId}
+        FROM account.accounts WHERE id IN (${Prisma.join(recipientIds)})
+      `;
+      await tx.adminDistribution.update({ where: { requestId }, data: { recipientCount: recipientIds.length, total } });
+      return { ok: true, requestId, recipients: recipientIds.length, total: total.toString(), replay: false, recipientIds };
+    }, { timeout: 30_000 });
+
+    if (!result.replay) {
+      this.realtime.notifyAccount(fromAccountId, { type: "balance" });
+      for (const accountId of result.recipientIds) this.realtime.notifyAccount(accountId, { type: "balance" });
+    }
+    const { recipientIds: _recipientIds, ...publicResult } = result;
+    return publicResult;
   }
 
   /** 계좌 이체 — 두 계좌를 ID 오름차순으로 잠근다 (스펙 S1 해결 지점) */
-  async transfer(fromAccountId: string, toNickname: string, amount: number) {
-    if (!Number.isInteger(amount) || amount <= 0) {
+  async transfer(fromAccountId: string, toNickname: string, amount: number, userId?: string, adminPassword?: string) {
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
       throw new BadRequestException("이체 금액은 양의 정수여야 합니다");
+    }
+    if (userId) {
+      const caller = await this.prisma.user.findUnique({ where: { id: userId } });
+      if (!caller) throw new UnauthorizedException("사용자를 찾을 수 없습니다");
+      if (caller.isAdmin && !(await bcrypt.compare(adminPassword ?? "", caller.passwordHash))) {
+        throw new ForbiddenException("관리자 비밀번호가 올바르지 않습니다");
+      }
     }
     const nickname = (toNickname ?? "").trim();
     if (!nickname) throw new BadRequestException("받는 사람 닉네임을 입력하세요");

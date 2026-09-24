@@ -10,16 +10,60 @@ export interface SymbolDef {
   initialPrice: number;
   /** 호가 단위. 지정가 주문은 이 단위의 배수여야 한다(API가 거부) */
   tickSize: number;
+  /**
+   * 지수용 발행주식수. 상장가 × 발행주식수 = 상장 시가총액이 전 종목 1.2조 원으로 같아,
+   * 상장 시점에는 종목마다 지수의 20%를 차지하고 이후에는 가격에 따라 비중이 움직인다.
+   */
+  listedShares: number;
 }
 
 /** 가상 종목 5개 */
 export const SYMBOLS: SymbolDef[] = [
-  { symbol: "MOCK", name: "모의전자", initialPrice: 50_000, tickSize: 50 },
-  { symbol: "KABU", name: "카부증권", initialPrice: 120_000, tickSize: 100 },
-  { symbol: "TANU", name: "타누키상사", initialPrice: 8_000, tickSize: 10 },
-  { symbol: "SAKU", name: "사쿠라중공업", initialPrice: 300_000, tickSize: 500 },
-  { symbol: "NEKO", name: "네코물산", initialPrice: 25_000, tickSize: 50 },
+  { symbol: "MOCK", name: "모의전자", initialPrice: 50_000, tickSize: 50, listedShares: 24_000_000 },
+  { symbol: "KABU", name: "카부증권", initialPrice: 120_000, tickSize: 100, listedShares: 10_000_000 },
+  { symbol: "TANU", name: "타누키상사", initialPrice: 8_000, tickSize: 10, listedShares: 150_000_000 },
+  { symbol: "SAKU", name: "사쿠라중공업", initialPrice: 300_000, tickSize: 500, listedShares: 4_000_000 },
+  { symbol: "NEKO", name: "네코물산", initialPrice: 25_000, tickSize: 50, listedShares: 48_000_000 },
 ];
+
+/** 지수 시작 수준. 첫 구간의 제수는 상장 시가총액 합 ÷ INDEX_BASE_LEVEL이다. */
+export const INDEX_BASE_LEVEL = 1000;
+
+/** 시가총액 가중 지수의 한 구간: 이 시각부터 `members`를 같은 `divisor`로 합산한다. */
+export interface IndexEpoch {
+  startsAt: number;
+  divisor: number;
+  members: string[];
+}
+
+/**
+ * 지수 수준 = Σ(가격 × 발행주식수) ÷ 제수. 편입 종목이 바뀌는 시각에는 직전 수준이 그대로
+ * 이어지도록 새 제수를 정한다(`continuingDivisor`). 가격이 없는 종목은 호출자가 상장가로 채운다.
+ */
+export function indexLevel(
+  epoch: Pick<IndexEpoch, "divisor" | "members">,
+  priceOf: (symbol: string) => number,
+  sharesOf: (symbol: string) => number,
+): number {
+  let cap = 0;
+  for (const symbol of epoch.members) cap += priceOf(symbol) * sharesOf(symbol);
+  return cap / epoch.divisor;
+}
+
+/** 새 편입 구성의 시가총액이 `levelBefore`와 같은 지수 수준이 되게 하는 제수. */
+export function continuingDivisor(capAfter: number, levelBefore: number): number {
+  return capAfter / levelBefore;
+}
+
+/** `ts` 시점에 적용되는 구간(시작 시각 오름차순 목록). */
+export function epochAt<T extends Pick<IndexEpoch, "startsAt">>(epochs: readonly T[], ts: number): T | null {
+  let found: T | null = null;
+  for (const epoch of epochs) {
+    if (epoch.startsAt <= ts) found = epoch;
+    else break;
+  }
+  return found;
+}
 
 /**
  * 주문 한 건의 상한. DB의 price/qty는 32비트 정수이고 체결 금액은 BigInt로 계산하므로,

@@ -23,13 +23,14 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/market/symbols` | 활성 종목 `[{symbol, name, initialPrice, tickSize, lastPrice}]` |
-| GET | `/market/overview` | 전 종목 시세 + 당일 요약 한 번에 (`symbols` + `summary` 필드 합집합, 2초 캐시) — 대시보드용 |
-| GET | `/market/summary/:symbol` | KST 당일 요약 `{referencePrice, lastPrice, high, low, volume, turnover, buyVolume, sellVolume, lastTradeTs}` |
+| GET | `/market/symbols` | 활성 종목 `[{symbol, name, initialPrice, referencePrice, sessionStart, tickSize, lastPrice}]`. `referencePrice`는 매일 09:00 KST 이후 첫 체결가(첫 체결 전에는 직전 체결가, 체결 이력이 없으면 `initialPrice`), `sessionStart`는 UTC 밀리초 |
+| GET | `/market/overview` | 전 종목 시세 + 09:00 KST 세션 요약 한 번에 (`symbols` + `summary` 필드 합집합, 2초 캐시) — 대시보드용 |
+| GET | `/market/summary/:symbol` | 09:00 KST 시작 세션 요약 `{referencePrice, sessionStart, lastPrice, high, low, volume, turnover, buyVolume, sellVolume, lastTradeTs}`. `sessionStart`는 UTC 밀리초 |
 | GET | `/market/orderbook/:symbol` | 호가 스냅샷 `{bids, asks, lastPrice, seq}` (각 10단) |
 | GET | `/market/candles/:symbol?interval=1m|5m|15m|1h|4h|1d&limit=` | 봉. 1분만 저장, 나머지는 조회 시 집계 |
 | GET | `/market/trades/:symbol?limit=` | 최근 체결 |
-| GET | `/market/index?range=1d|1w|all` | 모의 시장 지수 `[{ts, value}]` — 5종목 동일가중, 기준가 대비 ×1000 |
+| GET | `/market/index?range=1d|1w|all` | 모의 시장 지수 `[{ts, value}]` — 시가총액 가중: Σ(종가 × 발행주식수) ÷ 제수. 발행주식수는 상장 시가총액이 종목마다 1.2조 원(상장 시 각 20%)이 되도록 정했다(`SYMBOLS.listedShares`). 편입 종목·제수는 `market.index_epochs` 구간이 정하며 첫 구간은 상장 시 1,000, 재상장 등 편입 변경 시에는 지수 수준이 이어지도록 새 구간의 제수를 정한다. KST 09:00 점은 해당 1분봉 시가(체결이 없는 종목은 직전가, 거래 전 종목은 상장가)를 사용하고 기간 조회 시작 전 가격도 이어받는다. |
+| GET | `/market/index/meta` | 현재 지수 구간 `{startsAt, divisor, members: [{symbol, listedShares}]}` — 웹이 실시간 체결가로 현재 지수를 같은 식으로 계산할 때 쓴다 (10초 캐시) |
 | GET | `/market/news?symbol=&limit=` | 가상 뉴스(호재/악재·강도는 응답에서 제외) |
 
 ## 주문 `/orders` (인증)
@@ -62,15 +63,17 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/account` | `{id, balance, holdAmount, available}` |
+| GET | `/account` | `{id, balance, balanceExact, holdAmount, available, availableExact}` (`*Exact`는 큰 잔액의 정확한 십진 문자열) |
 | GET | `/account/holdings` | 보유 `[{symbol, qty, holdQty, availableQty, lastPrice, value, costBasis, avgCost, pnl, pnlRate}]` |
 | GET | `/account/trades?symbol=&limit=` | 내 체결 `[{tradeId, symbol, side: BUY|SELL|SELF, price, qty, amount, taker, realized, costBasis, ts}]` |
 | GET | `/account/realized?limit=` | 실현손익 `{today, todayQty, total, totalQty, bySymbol[], recent[], stats: {fills, wins, losses, winRate, avgWin, avgLoss, profitFactor, best, worst}}` |
 | GET | `/account/equity?range=1d|1w|all` | 분 단위 자산 스냅샷 `[{ts, cash, stockValue, equity}]` (1분/10분/1시간 버킷의 마지막 값) |
 | GET | `/account/daily?days=` | KST 일별 `[{date, closeEquity, closeCash, change, changeRate, realized, fills}]` 최신순 |
-| GET | `/account/leaderboard?limit=&period=all|today|week` | 사용자 계정 수익률 순위 `{total, rows: [{rank, nickname, equity, deposits, pnl, returnRate, indexRate, alpha, realized, me}]}` — `period`가 today/week면 기간 첫 스냅샷 대비 수익률(기간 중 입출금 제외)·기간 실현손익·기간 지수 등락; `alpha = returnRate − indexRate` (봇·관리자 `admin`·닉네임 `smoke-*` 제외, 내 행은 항상 포함) |
-| GET | `/account/ledger?limit=` | 현금 원장 |
-| POST | `/account/transfer` | `{toNickname, amount}` 계좌 이체 |
+| GET | `/account/leaderboard?limit=&period=all|today|week` | 사용자 계정 수익률 순위 `{total, rows: [{rank, nickname, equity, deposits, pnl, returnRate, indexRate, indexBase, indexCurrent, alpha, realized, me}]}` — 지수 수준은 `/market/index`와 같은 시가총액 가중(기준 시각의 지수 구간 사용). `indexRate = indexCurrent / indexBase − 1`; `alpha = returnRate − indexRate`. today/week는 첫 자산 스냅샷을 기준으로, 전체는 가입 시점을 기준으로 비교한다. 봇·관리자·`smoke-*` 제외 |
+| GET | `/account/ledger?limit=` | 현금 원장 (`deltaExact`, `balanceAfterExact` 십진 문자열 포함) |
+| GET | `/account/recipients?q=` | 관리자 전용 `{total, rows}` — 전체 지급 대상 수와 닉네임 검색 결과(최대 50건) |
+| POST | `/account/transfer` | `{toNickname, amount, adminPassword?}` 계좌 이체. 관리자 계정은 비밀번호 재확인 필요. 1회 금액은 JavaScript 안전 정수 범위 이내 |
+| POST | `/account/transfer-all` | 관리자 전용 `{amountEach, adminPassword, requestId(UUID)}` — 봇·관리자·`smoke-*`를 제외한 모든 계좌에 동일 금액을 원자적으로 지급. `requestId` 재시도는 중복 지급하지 않는다. 현재 비관적 잠금 전략에서 사용 |
 
 ## 운영
 
@@ -80,6 +83,7 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/health/ready` | DB·Redis + 워커 heartbeat + `background`(조건부 감시자·자산 스냅샷·브래킷) |
 | GET | `/health/trading` | ready + 매칭·정산 워커가 모두 up일 때만 ok |
 | GET | `/admin/lock-info` | 락 전략·충돌/재시도 카운터 |
+| GET | `/internal/operations` | API 컨테이너 loopback 전용 소켓 동접·프로세스 메모리 (공개 프록시에서 404) |
 | POST | `/internal/liquidity/ensure`, `/internal/news/publish` | 봇 프로세스 전용(부트스트랩 토큰) |
 | GET | `/replay/datasets`, `/replay/datasets/:id/candles` | 실전 리플레이(레거시 메뉴) |
 

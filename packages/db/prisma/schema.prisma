@@ -19,6 +19,7 @@ model User {
   passwordHash String   @map("password_hash")
   nickname     String   @unique
   isBot        Boolean  @default(false) @map("is_bot")
+  isAdmin      Boolean  @default(false) @map("is_admin")
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@map("users")
@@ -78,6 +79,19 @@ model LedgerEntry {
   @@schema("account")
 }
 
+/// 관리자 일괄 이체의 재시도 중복 지급 방지 키. 지급과 같은 트랜잭션에 기록한다.
+model AdminDistribution {
+  requestId      String   @id @map("request_id") @db.Uuid
+  accountId      String   @map("account_id")
+  amountEach     BigInt   @map("amount_each")
+  recipientCount Int      @default(0) @map("recipient_count")
+  total          BigInt   @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("admin_distributions")
+  @@schema("account")
+}
+
 /// 매도 체결별 실현손익. 정산 컨슈머가 costBasis 비례 차감과 같은 트랜잭션에 기록한다.
 /// realized = 매도 대금 − 차감 원가. 누적 realized + 남은 costBasis = 총 매입원가.
 model RealizedPnl {
@@ -123,6 +137,7 @@ model ProcessedEvent {
   eventId     String   @id @map("event_id")
   processedAt DateTime @default(now()) @map("processed_at")
 
+  @@index([processedAt])
   @@map("processed_events")
   @@schema("account")
 }
@@ -290,8 +305,23 @@ model MarketSymbol {
   initialPrice Int    @map("initial_price")
   tickSize     Int    @map("tick_size")
   lastPrice    Int    @map("last_price")
+  /// 지수용 발행주식수 (shared SYMBOLS.listedShares와 같음)
+  listedShares BigInt @default(0) @map("listed_shares")
+  /// 재상장 시각. 이 시각 전 체결은 원장으로만 남고 시세(현재가·기준가·통계·체결 목록)에서는 제외된다.
+  listedAt     DateTime? @map("listed_at")
 
   @@map("symbols")
+  @@schema("market")
+}
+
+/// 시가총액 가중 지수의 구간. starts_at부터 members를 divisor로 합산한다.
+/// 편입 종목이 바뀔 때 새 구간을 넣고, 직전 지수 수준이 이어지도록 divisor를 정한다.
+model IndexEpoch {
+  startsAt DateTime @id @map("starts_at")
+  divisor  Float
+  members  String[]
+
+  @@map("index_epochs")
   @@schema("market")
 }
 

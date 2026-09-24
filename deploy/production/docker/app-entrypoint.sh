@@ -40,6 +40,10 @@ case "$command_name" in
     shift
     exec packages/db/node_modules/.bin/tsx packages/db/scripts/prune-history.ts "$@"
     ;;
+  relist)
+    shift
+    exec packages/db/node_modules/.bin/tsx packages/db/scripts/relist-symbol.ts "$@"
+    ;;
   recover-settlement)
     shift
     exec packages/db/node_modules/.bin/tsx packages/db/scripts/recover-unsettled-trades.ts "$@"

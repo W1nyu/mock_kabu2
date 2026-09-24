@@ -136,7 +136,8 @@ async function main() {
         symbol,
         price,
         created_at
-      FROM matching.trades
+      FROM matching.trades t
+      WHERE t.created_at >= COALESCE((SELECT listed_at FROM market.symbols s WHERE s.symbol = t.symbol), '-infinity'::timestamp)
       ORDER BY symbol, created_at DESC, id DESC
     )
     SELECT

@@ -180,8 +180,9 @@ export class MatchingEngine {
       symbols.map(async (symbol) => {
         // 정산 소비자가 잠시 멈췄어도 matching.trades는 체결과 함께 남는다.
         // 재기동 시에는 캐시보다 실제 마지막 체결가를 우선한다.
+        // 재상장 전 체결은 원장으로만 남는다 — 그 가격으로 호가를 다시 열면 안 된다.
         const latestTrade = await this.prisma.trade.findFirst({
-          where: { symbol: symbol.symbol },
+          where: { symbol: symbol.symbol, ...(symbol.listedAt ? { createdAt: { gte: symbol.listedAt } } : {}) },
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           select: { price: true },
         });
