@@ -5,6 +5,7 @@ import { MarketMakerStartupBlockedError, runMarketMaker } from "./market-maker";
 import { MarketModel, referencePriceFromHistory } from "./market-model";
 import { ApiNewsSink } from "./news/api-sink";
 import { startNewsEngine } from "./news/scheduler";
+import { ScenarioBook, startScenarioPolling } from "./scenario";
 import { CompositeNewsSink, ConsoleNewsSink } from "./news/sink";
 import {
   chooseBookLevelIndex,
@@ -607,11 +608,16 @@ async function main() {
   }
 
   const restoredMarket = await restoreMarketState(clients[0]);
+  // Admin market scenarios lean news and flow for chosen symbols. Polled from
+  // the internal API; never shown to users.
+  const scenarios = new ScenarioBook();
+  startScenarioPolling(clients[0], scenarios);
   // News is now the only source of market events. The model's own anonymous
   // generator is switched off so a price move always has a headline behind it.
   const ref = new MarketModel(SYMBOLS, {
     initialPrices: restoredMarket.initialPrices,
     eventSpawnChance: 0,
+    scenarioPressure: (symbol) => scenarios.pressure(symbol),
   });
   for (const symbol of SYMBOLS) {
     ref.seedMarketHistory(symbol.symbol, restoredMarket.chartPrices.get(symbol.symbol) ?? []);
@@ -646,6 +652,7 @@ async function main() {
     ref,
     SYMBOLS,
     new CompositeNewsSink([new ConsoleNewsSink(), new ApiNewsSink(clients[0])]),
+    { pressure: (symbol, nowMs) => scenarios.pressure(symbol, nowMs) },
   );
 
   // Preserve bot1..bot5 as the flow pool. A flow bot can run two independent

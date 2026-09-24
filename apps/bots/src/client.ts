@@ -1,5 +1,6 @@
 import type { OrderSide, OrderType, OrderbookSnapshot } from "@mock-kabu/shared";
 import { requiredRuntimeEnv } from "./env";
+import type { PressureScenario } from "./scenario";
 
 const BASE = requiredRuntimeEnv("BOT_API_URL", "http://localhost:4100");
 const LIQUIDITY_BOOTSTRAP_TOKEN = requiredRuntimeEnv(
@@ -146,6 +147,17 @@ export class ApiClient {
       );
     }
     return res.json() as Promise<{ id: string }>;
+  }
+
+  /** Admin market scenarios that are running or about to start. Same internal token as news. */
+  async activeScenarios(): Promise<PressureScenario[]> {
+    const res = await fetch(`${BASE}/internal/scenarios/active`, {
+      headers: { "x-liquidity-bootstrap-token": LIQUIDITY_BOOTSTRAP_TOKEN },
+    });
+    if (!res.ok) {
+      throw new ApiError(res.status, `GET /internal/scenarios/active returned ${res.status}`);
+    }
+    return res.json() as Promise<PressureScenario[]>;
   }
 
   recentTrades(symbol: string, limit = 20) {

@@ -10,6 +10,7 @@ import { MarketModule } from "./market/market.module";
 import { NewsModule } from "./news/news.module";
 import { OrderModule } from "./order/order.module";
 import { ReplayModule } from "./replay/replay.module";
+import { ScenarioModule } from "./scenario/scenario.module";
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ReplayModule } from "./replay/replay.module";
     NewsModule,
     ReplayModule,
     AdminModule,
+    ScenarioModule,
   ],
 })
 export class AppModule {}

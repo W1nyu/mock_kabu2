@@ -1,8 +1,8 @@
 import type { SymbolDef } from "@mock-kabu/shared";
 import {
-  hiddenEventSentimentFromRoll,
   MAX_EVENT_STRENGTH,
   MIN_EVENT_STRENGTH,
+  pressuredSentimentFromRoll,
   sidewaysEventTargetWeight,
   type MarketEventSentiment,
   type RandomSource,
@@ -20,6 +20,10 @@ const MAX_RESAMPLE_ATTEMPTS = 4;
 const MACRO_JITTER = { min: 0.88, max: 1.12 };
 /** Macro impulses outlive flow news but not a balance-sheet event. */
 const MACRO_PERSISTENCE = { min: 0.93, max: 0.955 };
+/** At full scenario pressure a symbol is this much more likely to be the next story (1 + boost). */
+const SCENARIO_TARGET_BOOST = 1.5;
+/** At full pressure a story in the scenario's direction lands up to 30% harder. */
+const SCENARIO_STRENGTH_BOOST = 0.3;
 
 export interface GeneratorContext {
   readonly nowMs: number;
@@ -29,6 +33,8 @@ export interface GeneratorContext {
   readonly prices: ReadonlyMap<string, number>;
   readonly memory: RecentNewsMemory;
   readonly nextSequence: () => number;
+  /** Signed admin-scenario pressure per symbol. Absent or 0 leaves every draw unchanged. */
+  readonly pressure?: (symbol: string) => number;
 }
 
 function flip(sentiment: MarketEventSentiment): MarketEventSentiment {
@@ -121,24 +127,35 @@ export function generateSymbolNews(
       value: symbol,
       weight:
         sidewaysEventTargetWeight(ctx.sidewaysScores.get(symbol) ?? 0) *
-        ctx.memory.symbolPenalty(symbol, ctx.nowMs),
+        ctx.memory.symbolPenalty(symbol, ctx.nowMs) *
+        (1 + SCENARIO_TARGET_BOOST * Math.abs(ctx.pressure?.(symbol) ?? 0)),
     })),
   );
   const symbol = ctx.symbols.find((candidate) => candidate.symbol === targetSymbol);
   if (!symbol) return null;
   const profile = companyProfile(symbol.symbol);
+  const pressure = ctx.pressure?.(symbol.symbol) ?? 0;
 
   // 2. Sentiment, before the template, so the catalog's shape cannot move the
-  //    market's long-run drift.
-  const sentiment = hiddenEventSentimentFromRoll(unitRandom(ctx.random));
+  //    market's long-run drift. An admin scenario leans this roll only while
+  //    it runs.
+  const sentiment = pressuredSentimentFromRoll(unitRandom(ctx.random), pressure);
 
   // 3. Template, restricted to what this company could plausibly announce.
   const template = selectTemplate(SYMBOL_POOL, sentiment, profile?.sector ?? null, ctx);
   if (!template) return null;
 
   // 4. Strength, last, because only the template knows what magnitude is
-  //    believable for this particular story.
-  const strength = sampleStrength(template, ctx.random);
+  //    believable for this particular story. A story that goes the scenario's
+  //    way lands harder; one against it keeps its ordinary size.
+  const aligned = pressure !== 0 && (sentiment === "POSITIVE") === pressure > 0;
+  const strength = aligned
+    ? clamp(
+        sampleStrength(template, ctx.random) * (1 + SCENARIO_STRENGTH_BOOST * Math.abs(pressure)),
+        MIN_EVENT_STRENGTH,
+        MAX_EVENT_STRENGTH,
+      )
+    : sampleStrength(template, ctx.random);
 
   const slotContext: SlotContext = {
     random: ctx.random,

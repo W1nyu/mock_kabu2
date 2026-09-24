@@ -15,6 +15,14 @@ const DEFAULT_MIN_PUBLISH_GAP_MS = 20_000;
 const DEFAULT_SYMBOL_COOLDOWN_MS = 360_000;
 /** After a market-wide story, hold company news briefly so attribution is clear. */
 const DEFAULT_MACRO_MUTE_MS = 120_000;
+/**
+ * Extra company stories for symbols under an admin scenario, on top of the
+ * ordinary stream. Divided by the strongest current pressure, so full pressure
+ * adds one every 6–14 minutes and the weakest level one every 15–35 minutes.
+ */
+const SCENARIO_GAP: Range = { min: 360_000, max: 840_000 };
+/** Pressure this small is a ramp edge; it does not earn its own stories. */
+const MIN_SCENARIO_STREAM_PRESSURE = 0.05;
 
 export const NEWS_TICK_MS = 5_000;
 
@@ -25,6 +33,8 @@ export interface NewsSchedulerOptions {
   readonly minPublishGapMs?: number;
   readonly symbolCooldownMs?: number;
   readonly macroMuteMs?: number;
+  /** Signed admin-scenario pressure per symbol at a given time. Defaults to none. */
+  readonly pressure?: (symbol: string, nowMs: number) => number;
 }
 
 interface PendingFollowUp {
@@ -48,11 +58,16 @@ export class NewsScheduler {
   private readonly minPublishGapMs: number;
   private readonly symbolCooldownMs: number;
   private readonly macroMuteMs: number;
+  private readonly pressure: (symbol: string, nowMs: number) => number;
 
   private readonly followUps: PendingFollowUp[] = [];
   private sequence = 0;
   private nextSymbolAtMs: number | null = null;
   private nextMacroAtMs: number | null = null;
+  /** Pressure-weighted milliseconds since the last scenario story. */
+  private scenarioAccruedMs = 0;
+  private scenarioAccruedAtMs: number | null = null;
+  private nextScenarioDueMs: number | null = null;
   private lastPublishedAtMs = Number.NEGATIVE_INFINITY;
   private lastMacroAtMs = Number.NEGATIVE_INFINITY;
 
@@ -68,6 +83,7 @@ export class NewsScheduler {
     this.minPublishGapMs = options.minPublishGapMs ?? DEFAULT_MIN_PUBLISH_GAP_MS;
     this.symbolCooldownMs = options.symbolCooldownMs ?? DEFAULT_SYMBOL_COOLDOWN_MS;
     this.macroMuteMs = options.macroMuteMs ?? DEFAULT_MACRO_MUTE_MS;
+    this.pressure = options.pressure ?? (() => 0);
   }
 
   pendingFollowUpCount(): number {
@@ -88,7 +104,12 @@ export class NewsScheduler {
     // A late sequel reads as a broken story; a company headline slipping five
     // seconds reads as nothing. Macro beats symbol because it is the rarer
     // stream, so delaying it distorts its cadence proportionally more.
-    return this.tryFollowUp(nowMs) ?? this.tryMacro(nowMs) ?? this.trySymbol(nowMs);
+    return (
+      this.tryFollowUp(nowMs) ??
+      this.tryMacro(nowMs) ??
+      this.trySymbol(nowMs) ??
+      this.tryScenario(nowMs)
+    );
   }
 
   private context(nowMs: number): GeneratorContext {
@@ -106,6 +127,7 @@ export class NewsScheduler {
       prices,
       memory: this.memory,
       nextSequence: () => ++this.sequence,
+      pressure: (symbol) => this.pressure(symbol, nowMs),
     };
   }
 
@@ -137,6 +159,50 @@ export class NewsScheduler {
     if (!item) return null;
 
     this.nextSymbolAtMs = nowMs + randomInt(this.random, this.symbolGapMs.min, this.symbolGapMs.max);
+    return this.publish(item, nowMs);
+  }
+
+  /**
+   * The scenario stream: extra company stories drawn only from symbols under
+   * pressure. It shares the per-symbol cooldown, so even a strong scenario
+   * cannot put the same name in back-to-back headlines.
+   */
+  private tryScenario(nowMs: number): NewsItem | null {
+    const pressured = this.symbols
+      .map((symbol) => ({ symbol: symbol.symbol, pressure: Math.abs(this.pressure(symbol.symbol, nowMs)) }))
+      .filter((entry) => entry.pressure >= MIN_SCENARIO_STREAM_PRESSURE);
+    if (pressured.length === 0) {
+      this.scenarioAccruedMs = 0;
+      this.scenarioAccruedAtMs = null;
+      this.nextScenarioDueMs = null;
+      return null;
+    }
+
+    // Pressure-weighted time: a ramping or weak scenario accrues more slowly,
+    // so the gap stretches with pressure without being fixed at a ramp edge.
+    const strongest = Math.max(...pressured.map((entry) => entry.pressure));
+    if (this.scenarioAccruedAtMs !== null) {
+      this.scenarioAccruedMs += strongest * (nowMs - this.scenarioAccruedAtMs);
+    }
+    this.scenarioAccruedAtMs = nowMs;
+    this.nextScenarioDueMs ??= randomInt(this.random, SCENARIO_GAP.min, SCENARIO_GAP.max);
+    if (this.scenarioAccruedMs < this.nextScenarioDueMs) return null;
+    if (nowMs - this.lastMacroAtMs < this.macroMuteMs) return null;
+
+    const eligible = pressured
+      .map((entry) => entry.symbol)
+      .filter((symbol) => {
+        const last = this.memory.lastSymbolPublishMs(symbol);
+        return last === null || nowMs - last >= this.symbolCooldownMs;
+      });
+    // Every pressured symbol just made news; try again on a later tick.
+    if (eligible.length === 0) return null;
+
+    const item = generateSymbolNews(this.context(nowMs), eligible);
+    if (!item) return null;
+
+    this.scenarioAccruedMs = 0;
+    this.nextScenarioDueMs = null;
     return this.publish(item, nowMs);
   }
 

@@ -15,6 +15,11 @@ export interface MarketModelOptions {
   random?: RandomSource;
   /** Test-only tuning for deterministic event-generation coverage. */
   eventSpawnChance?: number;
+  /**
+   * Signed admin-scenario pressure in [-1, 1] per symbol. It leans ordinary
+   * flow the same way a live event would, without moving any price itself.
+   */
+  scenarioPressure?: (symbol: string) => number;
 }
 
 export type MarketEventSentiment = "POSITIVE" | "NEGATIVE";
@@ -78,6 +83,12 @@ const PERMANENT_EQUILIBRIUM_SHARE = 0.4;
 const MIN_REMAINING_EVENT_IMPULSE = 0.00008;
 const MAX_EVENT_FLOW_INTENSITY = 4;
 const MAX_SIDE_FLIP_CHANCE = 0.78;
+/**
+ * Standing flow lean at full scenario pressure. At 0.3 about a quarter of
+ * opposite-side aggressive orders flip, a steady tilt rather than a one-way tape;
+ * the headlines the scenario brings supply the sharper moves.
+ */
+const SCENARIO_FLOW_WEIGHT = 0.3;
 /** A slight positive skew keeps good-news events marginally more common than bad-news events. */
 export const POSITIVE_EVENT_PROBABILITY = 0.52;
 /** A durable print this far from the synthetic reference establishes a new market level. */
@@ -333,6 +344,20 @@ export function hiddenEventSentimentFromRoll(roll: number): MarketEventSentiment
   return Number.isFinite(roll) && roll < POSITIVE_EVENT_PROBABILITY ? "POSITIVE" : "NEGATIVE";
 }
 
+/** How far full scenario pressure moves the good-news probability. */
+const SCENARIO_SENTIMENT_SHIFT = 0.36;
+
+/**
+ * Same roll as hiddenEventSentimentFromRoll, with the threshold leaned by
+ * scenario pressure. Pressure 0 is exactly the unbiased mix; full downward
+ * pressure makes roughly 5 in 6 stories bad, never all of them.
+ */
+export function pressuredSentimentFromRoll(roll: number, pressure: number): MarketEventSentiment {
+  if (!pressure) return hiddenEventSentimentFromRoll(roll);
+  const threshold = clamp(POSITIVE_EVENT_PROBABILITY + SCENARIO_SENTIMENT_SHIFT * pressure, 0.08, 0.92);
+  return Number.isFinite(roll) && roll < threshold ? "POSITIVE" : "NEGATIVE";
+}
+
 /** Checks whether an API/DB price can safely initialise a reference model. */
 export function isUsableReferencePrice(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
@@ -368,10 +393,12 @@ export class MarketModel {
   private marketReturn = 0;
   private marketVariance = REGIME.CALM.marketVolatility ** 2;
   private eventCooldownTicks = 0;
+  private readonly scenarioPressure: (symbol: string) => number;
 
   constructor(symbols: SymbolDef[], options: MarketModelOptions = {}) {
     this.random = options.random ?? { next: () => Math.random() };
     this.eventSpawnChance = clamp(options.eventSpawnChance ?? DEFAULT_EVENT_SPAWN_CHANCE, 0, 1);
+    this.scenarioPressure = options.scenarioPressure ?? (() => 0);
     for (const [index, symbol] of symbols.entries()) {
       const restoredPrice = options.initialPrices?.get(symbol.symbol);
       const price = isUsableReferencePrice(restoredPrice) ? restoredPrice : symbol.initialPrice;
@@ -561,13 +588,13 @@ export class MarketModel {
     return this.stateFor(symbol).sideways.assessment().score;
   }
 
-  /** Signed net demand pressure from the still-active hidden events. */
+  /** Signed net demand pressure from the still-active hidden events and any admin scenario. */
   flowBias(symbol: string): number {
     const pressure = this.stateFor(symbol).events.reduce(
       (sum, event) => sum + this.eventFlowContribution(event),
       0,
     );
-    return clamp(pressure, -1, 1);
+    return clamp(pressure + SCENARIO_FLOW_WEIGHT * this.scenarioPressure(symbol), -1, 1);
   }
 
   /**
