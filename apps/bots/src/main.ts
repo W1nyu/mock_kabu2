@@ -681,14 +681,14 @@ async function main() {
   void runMomentumTrader(clients[9], ref, activity, "bot10");
   void runJanitor(clients.slice(5));
 
-  // 선물: 종목별 전담 마켓메이커(bot34~38), 시장가 거래 흐름(bot6~8), 기초자산 모멘텀(bot10).
+  // 선물: 종목별 전담 마켓메이커(bot34~38), 시장가 거래 흐름(bot7~9), 기초자산 모멘텀(bot10).
   // BOTS_FUTURES_DISABLED=1이면 선물 봇을 모두 끈다(부하 비교·장애 대응용 스위치).
   if (process.env.BOTS_FUTURES_DISABLED !== "1") {
     const futuresMarket = new FuturesMarketView(clients[0]);
     futuresMarket.start();
     FUTURES.forEach((def, index) => void runFuturesMarketMaker(liquidityClients[SYMBOLS.length + index], def, futuresMarket));
-    // 선물 거래 흐름 3계정(bot6·7·8) — 선물 체결이 끊기지 않게.
-    for (const index of [5, 6, 7]) void runFuturesTrader(clients[index], futuresMarket, `bot${index + 1}`);
+    // 선물 거래 흐름 3계정(bot7·8·9) — 선물 체결이 끊기지 않게. bot6은 주식 비중이 커 현금이 모자라 뺐다.
+    for (const index of [6, 7, 8]) void runFuturesTrader(clients[index], futuresMarket, `bot${index + 1}`);
     void runFuturesMomentumTrader(clients[9], futuresMarket, "bot10");
   } else {
     console.log("[bots] futures bots disabled (BOTS_FUTURES_DISABLED=1)");
