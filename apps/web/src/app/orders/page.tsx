@@ -1,11 +1,12 @@
 "use client";
 
-import { describeCondition, type ConditionalOrderDto } from "@mock-kabu/shared";
+import { describeCondition, isFuture, isOption, type ConditionalOrderDto } from "@mock-kabu/shared";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { api, fmt, getToken, getUser, won } from "@/lib/api";
 import { toCsv } from "@/lib/csv";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
+import { fmtFuture } from "@/lib/futures";
 import { formatKstTime, MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
@@ -83,6 +84,11 @@ const CONDITIONAL_STATUS_TONE: Record<ConditionalOrderDto["status"], string> = {
 
 const TAB_STORAGE_KEY = "orders:tab";
 
+/** 선물·옵션 가격은 정수 단위(실제 × scale)라 종목 표기로 바꾼다. 현물은 원 단위 숫자 그대로. */
+function priceOf(symbol: string, price: number): string {
+  return isFuture(symbol) || isOption(symbol) ? fmtFuture(symbol, price) : fmt.format(price);
+}
+
 /** 체결 내역을 CSV로 내려받는다. */
 function downloadFillsCsv(fills: FillRow[]) {
   const header = ["시각(KST)", "종목", "구분", "체결가", "수량", "체결금액", "실현손익", "차감원가", "테이커"];
@@ -90,7 +96,7 @@ function downloadFillsCsv(fills: FillRow[]) {
     new Date(f.ts).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false }),
     f.symbol,
     SIDE_LABEL[f.side],
-    f.price,
+    priceOf(f.symbol, f.price),
     f.qty,
     f.amount,
     f.realized,
@@ -242,7 +248,7 @@ function OrdersTable({ orders }: { orders: OrderRow[] }) {
                 {o.type === "LIMIT" ? "지정가" : "시장가"}
               </span>
             </td>
-            <td className="num text-right">{o.price != null ? fmt.format(o.price) : "—"}</td>
+            <td className="num text-right">{o.price != null ? priceOf(o.symbol, o.price) : "—"}</td>
             <td className="num text-right">
               {fmt.format(o.filledQty)}
               <span className="text-ink-faint">/{fmt.format(o.qty)}</span>
@@ -279,7 +285,7 @@ function FillsTable({ fills }: { fills: FillRow[] }) {
           <th className="text-right">체결가</th>
           <th className="text-right">수량</th>
           <th className="text-right">체결금액</th>
-          <th className="text-right" title="매도 체결에서 평단가 대비 확정된 손익">
+          <th className="text-right" title="주식은 매도 체결의 평단가 대비 손익, 선물·옵션은 포지션을 줄인 체결의 손익">
             실현손익
           </th>
         </tr>
@@ -300,7 +306,7 @@ function FillsTable({ fills }: { fills: FillRow[] }) {
                   {f.taker ? "테이커" : "메이커"}
                 </span>
               </td>
-              <td className="num text-right">{fmt.format(f.price)}</td>
+              <td className="num text-right">{priceOf(f.symbol, f.price)}</td>
               <td className="num text-right">{fmt.format(f.qty)}</td>
               <td className="num text-right">{won(f.amount)}</td>
               <td className="num text-right">
@@ -370,12 +376,12 @@ function ConditionalTable({
               )}
             </td>
             <td className="num text-right">
-              {fmt.format(r.triggerPrice)}
+              {priceOf(r.symbol, r.triggerPrice)}
               <span className="text-ink-faint">{r.direction === "AT_OR_ABOVE" ? " 이상" : " 이하"}</span>
             </td>
             <td className="num text-right">{fmt.format(r.qty)}</td>
             <td className="num text-right text-ink-muted">
-              {r.triggerTradePrice != null ? fmt.format(r.triggerTradePrice) : "—"}
+              {r.triggerTradePrice != null ? priceOf(r.symbol, r.triggerTradePrice) : "—"}
             </td>
             <td className="text-right">
               <span className={`chip ${CONDITIONAL_STATUS_TONE[r.status]}`}>

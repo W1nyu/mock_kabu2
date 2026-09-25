@@ -1,6 +1,12 @@
 "use client";
 
-import { futureDef, futureMarginPerContract, MARKET_BUY_HOLD_FACTOR, MAX_FUTURES_ORDER_QTY } from "@mock-kabu/shared";
+import {
+  futureDef,
+  futureMarginPerContract,
+  FUTURES_EMERGENCY_LOSS_BPS,
+  MARKET_BUY_HOLD_FACTOR,
+  MAX_FUTURES_ORDER_QTY,
+} from "@mock-kabu/shared";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, getUser, newIdempotencyKey } from "@/lib/api";
@@ -70,7 +76,8 @@ export default function FuturesOrderPanel({
   }, [refreshAccount]);
 
   const leverage = futures?.leverage?.[symbol] ?? null;
-  const positionQty = futures?.positions.find((p) => p.symbol === symbol)?.qty ?? 0;
+  const positionRow = futures?.positions.find((p) => p.symbol === symbol) ?? null;
+  const positionQty = positionRow?.qty ?? 0;
   // 포지션·미체결이 있으면 레버리지를 못 바꾼다(서버도 막는다).
   const leverageLocked = positionQty !== 0 || liveOrders > 0;
   const closing = (side === "SELL" && positionQty > 0) || (side === "BUY" && positionQty < 0);
@@ -106,6 +113,22 @@ export default function FuturesOrderPanel({
     setActivePct(pct);
   }
   const margin = perContract != null ? perContract * qty : null;
+  // 청산 주문이면 이 가격에 닫을 때의 실현손익(평균가 기준), 새로 여는 주문이면 긴급 반대매매(평가손실 = 증거금 90%) 예상 가격.
+  const closeQty = closing ? Math.min(qty, Math.abs(positionQty)) : 0;
+  const expectedRealized =
+    closing && positionRow && priceUnits != null
+      ? Math.sign(positionQty) * (priceUnits - positionRow.avgPrice) * closeQty * def.unitValue
+      : null;
+  const openingQty = qty - closeQty;
+  const emergencyUnits =
+    openingQty > 0 && priceUnits != null
+      ? (() => {
+          const bps = leverage != null ? Math.ceil(10_000 / leverage) : def.initialMarginBps;
+          const move = (priceUnits * bps * FUTURES_EMERGENCY_LOSS_BPS) / 10_000 / 10_000;
+          // 새로 열리는 쪽은 주문 방향(뒤집기면 청산 뒤 남는 수량)
+          return Math.round(side === "BUY" ? priceUnits - move : priceUnits + move);
+        })()
+      : null;
   const tickText = unitsToInput(symbol, def.tickUnits);
   /** 지정가를 호가 단위만큼 올리고 내린다(입력이 비었거나 틀렸으면 현재가에서 시작, 틱에 맞춘다). */
   function stepPrice(direction: 1 | -1) {
@@ -320,6 +343,21 @@ export default function FuturesOrderPanel({
           </dt>
           <dd className="font-semibold">{closingOnly ? "없음" : margin == null ? "—" : krw(margin)}</dd>
         </div>
+        {expectedRealized != null && (
+          <div className="flex justify-between">
+            <dt className="text-ink-muted">예상 실현손익 ({closeQty}계약 청산{type === "MARKET" ? ", 현재가 기준" : ""})</dt>
+            <dd className={`font-semibold ${expectedRealized > 0 ? "text-up" : expectedRealized < 0 ? "text-down" : ""}`}>
+              {expectedRealized > 0 ? "+" : ""}
+              {krw(expectedRealized)}
+            </dd>
+          </div>
+        )}
+        {emergencyUnits != null && (
+          <div className="flex justify-between" title="평가손실이 이 포지션 증거금의 90%가 되는 가격 — 여기에 닿으면 즉시 전량 반대매매">
+            <dt className="text-ink-muted">긴급 반대매매가 (예상)</dt>
+            <dd className="text-ink-muted">{fmtFuture(symbol, emergencyUnits)}</dd>
+          </div>
+        )}
         <div className="flex justify-between">
           <dt className="text-ink-muted">주문 가능 금액</dt>
           <dd>{available == null ? "—" : krw(available)}</dd>

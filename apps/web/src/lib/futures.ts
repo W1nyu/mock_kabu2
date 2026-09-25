@@ -13,8 +13,14 @@ export interface FutureRow {
   initialMarginBps: number;
   maintenanceMarginBps: number;
   lastPrice: number;
+  /** 등락률 기준가 = 직전 일일 정산가(없으면 이번 계약 첫 체결가) */
   base: number;
+  /** 직전 일일 정산가, 없으면 null */
+  settlementPrice?: number | null;
+  /** 이번 계약 정산 시각(epoch ms) */
+  settlesAt?: number;
   underlying: number | null;
+  /** 이번 계약(직전 04:11 이후) 거래량 */
   volume: number;
 }
 

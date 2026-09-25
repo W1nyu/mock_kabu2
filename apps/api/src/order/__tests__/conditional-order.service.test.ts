@@ -28,8 +28,31 @@ function waitingRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function build(options: { rows?: ReturnType<typeof waitingRow>[]; claimCount?: number; placeError?: Error } = {}) {
+function build(
+  options: {
+    rows?: ReturnType<typeof waitingRow>[];
+    claimCount?: number;
+    placeError?: Error;
+    /** 선물 포지션 "계좌|종목" → 부호 있는 계약 수 */
+    positions?: Map<string, number>;
+  } = {},
+) {
+  const positions = options.positions ?? new Map<string, number>();
   const prisma = {
+    futuresPosition: {
+      findUnique: vi.fn().mockImplementation(({ where }: any) => {
+        const qty = positions.get(`${where.accountId_symbol.accountId}|${where.accountId_symbol.symbol}`);
+        return Promise.resolve(qty == null ? null : { qty });
+      }),
+      findMany: vi.fn().mockImplementation(({ where }: any) =>
+        Promise.resolve(
+          (where.OR as { accountId: string; symbol: string }[]).flatMap((k) => {
+            const qty = positions.get(`${k.accountId}|${k.symbol}`);
+            return qty == null ? [] : [{ ...k, qty }];
+          }),
+        ),
+      ),
+    },
     conditionalOrder: {
       findMany: vi.fn().mockImplementation((args: any) =>
         // 인덱스 적재(status=WAITING만)와 OCO 짝 조회(ocoGroupId + id not)를 같은 fixture로 응답한다.
@@ -54,7 +77,7 @@ function build(options: { rows?: ReturnType<typeof waitingRow>[]; claimCount?: n
   const realtime = { notifyAccount: vi.fn() };
   const sub = { on: vi.fn(), off: vi.fn(), psubscribe: vi.fn().mockResolvedValue(1) };
   const service = new ConditionalOrderService(prisma as never, sub as never, orders as never, realtime as never);
-  return { service, prisma, orders, realtime };
+  return { service, prisma, orders, realtime, positions };
 }
 
 describe("ConditionalOrderService trigger loop", () => {
@@ -268,5 +291,62 @@ describe("ConditionalOrderService trailing reload", () => {
     service.onTick("KABU", 1_100); // 옛 트리거(970)였다면 발동하지 않았을 값 — 새 트리거 1,164 이하이므로 발동
     await flush();
     expect(orders.place).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("futures conditional orders only ever close the position", () => {
+  const futureRow = (overrides: Partial<Record<string, unknown>> = {}) =>
+    waitingRow({ symbol: "KABUF", side: "SELL", direction: "AT_OR_BELOW", triggerPrice: 87_000, qty: 5, ...overrides });
+
+  it("clamps the stop to the contracts still held when it fires", async () => {
+    const { service, orders } = build({ rows: [futureRow()], positions: new Map([["acct-1|KABUF", 3]]) });
+    await (service as any).reloadIndex();
+
+    service.onTick("KABUF", 86_995);
+    await flush();
+
+    expect(orders.place).toHaveBeenCalledWith("acct-1", { symbol: "KABUF", side: "SELL", type: "MARKET", qty: 3 });
+  });
+
+  it("cancels instead of opening a new position when the position is gone at trigger time", async () => {
+    const { service, prisma, orders, positions } = build({ rows: [futureRow()], positions: new Map([["acct-1|KABUF", 5]]) });
+    await (service as any).reloadIndex();
+    positions.set("acct-1|KABUF", 0); // 사용자가 전량 청산했다(다음 인덱스 재적재 전)
+
+    service.onTick("KABUF", 86_000);
+    await flush();
+
+    expect(orders.place).not.toHaveBeenCalled();
+    expect(prisma.conditionalOrder.update).toHaveBeenCalledWith({
+      where: { id: "cond-1" },
+      data: { status: "CANCELED", failReason: expect.stringContaining("포지션이 없어") },
+    });
+  });
+
+  it("sweeps waiting stops whose position was closed, settled or flipped when the index reloads", async () => {
+    const { service, prisma, orders } = build({
+      rows: [futureRow(), futureRow({ id: "cond-2", accountId: "acct-2" })],
+      positions: new Map([
+        ["acct-1|KABUF", 2],
+        ["acct-2|KABUF", -4], // 롱이 숏으로 뒤집혔다 — 매도 손절은 의미가 없다
+      ]),
+    });
+    await (service as any).reloadIndex();
+
+    expect(prisma.conditionalOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["cond-2"] }, status: "WAITING" },
+      data: { status: "CANCELED", failReason: expect.stringContaining("포지션이 없어") },
+    });
+    service.onTick("KABUF", 86_000);
+    await flush();
+    expect(orders.place).toHaveBeenCalledTimes(1);
+    expect(orders.place).toHaveBeenCalledWith("acct-1", expect.objectContaining({ qty: 2 }));
+  });
+
+  it("refuses to register a futures stop without a position to close", async () => {
+    const { service } = build({ rows: [] });
+    await expect(
+      service.place("acct-1", { symbol: "KABUF", side: "SELL", direction: "AT_OR_BELOW", triggerPrice: 87_000, qty: 1 }),
+    ).rejects.toThrow(/청산하는 방향으로만/);
   });
 });

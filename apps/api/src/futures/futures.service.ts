@@ -8,6 +8,7 @@ import {
   futureMaintenanceMargin,
   isValidLeverage,
   MAX_FUTURES_LEVERAGE,
+  nextFuturesSettlementAt,
   futureMarginPerContract,
   futureUnrealized,
   indexLevel,
@@ -17,12 +18,12 @@ import {
   type ReferenceTick,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
-import { koreaSessionStart } from "../common/market-time";
 import { MemoCache } from "../core/memo-cache";
 import { BALANCE_MUTATOR, PRISMA, REDIS } from "../core/tokens";
 import { futuresEncumbrance } from "../order/futures-margin";
 
 const OVERVIEW_TTL_MS = 2_000;
+const DAY_MS = 86_400_000;
 /** 평가가격은 반대매매 감시(5초)와 포지션 조회가 같이 쓴다 — 2초 공유 */
 const MARK_TTL_MS = 2_000;
 /** 평가가격에 넣는 최근 체결 범위 */
@@ -41,10 +42,18 @@ export interface FutureOverviewRow {
   maintenanceMarginBps: number;
   /** 선물 최근 체결가(정수 단위) */
   lastPrice: number;
-  /** 오늘(09:00 KST 이후) 첫 체결가, 없으면 직전 체결가, 없으면 상장가 */
+  /**
+   * 등락률 기준가 = 직전 일일 정산가(실제 거래소의 "전일 정산가"). 정산 기록이 없으면 이번 계약(직전 04:11 이후)
+   * 첫 체결가, 그것도 없으면 직전 체결가, 없으면 상장가.
+   */
   base: number;
+  /** 직전 일일 정산가(정수 단위), 없으면 null */
+  settlementPrice: number | null;
+  /** 이번 계약의 정산 시각(다음 04:11 KST) epoch ms */
+  settlesAt: number;
   /** 기초자산 현재값(정수 단위, 선물과 같은 scale). 아직 없으면 null */
   underlying: number | null;
+  /** 이번 계약(직전 04:11 이후) 거래량 */
   volume: number;
 }
 
@@ -58,11 +67,13 @@ export class FuturesService {
   ) {}
 
   /** 선물 5종 시세 + 기초자산. 모든 접속자가 같은 값이라 2초 공유한다. */
-  async overview(): Promise<FutureOverviewRow[]> {
-    const session = koreaSessionStart();
+  async overview(now = Date.now()): Promise<FutureOverviewRow[]> {
+    // 1일물이라 "오늘"은 09:00이 아니라 이번 계약이 시작된 직전 04:11 KST부터다.
+    const settlesAt = nextFuturesSettlementAt(now);
+    const session = new Date(settlesAt - DAY_MS);
     return this.cache.getOrCompute(`futures:overview:${session.getTime()}`, OVERVIEW_TTL_MS, async () => {
       const symbols = FUTURES.map((future) => future.symbol);
-      const [rows, stats, underlying] = await Promise.all([
+      const [rows, stats, underlying, settled] = await Promise.all([
         this.prisma.marketSymbol.findMany({ where: { symbol: { in: symbols } } }),
         this.prisma.$queryRaw<{ symbol: string; opening: number | null; previous: number | null; volume: bigint }[]>`
           SELECT s.symbol,
@@ -74,7 +85,14 @@ export class FuturesService {
           FROM market.symbols s WHERE s.kind = 'FUTURE'
         `,
         this.underlyingUnits(),
+        // 결제가격 0 = 그날 기초자산 값이 없어 정산 대상 없이 넘긴 날 — 기준가로 쓰지 않는다.
+        this.prisma.$queryRaw<{ symbol: string; price: number }[]>`
+          SELECT DISTINCT ON (symbol) symbol, price FROM market.futures_settlements
+          WHERE symbol IN (${Prisma.join(symbols)}) AND price > 0
+          ORDER BY symbol, trading_day DESC
+        `,
       ]);
+      const settledBySymbol = new Map(settled.map((row) => [row.symbol, Number(row.price)]));
       const bySymbol = new Map(rows.map((row) => [row.symbol, row]));
       const statBySymbol = new Map(stats.map((row) => [row.symbol, row]));
       return FUTURES.map((future) => {
@@ -91,7 +109,9 @@ export class FuturesService {
           initialMarginBps: future.initialMarginBps,
           maintenanceMarginBps: future.maintenanceMarginBps,
           lastPrice: row?.lastPrice ?? future.initialPrice,
-          base: stat?.opening ?? stat?.previous ?? row?.initialPrice ?? future.initialPrice,
+          base: settledBySymbol.get(future.symbol) ?? stat?.opening ?? stat?.previous ?? row?.initialPrice ?? future.initialPrice,
+          settlementPrice: settledBySymbol.get(future.symbol) ?? null,
+          settlesAt,
           underlying: underlying.get(future.symbol) ?? null,
           volume: Number(stat?.volume ?? 0),
         };

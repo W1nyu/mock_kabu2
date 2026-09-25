@@ -193,6 +193,7 @@ export class OrderService {
         type,
         // MARKET BUY는 체결 상한을 전달 (홀드 초과 체결 방지). 선물 홀드는 증거금이라 상한과 따로 계산한다.
         // 옵션 시장가 매도는 최근가의 절반을 하한으로 — 호가가 비어도 1호가에 던지지 않게.
+        // 선물 시장가 매도는 매수 상한(최근가 × 1.1)과 대칭인 최근가 ÷ 1.1을 하한으로(반대매매와 같은 보호 한도).
         price:
           type === "LIMIT"
             ? price
@@ -200,7 +201,9 @@ export class OrderService {
               ? marketCap
               : option
                 ? Math.max(option.tickUnits, Math.floor(marketSymbol.lastPrice / 2))
-                : null,
+                : future
+                  ? Math.max(future.tickUnits, Math.floor(marketSymbol.lastPrice / MARKET_BUY_HOLD_FACTOR))
+                  : null,
         qty,
         ts: Date.now(),
       };

@@ -12,6 +12,7 @@ import { MobileTradeBar } from "@/components/MobileOrderSheet";
 import UnitCandleChart from "@/components/UnitCandleChart";
 import { api, getUser } from "@/lib/api";
 import { changePct, fmtFuture, type FutureRow } from "@/lib/futures";
+import { timeLeft } from "@/lib/options";
 import { COMPACT_TRADE_QUERY, useMediaQuery } from "@/lib/media";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
@@ -98,13 +99,17 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
       </div>
       <div className="glass p-4 sm:p-5">
         <p className="text-[13px] text-ink-muted">
-          {def.symbol} · 1일물 선물 <span className="text-ink-faint">· 매일 04:10 현금 정산</span>
+          {def.symbol} · 1일물 선물{" "}
+          <span className="text-ink-faint">
+            · {row?.settlesAt ? `정산까지 ${timeLeft(row.settlesAt)} (04:10 현금 정산)` : "매일 04:10 현금 정산"}
+          </span>
         </p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">{def.name}</h1>
         <div className="mt-2 flex flex-wrap items-end gap-x-5 gap-y-1">
           <p className="num text-2xl font-semibold tracking-tight sm:text-3xl">{fmtFuture(def.symbol, price)}</p>
           <p className={`num pb-1 text-sm font-medium ${tone}`}>
-            {change == null ? "—" : `${change > 0 ? "+" : ""}${change.toFixed(2)}% 오늘`}
+            {change == null ? "—" : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}
+            <span className="ml-1 font-normal text-ink-faint">{row?.settlementPrice != null ? "전일 정산가 대비" : "오늘"}</span>
           </p>
         </div>
         <dl className="num mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-ink-muted">
@@ -114,7 +119,10 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
           <div>
             베이시스 <span className="text-ink">{basis == null ? "—" : `${basis > 0 ? "+" : ""}${(basis / def.priceScale).toFixed(def.decimals)}`}</span>
           </div>
-          <div>
+          <div title="등락률의 기준 — 직전 04:10 일일 정산 가격">
+            기준가 <span className="text-ink">{fmtFuture(def.symbol, row?.base ?? null)}</span>
+          </div>
+          <div title="이번 계약(직전 정산 이후) 거래량">
             거래량 <span className="text-ink">{(row?.volume ?? 0).toLocaleString("ko-KR")}계약</span>
           </div>
         </dl>

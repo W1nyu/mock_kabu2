@@ -34,7 +34,7 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/market/news?symbol=&industry=&scope=&reference=&limit=` | 가상 뉴스(호재/악재·강도는 응답에서 제외). `symbol`은 그 종목·시장 전반·소속 산업군 기사(`scope=own`이면 그 종목 기사만), `industry=<산업군 id>`는 그 산업군 종목 기사와 산업군 기사(`INDUSTRIES`: tech·battery·industrial·mobility·media·health·energy·consumer·finance), `industry=market`은 시장 전반 기사만, `reference=<USDKRW|OIL|GAS|COPPER|GOLD|CORN>`은 그 기초자산을 움직인 기사. 응답에 `referenceCodes[]` |
 | GET | `/market/sparks` | 전 종목 미니 추세선 `{ 종목: [5분봉 종가…] }` (최근 72개). 1분 공유 캐시 — 화면마다 종목 수만큼 봉을 요청하지 않게 한 묶음 API |
 | GET | `/market/reference` | 선물 기초자산 가상 지수(원/달러·원유·천연가스·구리) `[{code,name,unit,scale,decimals,value,ts,base,spark}]`. 값은 실제값 × scale 정수, `base`는 09:00 KST 이후 첫 1분봉 시가(없으면 직전 종가). 5초 공유 캐시. 실시간은 소켓 `ref:{code}` |
-| GET | `/market/futures` | 선물 5종(KABUF·USDF·OILF·GASF·CPRF) `[{symbol,name,unit,priceScale,decimals,tickUnits,unitValue,initialMarginBps,maintenanceMarginBps,lastPrice,base,underlying,volume}]`. 가격은 정수 단위(실제 × priceScale), `underlying`은 기초자산(KABU 지수는 현물 최근가로 계산). 2초 공유 캐시 |
+| GET | `/market/futures` | 선물 5종(KABUF·USDF·OILF·GASF·CPRF) `[{symbol,name,unit,priceScale,decimals,tickUnits,unitValue,initialMarginBps,maintenanceMarginBps,lastPrice,base,underlying,volume}]`. 가격은 정수 단위(실제 × priceScale), `underlying`은 기초자산(KABU 지수는 현물 최근가로 계산). `base`(등락률 기준) = 직전 일일 정산가 `settlementPrice`(없으면 이번 계약 첫 체결가), `settlesAt` = 이번 계약 정산 시각, `volume` = 이번 계약(직전 04:11 이후) 거래량. 2초 공유 캐시 |
 | GET | `/account/futures` 🔒 | 내 선물 포지션 `{positions:[{symbol,qty(±),avgPrice,markPrice,unrealized,marginHeld,maintenanceMargin,leverage}],marginHeld,debt,unrealized,maintenanceMargin,initialMargin,equity,leverage:{[symbol]:1~20|null},marginCall:{startedAt,deadline,required,shortfall}|null,liquidations:[{orderId,symbol,side,qty,reason:DEADLINE|EMERGENCY,createdAt}],options:[{symbol,name,type,strike,qty,avgPrice,lastPrice,theo,value,unrealized,marginHeld}],optionsValue}` — 추가증거금·반대매매 상태 포함. `options`는 옵션 포지션, `optionsValue`는 옵션 평가액(최근가 × 수량 × 승수) 합계로 총 자산에 더한다. 계좌 채널 push `{type:"futures_margin_call",status:OPEN|RESOLVED|LIQUIDATED|EMERGENCY}` |
 | POST | `/account/futures/leverage` 🔒 | `{symbol, leverage: 1~20 | null}` 종목 레버리지 설정(null = 거래소 기준 증거금). 그 종목에 포지션·미체결 주문이 있으면 422. 위탁증거금률 = 1/레버리지, 유지 = 위탁의 2/3 |
 | GET | `/market/options` | 1일물 옵션 20종목(주가지수 `KC1~5`·`KP1~5`, 원/달러 `UC1~5`·`UP1~5`, 3번이 등가격) `[{symbol,family:K|U,familyName,type:CALL|PUT,slot,name,strike,underlying,theo,lastPrice,priceScale,decimals,unit,tickUnits,unitValue,expiresAt}]`. 행사가는 매일 04:11 만기 정산 뒤 다시 깐다(`market.option_series`). `theo` = 블랙-숄즈 이론가(r=0, 하루 변동성 주가지수 1.2%·원/달러 0.5%). 2초 공유 캐시 |
@@ -60,7 +60,7 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| POST | `/orders/conditional` | 고정: `{symbol, side, direction: AT_OR_ABOVE|AT_OR_BELOW, triggerPrice, qty, orderType?: MARKET|LIMIT, limitPrice?}`. 트레일링: `{symbol, side, qty, trailBps(10~5000)}` — 매도는 고점, 매수는 저점을 따라 `triggerPrice`가 움직인다(`watermark`). 현재가가 이미 조건을 만족하면 **400** |
+| POST | `/orders/conditional` | 고정: `{symbol, side, direction: AT_OR_ABOVE|AT_OR_BELOW, triggerPrice, qty, orderType?: MARKET|LIMIT, limitPrice?}`. 트레일링: `{symbol, side, qty, trailBps(10~5000)}` — 매도는 고점, 매수는 저점을 따라 `triggerPrice`가 움직인다(`watermark`). 현재가가 이미 조건을 만족하면 **400**. **선물**은 보유 포지션을 닫는 방향·수량만(없거나 넘으면 **422**), 발동 때 그 시점 포지션만큼으로 줄이고 포지션이 없으면 새 포지션을 열지 않고 `CANCELED`("청산할 선물 포지션이 없어 자동 취소"). 포지션이 사라지거나 뒤집힌 대기 예약은 10초 안에 같은 사유로 취소된다. 옵션은 예약 주문 불가(404) |
 | POST | `/orders/conditional/oco` | `{symbol, side, qty, lowerPrice, upperPrice}` → 두 다리(같은 `ocoGroupId`). 한쪽 발동/취소 시 다른 쪽 자동 취소 |
 | GET | `/orders/conditional?symbol=&status=&limit=` | 목록 (`WAITING|TRIGGERED|CANCELED|FAILED`, `triggerTradePrice`, `triggeredOrderId`) |
 | DELETE | `/orders/conditional/:id` | WAITING 취소 (OCO면 짝도 취소) |
@@ -73,7 +73,7 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 |---|---|---|
 | GET | `/account` | `{id, balance, balanceExact, holdAmount, available, availableExact}` (`*Exact`는 큰 잔액의 정확한 십진 문자열) |
 | GET | `/account/holdings` | 보유 `[{symbol, qty, holdQty, availableQty, lastPrice, value, costBasis, avgCost, pnl, pnlRate}]` |
-| GET | `/account/trades?symbol=&limit=` | 내 체결 `[{tradeId, symbol, side: BUY|SELL|SELF, price, qty, amount, taker, realized, costBasis, ts}]` |
+| GET | `/account/trades?symbol=&limit=` | 내 체결 `[{tradeId, symbol, side: BUY|SELL|SELF, price, qty, amount, taker, realized, costBasis, ts}]`. 선물·옵션은 `price`가 정수 단위, `amount` = 가격 × 수량 × 승수(명목 원), `realized`는 그 체결로 포지션을 줄인 실현손익(`costBasis` null) |
 | GET | `/account/realized?limit=` | 실현손익 `{today, todayQty, total, totalQty, bySymbol[], recent[], stats: {fills, wins, losses, winRate, avgWin, avgLoss, profitFactor, best, worst}, futures: {today, todayQty, total, totalQty, stats}}` — `futures`는 선물 청산(반대매매·일일 정산 포함) 실현손익, 주식과 같은 모양 |
 | GET | `/account/equity?range=1d|1w|all` | 분 단위 자산 스냅샷 `[{ts, cash, stockValue, equity}]` (1분/10분/1시간 버킷의 마지막 값) |
 | GET | `/account/daily?days=` | KST 일별 `[{date, closeEquity, closeCash, change, changeRate, realized, fills}]` 최신순 |

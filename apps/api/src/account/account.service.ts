@@ -1,6 +1,6 @@
 import { Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { Prisma, type PrismaClient } from "@mock-kabu/db";
-import { ADMIN_NICKNAME, SYMBOLS } from "@mock-kabu/shared";
+import { ADMIN_NICKNAME, futureDef, optionDef, SYMBOLS } from "@mock-kabu/shared";
 import { koreaDayStart } from "../common/market-time";
 import { MemoCache } from "../core/memo-cache";
 import { futuresEncumbrance } from "../order/futures-margin";
@@ -222,7 +222,7 @@ export class AccountService {
   /** 내 체결 내역. 매수·매도 양쪽 원장을 계정 기준 한 줄로 합쳐 최신순으로 돌려준다. */
   async getTrades(accountId: string, limit = 100, symbol?: string) {
     const take = Math.min(Math.max(1, limit), 200);
-    const [trades, realized] = await Promise.all([
+    const [trades, realized, futuresRealized] = await Promise.all([
       this.prisma.trade.findMany({
         where: {
           OR: [{ buyerAccountId: accountId }, { sellerAccountId: accountId }],
@@ -237,14 +237,40 @@ export class AccountService {
         take,
         select: { tradeId: true, realized: true, costBasis: true },
       }),
+      // 선물·옵션은 매수·매도 어느 쪽이든 포지션을 줄이면 실현손익이 생긴다(futures_realized, trade_id + side).
+      this.prisma.futuresRealized.findMany({
+        where: { accountId, ...(symbol ? { symbol } : {}) },
+        orderBy: { createdAt: "desc" },
+        take,
+        select: { tradeId: true, side: true, realized: true },
+      }),
     ]);
     const realizedByTrade = new Map(realized.map((row) => [row.tradeId, row]));
+    const futuresRealizedByTrade = new Map(futuresRealized.map((row) => [`${row.tradeId}:${row.side}`, row.realized]));
     return trades.map((trade) => {
       const isBuyer = trade.buyerAccountId === accountId;
       const isSeller = trade.sellerAccountId === accountId;
       // 자기 체결은 매칭 엔진이 막지만, 만약 있다면 매수·매도 양쪽 원장이므로 SELF로 표시한다.
       const side = isBuyer && isSeller ? "SELF" : isBuyer ? "BUY" : "SELL";
       const realizedRow = isSeller ? realizedByTrade.get(trade.id) : undefined;
+      // 선물·옵션: 가격은 정수 단위라 체결금액(명목) = 가격 × 수량 × 승수
+      const unitValue = futureDef(trade.symbol)?.unitValue ?? optionDef(trade.symbol)?.unitValue ?? null;
+      if (unitValue != null) {
+        const futureRealized = futuresRealizedByTrade.get(`${trade.id}:${side === "SELF" ? "BUY" : side}`);
+        return {
+          tradeId: trade.id,
+          symbol: trade.symbol,
+          side,
+          price: trade.price,
+          qty: trade.qty,
+          amount: trade.price * trade.qty * unitValue,
+          orderId: isBuyer ? trade.buyOrderId : trade.sellOrderId,
+          taker: trade.takerSide === (isBuyer ? "BUY" : "SELL"),
+          realized: futureRealized != null ? Number(futureRealized) : null,
+          costBasis: null,
+          ts: trade.createdAt.getTime(),
+        };
+      }
       return {
         tradeId: trade.id,
         symbol: trade.symbol,

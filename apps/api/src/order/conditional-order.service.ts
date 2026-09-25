@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
   OnModuleDestroy,
+  UnprocessableEntityException,
   OnModuleInit,
   Optional,
 } from "@nestjs/common";
@@ -21,6 +22,7 @@ import {
   formatFuturePrice,
   futureDef,
   isOnTick,
+  isOption,
   tickSizeOf,
   trailingTrigger,
   type ConditionalOrderDto,
@@ -76,12 +78,14 @@ interface WaitingRow {
 }
 
 const OCO_SIBLING_NOTE = "OCO 짝 주문 발동으로 자동 취소";
+/** 선물 예약은 보유 포지션 청산용 — 포지션이 사라지거나 뒤집히면 남은 예약을 이 사유로 취소한다. */
+const NO_POSITION_NOTE = "청산할 선물 포지션이 없어 자동 취소";
 
 /** 다른 API 인스턴스가 만든 대기 주문을 늦어도 이 간격 안에 메모리 인덱스로 가져온다. */
 const INDEX_REFRESH_MS = 10_000;
 const MAX_WAITING_PER_ACCOUNT = 50;
-/** 현물과 선물 모두 — 선물은 손절·익절(OCO)로 포지션을 닫는 데 쓴다. */
-const ACTIVE_SYMBOLS = new Set(TRADABLE_SYMBOLS);
+/** 현물과 선물 — 선물은 손절·익절(OCO)로 포지션을 닫는 데만 쓴다. 옵션은 예약 주문을 받지 않는다. */
+const ACTIVE_SYMBOLS = new Set(TRADABLE_SYMBOLS.filter((symbol) => !isOption(symbol)));
 
 /** 안내 문구용 가격: 현물은 원, 선물은 정수 단위를 실제 가격으로 */
 function priceText(symbol: string, units: number): string {
@@ -160,6 +164,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     const trailBps = dto.trailBps != null ? Number(dto.trailBps) : null;
 
     this.assertSymbolSideQty(symbol, side, qty);
+    await this.assertFuturesClosing(accountId, symbol, side, qty);
     if (orderType !== "MARKET" && orderType !== "LIMIT") throw new BadRequestException("orderType은 MARKET/LIMIT");
     if (orderType === "LIMIT" && (!Number.isInteger(limitPrice) || limitPrice! <= 0)) {
       throw new BadRequestException("지정가는 양의 정수");
@@ -224,6 +229,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     const lowerPrice = Number(dto.lowerPrice);
     const upperPrice = Number(dto.upperPrice);
     this.assertSymbolSideQty(symbol, side, qty);
+    await this.assertFuturesClosing(accountId, symbol, side, qty);
     if (!Number.isInteger(lowerPrice) || lowerPrice <= 0 || !Number.isInteger(upperPrice) || upperPrice <= 0) {
       throw new BadRequestException("트리거 가격은 양의 정수");
     }
@@ -255,6 +261,30 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     if (!ACTIVE_SYMBOLS.has(symbol)) throw new NotFoundException(`없는 종목: ${symbol}`);
     if (side !== "BUY" && side !== "SELL") throw new BadRequestException("side는 BUY/SELL");
     if (!Number.isInteger(qty) || qty <= 0) throw new BadRequestException("수량은 양의 정수");
+  }
+
+  /** 이 방향으로 지금 청산할 수 있는 선물 계약 수(매도는 롱, 매수는 숏). 선물이 아니면 null. */
+  private async futuresClosable(accountId: string, symbol: string, side: OrderSide): Promise<number | null> {
+    if (!futureDef(symbol)) return null;
+    const position = await this.prisma.futuresPosition.findUnique({
+      where: { accountId_symbol: { accountId, symbol } },
+      select: { qty: true },
+    });
+    const held = position?.qty ?? 0;
+    return side === "SELL" ? Math.max(0, held) : Math.max(0, -held);
+  }
+
+  /**
+   * 선물 예약은 보유 포지션을 닫는 방향·수량만 받는다. 포지션 없이 걸어 두면 나중에 발동해 새 포지션을
+   * (증거금 확인 없이 사용자가 모르는 사이) 여는 주문이 된다.
+   */
+  private async assertFuturesClosing(accountId: string, symbol: string, side: OrderSide, qty: number): Promise<void> {
+    const closable = await this.futuresClosable(accountId, symbol, side);
+    if (closable == null) return;
+    if (closable === 0) {
+      throw new UnprocessableEntityException("선물 예약 주문은 보유 포지션을 청산하는 방향으로만 걸 수 있습니다");
+    }
+    if (qty > closable) throw new UnprocessableEntityException(`청산할 수 있는 수량은 ${closable}계약입니다`);
   }
 
   private async lastPriceOf(symbol: string): Promise<number> {
@@ -378,6 +408,21 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
       if (claimed.count === 0) return;
       if (row.ocoGroupId) await this.cancelOcoSiblings(row.ocoGroupId, row.id, OCO_SIBLING_NOTE);
 
+      // 선물: 발동 시점 포지션만큼만 청산한다. 포지션이 없거나 뒤집혔으면 새 포지션을 열지 않고 취소.
+      let qty = row.qty;
+      const closable = await this.futuresClosable(row.accountId, row.symbol, row.side);
+      if (closable != null) {
+        if (closable === 0) {
+          await this.prisma.conditionalOrder.update({
+            where: { id: row.id },
+            data: { status: "CANCELED", failReason: NO_POSITION_NOTE },
+          });
+          this.realtime.notifyAccount(row.accountId, { type: "conditional", id: row.id, status: "CANCELED" });
+          return;
+        }
+        qty = Math.min(qty, closable);
+      }
+
       let failReason: string | null = null;
       let triggeredOrderId: string | null = null;
       try {
@@ -385,7 +430,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
           symbol: row.symbol,
           side: row.side,
           type: row.orderType,
-          qty: row.qty,
+          qty,
           ...(row.orderType === "LIMIT" && row.limitPrice != null ? { price: row.limitPrice } : {}),
         });
         triggeredOrderId = order.id;
@@ -406,7 +451,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
         status: triggeredOrderId ? "TRIGGERED" : "FAILED",
         symbol: row.symbol,
         side: row.side,
-        qty: row.qty,
+        qty,
         triggerPrice: row.triggerPrice,
         label,
         orderId: triggeredOrderId,
@@ -420,7 +465,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
 
   private async reloadIndex(): Promise<void> {
     try {
-      const rows = await this.prisma.conditionalOrder.findMany({ where: { status: "WAITING" } });
+      const rows = await this.sweepOrphanFutures(await this.prisma.conditionalOrder.findMany({ where: { status: "WAITING" } }));
       const next = new Map<string, Map<string, WaitingRow>>();
       for (const row of rows) {
         let bucket = next.get(row.symbol);
@@ -447,6 +492,41 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       console.error("[conditional] index reload failed", error);
     }
+  }
+
+  /**
+   * 포지션이 사라진(전량 청산·일일 정산·반대매매·뒤집기) 선물 예약을 취소하고 남은 행만 돌려준다.
+   * 선물 화면은 포지션이 없으면 예약 목록을 보여 주지 않으므로, 남겨 두면 사용자가 모르는 예약이 된다.
+   */
+  private async sweepOrphanFutures<T extends { id: string; accountId: string; symbol: string; side: string; ocoGroupId: string | null }>(
+    rows: T[],
+  ): Promise<T[]> {
+    const futures = rows.filter((row) => futureDef(row.symbol) != null);
+    if (futures.length === 0) return rows;
+    const positions = await this.prisma.futuresPosition.findMany({
+      where: {
+        OR: [...new Set(futures.map((row) => `${row.accountId}|${row.symbol}`))].map((key) => {
+          const [accountId, symbol] = key.split("|");
+          return { accountId, symbol };
+        }),
+      },
+      select: { accountId: true, symbol: true, qty: true },
+    });
+    const held = new Map(positions.map((p) => [`${p.accountId}|${p.symbol}`, p.qty]));
+    const orphans = futures.filter((row) => {
+      const qty = held.get(`${row.accountId}|${row.symbol}`) ?? 0;
+      return row.side === "SELL" ? qty <= 0 : qty >= 0;
+    });
+    if (orphans.length === 0) return rows;
+    await this.prisma.conditionalOrder.updateMany({
+      where: { id: { in: orphans.map((row) => row.id) }, status: "WAITING" },
+      data: { status: "CANCELED", failReason: NO_POSITION_NOTE },
+    });
+    for (const accountId of new Set(orphans.map((row) => row.accountId))) {
+      this.realtime.notifyAccount(accountId, { type: "conditional", id: "sweep", status: "CANCELED" });
+    }
+    const gone = new Set(orphans.map((row) => row.id));
+    return rows.filter((row) => !gone.has(row.id));
   }
 
   private async evaluateAgainstLastPrices(): Promise<void> {
