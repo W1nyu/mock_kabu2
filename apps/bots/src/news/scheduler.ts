@@ -1,7 +1,13 @@
 import type { SymbolDef } from "@mock-kabu/shared";
 import type { MarketModel, RandomSource } from "../market-model";
 import { templateById } from "./catalog";
-import { generateMacroNews, generateSequel, generateSymbolNews, type GeneratorContext } from "./generator";
+import {
+  generateMacroNews,
+  generateSectorNews,
+  generateSequel,
+  generateSymbolNews,
+  type GeneratorContext,
+} from "./generator";
 import { RecentNewsMemory } from "./memory";
 import { randomInt, unitRandom, type Range } from "./random";
 import type { FollowUpOutcome, NewsItem, NewsSink } from "./types";
@@ -9,6 +15,8 @@ import type { FollowUpOutcome, NewsItem, NewsSink } from "./types";
 /** 종목 뉴스 4~8분, 매크로 30~60분. (처음엔 절반이었는데 너무 잦아 두 배로 늘렸다.) */
 const DEFAULT_SYMBOL_GAP: Range = { min: 240_000, max: 480_000 };
 const DEFAULT_MACRO_GAP: Range = { min: 1_800_000, max: 3_600_000 };
+/** 산업군 뉴스 15~30분 — 매크로보다 잦고 종목 뉴스보다 드물다. */
+const DEFAULT_SECTOR_GAP: Range = { min: 900_000, max: 1_800_000 };
 /** Two stories must never land in the same second; the feed has to stay readable. */
 const DEFAULT_MIN_PUBLISH_GAP_MS = 20_000;
 /** A symbol that just made news is skipped so one name cannot dominate. */
@@ -30,6 +38,7 @@ export interface NewsSchedulerOptions {
   readonly random?: RandomSource;
   readonly symbolGapMs?: Range;
   readonly macroGapMs?: Range;
+  readonly sectorGapMs?: Range;
   readonly minPublishGapMs?: number;
   readonly symbolCooldownMs?: number;
   readonly macroMuteMs?: number;
@@ -55,6 +64,7 @@ export class NewsScheduler {
   private readonly memory = new RecentNewsMemory();
   private readonly symbolGapMs: Range;
   private readonly macroGapMs: Range;
+  private readonly sectorGapMs: Range;
   private readonly minPublishGapMs: number;
   private readonly symbolCooldownMs: number;
   private readonly macroMuteMs: number;
@@ -64,6 +74,7 @@ export class NewsScheduler {
   private sequence = 0;
   private nextSymbolAtMs: number | null = null;
   private nextMacroAtMs: number | null = null;
+  private nextSectorAtMs: number | null = null;
   /** Pressure-weighted milliseconds since the last scenario story. */
   private scenarioAccruedMs = 0;
   private scenarioAccruedAtMs: number | null = null;
@@ -80,6 +91,7 @@ export class NewsScheduler {
     this.random = options.random ?? { next: () => Math.random() };
     this.symbolGapMs = options.symbolGapMs ?? DEFAULT_SYMBOL_GAP;
     this.macroGapMs = options.macroGapMs ?? DEFAULT_MACRO_GAP;
+    this.sectorGapMs = options.sectorGapMs ?? DEFAULT_SECTOR_GAP;
     this.minPublishGapMs = options.minPublishGapMs ?? DEFAULT_MIN_PUBLISH_GAP_MS;
     this.symbolCooldownMs = options.symbolCooldownMs ?? DEFAULT_SYMBOL_COOLDOWN_MS;
     this.macroMuteMs = options.macroMuteMs ?? DEFAULT_MACRO_MUTE_MS;
@@ -98,6 +110,9 @@ export class NewsScheduler {
     if (this.nextMacroAtMs === null) {
       this.nextMacroAtMs = nowMs + randomInt(this.random, this.macroGapMs.min, this.macroGapMs.max);
     }
+    if (this.nextSectorAtMs === null) {
+      this.nextSectorAtMs = nowMs + randomInt(this.random, this.sectorGapMs.min, this.sectorGapMs.max);
+    }
 
     if (nowMs - this.lastPublishedAtMs < this.minPublishGapMs) return null;
 
@@ -107,6 +122,7 @@ export class NewsScheduler {
     return (
       this.tryFollowUp(nowMs) ??
       this.tryMacro(nowMs) ??
+      this.trySector(nowMs) ??
       this.trySymbol(nowMs) ??
       this.tryScenario(nowMs)
     );
@@ -147,6 +163,19 @@ export class NewsScheduler {
     if (!item) return null;
 
     this.nextMacroAtMs = nowMs + randomInt(this.random, this.macroGapMs.min, this.macroGapMs.max);
+    this.lastMacroAtMs = nowMs;
+    return this.publish(item, nowMs);
+  }
+
+  private trySector(nowMs: number): NewsItem | null {
+    if (this.nextSectorAtMs === null || nowMs < this.nextSectorAtMs) return null;
+    if (nowMs - this.lastMacroAtMs < this.macroMuteMs) return null;
+
+    const item = generateSectorNews(this.context(nowMs));
+    if (!item) return null;
+
+    this.nextSectorAtMs = nowMs + randomInt(this.random, this.sectorGapMs.min, this.sectorGapMs.max);
+    // Hold company news briefly, as after a macro story, so the move reads as the industry's.
     this.lastMacroAtMs = nowMs;
     return this.publish(item, nowMs);
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { industryOf, type NewsItemDto } from "@mock-kabu/shared";
+import { industryById, industryOf, type NewsItemDto } from "@mock-kabu/shared";
 import Link from "next/link";
 import { formatNewsTime } from "@/lib/news";
 
@@ -31,6 +31,9 @@ export function NewsRow({
                 <span className="truncate text-[11px] text-ink-faint">{industryOf(item.symbol)!.label}</span>
               )}
             </span>
+          ) : item.industry && industryById(item.industry) ? (
+            // 산업군 전체에 대한 기사 — 특정 종목이 아니라 업종 이름을 단다.
+            <span className="chip shrink-0 border-sky/30 text-sky">{industryById(item.industry)!.label}</span>
           ) : (
             <span className="chip shrink-0">시장 전체</span>
           ))}

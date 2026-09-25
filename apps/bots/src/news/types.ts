@@ -3,7 +3,11 @@ import type { Range } from "./random";
 
 export type { Range };
 
-export type NewsScope = "SYMBOL" | "MACRO";
+/**
+ * SYMBOL: one company. SECTOR: one or more industries, weighted by `sectorExposure`.
+ * MACRO: the whole market, split by each company's macro beta.
+ */
+export type NewsScope = "SYMBOL" | "SECTOR" | "MACRO";
 
 export type NewsCategory =
   | "CAPITAL"
@@ -13,6 +17,7 @@ export type NewsCategory =
   | "RISK"
   | "FLOW"
   | "MACRO"
+  | "SECTOR"
   | "SEQUEL";
 
 export type SectorTag =
@@ -125,6 +130,12 @@ export interface NewsTemplate {
    * hurt the brokerage at the same time. Required on MACRO scope.
    */
   readonly macroDirection?: 1 | -1;
+  /**
+   * Required on SECTOR scope, forbidden elsewhere. Signed weight per sector: 1 is the
+   * industry the story is about, 0.3–0.6 a knock-on, and a negative weight an industry
+   * the same news hurts (cheap crude lifts airlines and squeezes refiners).
+   */
+  readonly sectorExposure?: Readonly<Partial<Record<SectorTag, number>>>;
 }
 
 /** One symbol's share of a published story's price effect. */
@@ -149,6 +160,8 @@ export interface NewsItem {
   readonly scope: NewsScope;
   readonly category: NewsCategory;
   readonly symbol: string | null;
+  /** Industry id (shared INDUSTRIES) a SECTOR story is filed under; null otherwise. */
+  readonly industry: string | null;
   readonly headline: string;
   readonly body: string | null;
   readonly publishedAtMs: number;

@@ -1,7 +1,15 @@
 import { timingSafeEqual } from "node:crypto";
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import type { PrismaClient } from "@mock-kabu/db";
-import { CHANNELS, NEWS_FEED_SCOPE, SYMBOLS, type NewsItemDto } from "@mock-kabu/shared";
+import {
+  CHANNELS,
+  industryById,
+  industryOf,
+  NEWS_FEED_SCOPE,
+  SYMBOLS,
+  type IndustryDef,
+  type NewsItemDto,
+} from "@mock-kabu/shared";
 import type Redis from "ioredis";
 import { PRISMA, REDIS } from "../core/tokens";
 // Same trust boundary as the liquidity endpoint: the local bots process
@@ -18,6 +26,7 @@ export interface PublishNewsDto {
   externalId?: unknown;
   parentExternalId?: unknown;
   symbol?: unknown;
+  industry?: unknown;
   category?: unknown;
   headline?: unknown;
   body?: unknown;
@@ -28,6 +37,7 @@ export interface PublishNewsDto {
 interface NewsRow {
   id: string;
   symbol: string | null;
+  industry: string | null;
   category: string;
   headline: string;
   body: string | null;
@@ -53,6 +63,7 @@ export class NewsService {
       id: row.id,
       symbol: row.symbol,
       symbolName: row.symbol ? (SYMBOL_NAMES.get(row.symbol) ?? null) : null,
+      industry: row.industry,
       category: row.category,
       headline: row.headline,
       body: row.body,
@@ -61,22 +72,25 @@ export class NewsService {
   }
 
   /**
-   * `only`을 주면 그 종목들의 기사만(산업군 피드), `null`이면 시장 전반 기사만 돌려준다.
+   * `industry`를 주면 그 산업군 피드(소속 종목 기사 + 산업군 기사), `null`이면 시장 전반 기사만.
+   * 종목 피드에는 그 종목 기사, 시장 전반 기사, 그 종목이 속한 산업군 기사가 함께 나온다.
    */
   async list(
     symbol: string | undefined,
     limit: number,
-    only?: readonly string[] | null,
+    industry?: IndustryDef | null,
   ): Promise<NewsItemDto[]> {
     const take = Number.isFinite(limit) ? Math.min(Math.max(1, Math.trunc(limit)), MAX_LIMIT) : DEFAULT_LIMIT;
+    const marketWide = { symbol: null, industry: null };
+    const own = symbol ? industryOf(symbol) : null;
     const where =
-      only === null
-        ? { symbol: null }
-        : only
-          ? { symbol: { in: [...only] } }
-          : // A market-wide story moved this symbol too, so it belongs in its feed.
-            symbol
-            ? { OR: [{ symbol }, { symbol: null }] }
+      industry === null
+        ? marketWide
+        : industry
+          ? { OR: [{ symbol: { in: [...industry.symbols] } }, { industry: industry.id }] }
+          : symbol
+            ? // A market-wide or industry story moved this symbol too, so it belongs in its feed.
+              { OR: [{ symbol }, marketWide, ...(own ? [{ industry: own.id }] : [])] }
             : {};
 
     const rows = await this.prisma.newsItem.findMany({
@@ -86,6 +100,7 @@ export class NewsService {
       select: {
         id: true,
         symbol: true,
+        industry: true,
         category: true,
         headline: true,
         body: true,
@@ -113,6 +128,10 @@ export class NewsService {
     if (symbol !== null && !ACTIVE_SYMBOLS.has(symbol)) {
       throw new BadRequestException(`unknown symbol: ${symbol}`);
     }
+    const industry = dto.industry == null ? null : requireString(dto.industry, "industry");
+    if (industry !== null && (symbol !== null || !industryById(industry))) {
+      throw new BadRequestException(`invalid industry: ${industry}`);
+    }
     const body = dto.body == null ? null : requireString(dto.body, "body");
     const parentExternalId =
       dto.parentExternalId == null ? null : requireString(dto.parentExternalId, "parentExternalId");
@@ -131,6 +150,7 @@ export class NewsService {
         externalId,
         parentExternalId,
         symbol,
+        industry,
         category,
         headline,
         body,
@@ -143,6 +163,7 @@ export class NewsService {
       select: {
         id: true,
         symbol: true,
+        industry: true,
         category: true,
         headline: true,
         body: true,
@@ -156,11 +177,15 @@ export class NewsService {
 
   private async broadcast(item: NewsItemDto): Promise<void> {
     const payload = JSON.stringify(item);
-    // A market-wide story is delivered to every symbol channel as well, so a
-    // symbol panel only ever needs to subscribe to its own channel.
+    // A market-wide story is delivered to every symbol channel as well, and an
+    // industry story to its industry's symbols, so a symbol panel only ever needs
+    // to subscribe to its own channel.
+    const industry = item.industry ? industryById(item.industry) : null;
     const scopes = item.symbol
       ? [item.symbol, NEWS_FEED_SCOPE]
-      : [...ACTIVE_SYMBOLS, NEWS_FEED_SCOPE];
+      : industry
+        ? [...industry.symbols, NEWS_FEED_SCOPE]
+        : [...ACTIVE_SYMBOLS, NEWS_FEED_SCOPE];
 
     await Promise.all(
       scopes.map((scope) =>

@@ -144,7 +144,8 @@ test("two simulated hours publish a readable, non-repeating feed", () => {
     `symbol items: ${symbolItems.length}`,
   );
   assert.ok(macroItems.length >= 1 && macroItems.length <= 5, `macro items: ${macroItems.length}`);
-  assert.ok(sequels.length >= 1, `expected at least one follow-up, got ${sequels.length}`);
+  // Follow-ups are checked across seeds below; one seed's two hours can legitimately miss them.
+  void sequels;
 
   // Nothing lands on top of anything else.
   for (let i = 1; i < published.length; i++) {
@@ -172,6 +173,23 @@ test("two simulated hours publish a readable, non-repeating feed", () => {
     published.map((item) => item.id),
     "every published item reaches the sink",
   );
+});
+
+test("follow-up stories show up in most two-hour windows", () => {
+  // About 1 in 6 two-hour windows has no sequel at all, so judge the rate, not one seed.
+  let withSequel = 0;
+  for (let seed = 1; seed <= 12; seed++) {
+    const random = seededRandom(seed);
+    const model = freshModel(seededRandom(99));
+    const scheduler = new NewsScheduler(model, SYMBOLS, new RingBufferNewsSink(500), { random });
+    let sequels = 0;
+    for (let t = 0; t <= 7_200_000; t += 5_000) {
+      if (scheduler.tick(t)?.parentItemId) sequels++;
+      model.tick();
+    }
+    if (sequels > 0) withSequel++;
+  }
+  assert.ok(withSequel >= 8, `only ${withSequel}/12 two-hour windows had a follow-up`);
 });
 
 test("a follow-up fires once, inside its declared delay, and can reverse", () => {

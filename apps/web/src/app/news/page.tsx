@@ -34,7 +34,8 @@ function feedUrl(scope: Scope): string {
 
 function inScope(item: NewsItemDto, scope: Scope): boolean {
   if (scope === ALL) return true;
-  if (scope === MARKET) return item.symbol === null;
+  if (scope === MARKET) return item.symbol === null && !item.industry;
+  if (item.industry) return item.industry === scope;
   return item.symbol !== null && industryOf(item.symbol)?.id === scope;
 }
 

@@ -4,8 +4,11 @@ import { BUSINESS_TEMPLATES } from "./business";
 import { CAPITAL_TEMPLATES } from "./capital";
 import { EARNINGS_TEMPLATES } from "./earnings";
 import { FLOW_TEMPLATES } from "./flow";
+import { INDUSTRY_COMPANY_TEMPLATES } from "./industry-company";
 import { MACRO_TEMPLATES } from "./macro";
+import { MACRO_EXTRA_TEMPLATES } from "./macro-extra";
 import { RISK_TEMPLATES } from "./risk";
+import { SECTOR_TEMPLATES } from "./sector";
 import { SEQUEL_TEMPLATES } from "./sequels";
 
 export const NEWS_TEMPLATES: readonly NewsTemplate[] = [
@@ -15,7 +18,10 @@ export const NEWS_TEMPLATES: readonly NewsTemplate[] = [
   ...BUSINESS_TEMPLATES,
   ...RISK_TEMPLATES,
   ...FLOW_TEMPLATES,
+  ...INDUSTRY_COMPANY_TEMPLATES,
   ...MACRO_TEMPLATES,
+  ...MACRO_EXTRA_TEMPLATES,
+  ...SECTOR_TEMPLATES,
   ...SEQUEL_TEMPLATES,
 ];
 
@@ -25,6 +31,9 @@ export const TEMPLATES_BY_ID = new Map(NEWS_TEMPLATES.map((template) => [templat
 export const SYMBOL_POOL = NEWS_TEMPLATES.filter(
   (template) => template.scope === "SYMBOL" && !template.sequelOnly,
 );
+
+/** Industry stories. */
+export const SECTOR_POOL = NEWS_TEMPLATES.filter((template) => template.scope === "SECTOR");
 
 /** Market-wide stories. */
 export const MACRO_POOL = NEWS_TEMPLATES.filter((template) => template.scope === "MACRO");

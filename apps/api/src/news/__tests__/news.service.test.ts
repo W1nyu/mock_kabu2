@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { industryById } from "@mock-kabu/shared";
+import { liquidityBootstrapToken } from "../../liquidity/liquidity-reserve";
 import { NewsService } from "../news.service";
 
 function serviceWith(rows: unknown[], redis = { publish: vi.fn().mockResolvedValue(1) }) {
@@ -15,6 +17,7 @@ function serviceWith(rows: unknown[], redis = { publish: vi.fn().mockResolvedVal
 const ROW = {
   id: "row-1",
   symbol: "KABU",
+  industry: null,
   category: "CAPITAL",
   headline: "카부증권, 3,200억원 규모 자사주 취득 신탁계약 체결",
   body: null,
@@ -30,6 +33,7 @@ describe("NewsService.list", () => {
       id: "row-1",
       symbol: "KABU",
       symbolName: "카부증권",
+      industry: null,
       category: "CAPITAL",
       headline: ROW.headline,
       body: null,
@@ -48,22 +52,24 @@ describe("NewsService.list", () => {
     expect(select.impact).toBeUndefined();
   });
 
-  it("includes market-wide stories in a single symbol's feed", async () => {
+  it("includes market-wide stories and its own industry's stories in a single symbol's feed", async () => {
     const { service, prisma } = serviceWith([ROW]);
     await service.list("KABU", 10);
 
     expect(prisma.newsItem.findMany.mock.calls[0][0].where).toEqual({
-      OR: [{ symbol: "KABU" }, { symbol: null }],
+      OR: [{ symbol: "KABU" }, { symbol: null, industry: null }, { industry: "finance" }],
     });
   });
 
-  it("serves an industry feed without market-wide stories, and a market-only feed", async () => {
+  it("serves an industry feed (its symbols + industry stories) and a market-only feed", async () => {
     const { service, prisma } = serviceWith([ROW]);
-    await service.list(undefined, 10, ["MOCK", "DAON"]);
+    await service.list(undefined, 10, industryById("tech"));
     await service.list(undefined, 10, null);
 
-    expect(prisma.newsItem.findMany.mock.calls[0][0].where).toEqual({ symbol: { in: ["MOCK", "DAON"] } });
-    expect(prisma.newsItem.findMany.mock.calls[1][0].where).toEqual({ symbol: null });
+    expect(prisma.newsItem.findMany.mock.calls[0][0].where).toEqual({
+      OR: [{ symbol: { in: ["MOCK", "DAON"] } }, { industry: "tech" }],
+    });
+    expect(prisma.newsItem.findMany.mock.calls[1][0].where).toEqual({ symbol: null, industry: null });
   });
 
   it("caps the page size so one request cannot pull the whole table", async () => {
@@ -92,11 +98,37 @@ describe("NewsService.publish", () => {
 
   it("broadcasts only the public projection", async () => {
     const { service, redis } = serviceWith([ROW]);
-    await service.publish(process.env.LIQUIDITY_BOOTSTRAP_TOKEN, draft).catch(() => {});
+    await service.publish(liquidityBootstrapToken(), draft);
+    expect(redis.publish).toHaveBeenCalled();
 
     for (const [, payload] of redis.publish.mock.calls) {
       expect(payload).not.toContain("sentiment");
       expect(payload).not.toContain("impact");
     }
+  });
+
+  it("routes an industry story to that industry's symbols and the firehose only", async () => {
+    const industryRow = { ...ROW, id: "row-2", symbol: null, industry: "tech", category: "SECTOR" };
+    const { service, redis } = serviceWith([industryRow]);
+    await service.publish(liquidityBootstrapToken(), {
+      ...draft,
+      externalId: "13:sec.semi.export.up",
+      symbol: null,
+      industry: "tech",
+      category: "SECTOR",
+    });
+
+    const channels = redis.publish.mock.calls.map(([channel]) => String(channel));
+    expect(channels.some((channel) => channel.endsWith("MOCK"))).toBe(true);
+    expect(channels.some((channel) => channel.endsWith("DAON"))).toBe(true);
+    expect(channels.some((channel) => channel.endsWith("KABU"))).toBe(false);
+    expect(channels).toHaveLength(3);
+  });
+
+  it("rejects an unknown industry, or an industry on a company story", async () => {
+    const { service } = serviceWith([ROW]);
+    const token = liquidityBootstrapToken();
+    await expect(service.publish(token, { ...draft, symbol: null, industry: "nope" })).rejects.toThrow(/industry/);
+    await expect(service.publish(token, { ...draft, industry: "tech" })).rejects.toThrow(/industry/);
   });
 });

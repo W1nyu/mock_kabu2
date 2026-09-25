@@ -48,9 +48,11 @@ export interface CandleDto {
  */
 export interface NewsItemDto {
   id: string;
-  /** null for a market-wide story. */
+  /** null for an industry or market-wide story. */
   symbol: string | null;
   symbolName: string | null;
+  /** Industry id (INDUSTRIES) for an industry story; null otherwise. */
+  industry: string | null;
   category: string;
   headline: string;
   body: string | null;

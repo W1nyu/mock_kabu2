@@ -17,12 +17,12 @@ export class NewsController {
     @Query("industry") industry?: string,
   ) {
     const take = limit ? Number(limit) : 40;
-    // 산업군 피드는 그 종목들의 기사만 — 시장 전반 기사는 `industry=market`으로 따로 본다.
+    // 산업군 피드는 소속 종목 기사와 산업군 기사 — 시장 전반 기사는 `industry=market`으로 따로 본다.
     if (industry !== undefined) {
       if (industry === MARKET_WIDE) return this.news.list(undefined, take, null);
       const def = industryById(industry);
       if (!def) throw new NotFoundException(`없는 산업군: ${industry}`);
-      return this.news.list(undefined, take, def.symbols);
+      return this.news.list(undefined, take, def);
     }
     if (symbol !== undefined && !ACTIVE_SYMBOLS.has(symbol)) {
       throw new NotFoundException(`없는 종목: ${symbol}`);

@@ -157,7 +157,7 @@ export const SEQUEL_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     sequelOnly: true,
     strength: { min: 0.4, max: 0.65 },
-    headlines: ["{name} {product} 리콜 확대… 대상 {count}으로 늘어"],
+    headlines: ["{name} {product} 리콜 확대… 대상 {count}{로} 늘어"],
     slots: {
       product: { kind: "pick", vocab: "product" },
       count: { kind: "count", range: { min: 50_000, max: 900_000 }, unit: "개" },

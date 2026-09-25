@@ -123,6 +123,7 @@ export class ApiClient {
    */
   async publishNews(draft: {
     symbol: string | null;
+    industry: string | null;
     category: string;
     headline: string;
     body: string | null;

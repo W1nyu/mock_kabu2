@@ -1,4 +1,4 @@
-import type { SymbolDef } from "@mock-kabu/shared";
+import { industryOf, type SymbolDef } from "@mock-kabu/shared";
 import {
   MAX_EVENT_STRENGTH,
   MIN_EVENT_STRENGTH,
@@ -7,7 +7,7 @@ import {
   type MarketEventSentiment,
   type RandomSource,
 } from "../market-model";
-import { MACRO_POOL, SYMBOL_POOL, templateById } from "./catalog";
+import { MACRO_POOL, SECTOR_POOL, SYMBOL_POOL, templateById } from "./catalog";
 import { companyProfile, MIN_MACRO_BETA } from "./company-profiles";
 import { RecentNewsMemory, renderKey } from "./memory";
 import { clamp, pickOne, triangular, unitRandom, uniform, weightedPick } from "./random";
@@ -18,6 +18,10 @@ import type { FollowUpOutcome, NewsImpact, NewsItem, NewsTemplate, SectorTag } f
 const MAX_RESAMPLE_ATTEMPTS = 4;
 /** Per-symbol variation applied to a market-wide story. */
 const MACRO_JITTER = { min: 0.88, max: 1.12 };
+/** Per-symbol variation applied to an industry story. */
+const SECTOR_JITTER = { min: 0.85, max: 1.15 };
+/** An exposure weaker than this is not worth a separate print for that listing. */
+const MIN_SECTOR_EXPOSURE = 0.15;
 /** Macro impulses outlive flow news but not a balance-sheet event. */
 const MACRO_PERSISTENCE = { min: 0.93, max: 0.955 };
 /** At full scenario pressure a symbol is this much more likely to be the next story (1 + boost). */
@@ -173,6 +177,7 @@ export function generateSymbolNews(
     scope: "SYMBOL",
     category: template.category,
     symbol: symbol.symbol,
+    industry: null,
     headline,
     body,
     publishedAtMs: ctx.nowMs,
@@ -252,6 +257,80 @@ export function generateMacroNews(ctx: GeneratorContext): NewsItem | null {
     scope: "MACRO",
     category: template.category,
     symbol: null,
+    industry: null,
+    headline,
+    body,
+    publishedAtMs: ctx.nowMs,
+    slotValues,
+    parentItemId: null,
+    impact,
+  };
+}
+
+/**
+ * An industry story. Like a macro story it names no company and is not filtered by
+ * sentiment first — the sector pool is built in up/down pairs. Each listing's
+ * direction is the template's sentiment, flipped where its sector weight is negative.
+ */
+export function generateSectorNews(ctx: GeneratorContext): NewsItem | null {
+  const listed = new Set(ctx.symbols.map((symbol) => companyProfile(symbol.symbol)?.sector));
+  const template = weightedPick(
+    ctx.random,
+    SECTOR_POOL.filter((candidate) =>
+      Object.entries(candidate.sectorExposure ?? {}).some(
+        ([sector, weight]) => (weight ?? 0) > 0 && listed.has(sector as SectorTag),
+      ),
+    ).map((candidate) => ({
+      value: candidate,
+      weight:
+        (candidate.weight ?? 1) *
+        ctx.memory.templatePenalty(candidate.id, ctx.nowMs) *
+        ctx.memory.categoryPenalty(candidate.category, ctx.nowMs),
+    })),
+  );
+  if (!template) return null;
+
+  const baseStrength = sampleStrength(template, ctx.random);
+  const slotContext: SlotContext = {
+    random: ctx.random,
+    nowMs: ctx.nowMs,
+    symbol: null,
+    profile: null,
+    price: null,
+    memory: ctx.memory,
+  };
+  const { headline, body, slotValues } = renderWithSlots(template, ctx, slotContext);
+
+  const impact: NewsImpact[] = [];
+  let lead: { symbol: string; weight: number } | null = null;
+  for (const symbol of ctx.symbols) {
+    const sector = companyProfile(symbol.symbol)?.sector;
+    const weight = sector ? (template.sectorExposure?.[sector] ?? 0) : 0;
+    if (Math.abs(weight) < MIN_SECTOR_EXPOSURE) continue;
+    if (weight > 0 && (!lead || weight > lead.weight)) lead = { symbol: symbol.symbol, weight };
+    impact.push({
+      symbol: symbol.symbol,
+      sentiment: weight > 0 ? template.sentiment : flip(template.sentiment),
+      strength: clamp(
+        baseStrength * Math.abs(weight) * uniform(ctx.random, SECTOR_JITTER),
+        MIN_EVENT_STRENGTH,
+        MAX_EVENT_STRENGTH,
+      ),
+      persistence: optionalRange(template.persistence, ctx.random),
+      volumeMultiplier: optionalRange(template.volumeMultiplier, ctx.random),
+    });
+  }
+  if (impact.length === 0 || !lead) return null;
+
+  return {
+    id: makeId(ctx, template),
+    templateId: template.id,
+    scope: "SECTOR",
+    category: template.category,
+    symbol: null,
+    // Filed under the industry of the most exposed listing, so the story shows up
+    // in that industry's feed and on its symbols' pages.
+    industry: industryOf(lead.symbol)?.id ?? null,
     headline,
     body,
     publishedAtMs: ctx.nowMs,
@@ -306,6 +385,7 @@ export function generateSequel(
     scope: "SYMBOL",
     category: template.category,
     symbol: symbol.symbol,
+    industry: null,
     headline,
     body,
     publishedAtMs: ctx.nowMs,

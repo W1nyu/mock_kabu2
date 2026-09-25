@@ -15,7 +15,7 @@ export class ApiNewsSink implements NewsSink {
   publish(item: NewsItem): void {
     const template = templateById(item.templateId);
 
-    // A market-wide story has one impact per symbol, each with its own
+    // A market-wide or industry story has one impact per symbol, each with its own
     // direction. The single recorded pair is the template's own reading plus
     // the average magnitude — enough to analyse later, and never shown to a user.
     const sentiment = template?.sentiment ?? item.impact[0]?.sentiment ?? "POSITIVE";
@@ -27,6 +27,7 @@ export class ApiNewsSink implements NewsSink {
         externalId: item.id,
         parentExternalId: item.parentItemId,
         symbol: item.symbol,
+        industry: item.industry,
         category: item.category,
         headline: item.headline,
         body: item.body,

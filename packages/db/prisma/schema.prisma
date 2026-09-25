@@ -350,9 +350,11 @@ model NewsItem {
   id             String   @id @default(uuid())
   /// 봇 프로세스가 부여한 식별자. 재시도 시 중복 저장을 막는다.
   externalId     String   @unique @map("external_id")
-  /// 종목 뉴스면 심볼, 시장 전체 매크로 뉴스면 null
+  /// 종목 뉴스면 심볼, 산업군·시장 전체 뉴스면 null
   symbol         String?
-  category       String // CAPITAL | EARNINGS | ANALYST | BUSINESS | RISK | FLOW | MACRO | SEQUEL
+  /// 산업군 뉴스면 산업군 id(shared INDUSTRIES), 그 밖에는 null
+  industry       String?
+  category       String // CAPITAL | EARNINGS | ANALYST | BUSINESS | RISK | FLOW | MACRO | SECTOR | SEQUEL
   headline       String
   body           String?
   /// POSITIVE | NEGATIVE — 공개 응답에서 제외된다
@@ -367,6 +369,7 @@ model NewsItem {
 
   @@index([createdAt])
   @@index([symbol, createdAt])
+  @@index([industry, createdAt])
   @@map("news_items")
   @@schema("market")
 }
