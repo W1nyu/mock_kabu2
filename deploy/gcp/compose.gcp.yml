@@ -9,7 +9,7 @@ x-app-build: &app-build
     NEXT_PUBLIC_API_URL: ${APP_ORIGIN:?APP_ORIGIN is required}
 
 services:
-  # e2-standard-4 (vCPU 4, 16GB) 기준 한도. 기본 compose는 4GB OCI 서버와 같이 쓰므로
+  # vCPU 8 머신 기준 한도. 기본 compose는 4GB OCI 서버와 같이 쓰므로
   # 동시 접속자 대비 여유는 이 GCP 오버레이에서만 늘린다.
   postgres:
     environment:
@@ -35,7 +35,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.00"
+          cpus: "3.00"
           memory: 1536M
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -60,14 +60,27 @@ services:
           cpus: "1.50"
           memory: 768M
 
+  # 종목 수만큼 봉·주문 처리량이 늘어 기본 0.75코어에 닿았다(18종목 때 엔진 57%). vCPU 8 기준 여유.
   matching-engine:
     build: *app-build
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
 
   settlement:
     build: *app-build
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
 
   bots:
     build: *app-build
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
 
   web:
     build: *app-build
