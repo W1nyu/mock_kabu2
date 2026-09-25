@@ -200,6 +200,8 @@ export const KEYS = {
   cancelRequested: (orderId: string) => redisKey(`cancel-requested:${orderId}`),
   /** 운영자가 거는 임시 점검 JSON `{startAt, endAt, message}` — 주문 차단·화면 배너 */
   manualMaintenance: () => redisKey("maintenance:manual"),
+  /** 운영자가 즉시 발행을 요청한 시장 기사 템플릿 id 대기열(봇이 꺼내 간다) */
+  newsForceQueue: () => redisKey("news:force"),
 } as const;
 
 /** Names used for worker heartbeats and operational health reports. */

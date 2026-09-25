@@ -98,3 +98,10 @@ test("a metals story moves copper only when it is about copper-family metals", (
     if (commodity === "천연가스") assert.ok(codes.includes("GAS") && !codes.includes("COPPER"));
   }
 });
+
+test("an operator can force a specific market story — unknown ids produce nothing", () => {
+  const item = generateMacroNews(context(3), "macro.oil.spike");
+  assert.equal(item?.templateId, "macro.oil.spike");
+  assert.ok((item?.referenceMoves ?? []).some((m) => m.code === "OIL" && m.move > 0));
+  assert.equal(generateMacroNews(context(3), "macro.nope"), null);
+});

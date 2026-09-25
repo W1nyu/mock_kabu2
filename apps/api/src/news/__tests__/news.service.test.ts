@@ -133,3 +133,30 @@ describe("NewsService.publish", () => {
     await expect(service.publish(token, { ...draft, industry: "tech" })).rejects.toThrow(/industry/);
   });
 });
+
+describe("NewsService forced market stories", () => {
+  function make() {
+    const queue: string[] = [];
+    const redis = {
+      lpush: vi.fn(async (_k: string, v: string) => queue.unshift(v)),
+      expire: vi.fn(async () => 1),
+      rpop: vi.fn(async () => queue.pop() ?? null),
+      publish: vi.fn(async () => 1),
+    };
+    const service = new NewsService({} as never, redis as never);
+    return { service, queue };
+  }
+
+  it("queues a macro.* template for the bots and hands it out once", async () => {
+    const { service } = make();
+    await expect(service.requestForcedNews(liquidityBootstrapToken(), "macro.oil.spike")).resolves.toEqual({ queued: "macro.oil.spike" });
+    await expect(service.takeForcedNews(liquidityBootstrapToken())).resolves.toEqual({ templateId: "macro.oil.spike" });
+    await expect(service.takeForcedNews(liquidityBootstrapToken())).resolves.toEqual({ templateId: null });
+  });
+
+  it("rejects non-macro ids and callers without the token", async () => {
+    const { service } = make();
+    await expect(service.requestForcedNews(liquidityBootstrapToken(), "biz.order")).rejects.toThrow(/macro/);
+    await expect(service.requestForcedNews("wrong", "macro.oil.spike")).rejects.toThrow();
+  });
+});

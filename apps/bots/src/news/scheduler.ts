@@ -161,6 +161,17 @@ export class NewsScheduler {
     return item ? this.publish(item, nowMs) : null;
   }
 
+  /**
+   * 운영자 요청: 이 시장 기사 템플릿을 지금 발행한다(주기와 무관). 없는 템플릿이면 null.
+   * 발행 경로는 평소와 같아 주가 영향·기초자산 반응·후속 보도가 그대로 적용된다.
+   */
+  forceMacro(templateId: string, nowMs: number = Date.now()): NewsItem | null {
+    const item = generateMacroNews(this.context(nowMs), templateId);
+    if (!item) return null;
+    this.lastMacroAtMs = nowMs;
+    return this.publish(item, nowMs);
+  }
+
   private tryMacro(nowMs: number): NewsItem | null {
     if (this.nextMacroAtMs === null || nowMs < this.nextMacroAtMs) return null;
 
@@ -308,7 +319,7 @@ export function startNewsEngine(
   symbols: readonly SymbolDef[],
   sink: NewsSink,
   options: NewsSchedulerOptions = {},
-): { stop(): void } {
+): { stop(): void; forceMacro(templateId: string): NewsItem | null } {
   const scheduler = new NewsScheduler(model, symbols, sink, options);
   const timer = setInterval(() => scheduler.tick(), NEWS_TICK_MS);
   timer.unref?.();
@@ -316,5 +327,6 @@ export function startNewsEngine(
     stop() {
       clearInterval(timer);
     },
+    forceMacro: (templateId: string) => scheduler.forceMacro(templateId),
   };
 }

@@ -48,4 +48,16 @@ export class InternalNewsController {
   publish(@Body() dto: PublishNewsDto, @Headers("x-liquidity-bootstrap-token") token?: string) {
     return this.news.publish(token, dto);
   }
+
+  /** 운영자 도구: 시장 기사 즉시 발행 요청 `{templateId: "macro.oil.spike"}` */
+  @Post("force")
+  force(@Body() body: { templateId?: unknown }, @Headers("x-liquidity-bootstrap-token") token?: string) {
+    return this.news.requestForcedNews(token, body?.templateId);
+  }
+
+  /** 봇 전용: 요청된 템플릿 하나를 꺼낸다 */
+  @Post("force/take")
+  takeForced(@Headers("x-liquidity-bootstrap-token") token?: string) {
+    return this.news.takeForcedNews(token);
+  }
 }

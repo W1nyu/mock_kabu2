@@ -182,6 +182,17 @@ export class ApiClient {
     return this.request("GET", "/market/reference") as Promise<{ code: string; value: number | null }[]>;
   }
 
+  /** 운영자가 즉시 발행을 요청한 시장 기사 템플릿 하나(없으면 null). */
+  async takeForcedNews(): Promise<string | null> {
+    const res = await fetch(`${BASE}/internal/news/force/take`, {
+      method: "POST",
+      headers: { "x-liquidity-bootstrap-token": LIQUIDITY_BOOTSTRAP_TOKEN },
+    });
+    if (!res.ok) throw new ApiError(res.status, `POST /internal/news/force/take returned ${res.status}`);
+    const body = (await res.json()) as { templateId: string | null };
+    return body.templateId;
+  }
+
   /** Admin market scenarios that are running or about to start. Same internal token as news. */
   async activeScenarios(): Promise<PressureScenario[]> {
     const res = await fetch(`${BASE}/internal/scenarios/active`, {

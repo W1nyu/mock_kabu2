@@ -657,7 +657,7 @@ async function main() {
   // through chooseFlowSide, so the tape reacts to the headline.
   // 원/달러·원자재 가상 지수(선물 기초자산). 시장 전체 기사가 채널 방향대로 이 가격도 움직인다.
   const reference = await startReferenceEngine(clients[0]);
-  startNewsEngine(
+  const newsEngine = startNewsEngine(
     ref,
     SYMBOLS,
     new CompositeNewsSink([new ConsoleNewsSink(), new ApiNewsSink(clients[0]), new ReferenceNewsSink(reference.model)]),
@@ -667,6 +667,17 @@ async function main() {
       referenceValue: (code) => reference.model.value(code),
     },
   );
+  // 운영자 도구: /internal/news/force로 요청된 시장 기사를 5초 안에 발행한다.
+  setInterval(() => {
+    void clients[0]
+      .takeForcedNews()
+      .then((templateId) => {
+        if (!templateId) return;
+        const item = newsEngine.forceMacro(templateId);
+        console.log(item ? `[news] forced ${templateId}: ${item.headline}` : `[news] forced ${templateId}: unknown template`);
+      })
+      .catch(() => undefined);
+  }, 5_000);
 
   // Preserve bot1..bot5 as the flow pool. A flow bot can run two independent
   // symbol loops, leaving bot6..bot10 in their specialized roles as listings grow.

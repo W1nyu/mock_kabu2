@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { BadRequestException, Inject, Injectable, Optional, UnauthorizedException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@mock-kabu/db";
 import {
+  KEYS,
   referenceAsset,
   DELISTED_SYMBOLS,
   CHANNELS,
@@ -229,6 +230,26 @@ export class NewsService {
         }),
       ),
     );
+  }
+
+  /**
+   * 운영자 도구: 시장 기사 템플릿(macro.*)을 즉시 발행해 달라고 봇에 요청한다. 봇이 5초마다 꺼내 가
+   * 평소와 같은 경로(주가 영향·기초자산 반응 포함)로 발행한다. 템플릿 존재 여부는 봇이 확인한다.
+   */
+  async requestForcedNews(token: string | undefined, templateId: unknown): Promise<{ queued: string }> {
+    this.assertToken(token);
+    const id = requireString(templateId, "templateId");
+    if (!/^macro\.[a-z0-9.\-]{1,60}$/.test(id)) throw new BadRequestException("templateId must be a macro.* template id");
+    const key = KEYS.newsForceQueue();
+    await this.redis.lpush(key, id);
+    await this.redis.expire(key, 600);
+    return { queued: id };
+  }
+
+  /** 봇 전용: 요청된 템플릿 하나를 꺼낸다(없으면 null). */
+  async takeForcedNews(token: string | undefined): Promise<{ templateId: string | null }> {
+    this.assertToken(token);
+    return { templateId: await this.redis.rpop(KEYS.newsForceQueue()) };
   }
 
   private assertToken(presentedToken: string | undefined) {

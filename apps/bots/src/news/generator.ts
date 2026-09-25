@@ -214,12 +214,15 @@ export function generateSymbolNews(
   };
 }
 
-export function generateMacroNews(ctx: GeneratorContext): NewsItem | null {
+export function generateMacroNews(ctx: GeneratorContext, forcedTemplateId?: string): NewsItem | null {
   // No sentiment filter here. A macro story's direction per symbol comes from
   // macroDirection x beta, so pre-filtering by the template's market-average
   // label would double-count the direction and could contradict the impacts.
   // The macro pool is built in up/down pairs, which keeps the mix balanced.
-  const template = weightedPick(
+  // forcedTemplateId: 운영자가 즉시 발행을 요청한 템플릿(없는 id면 null).
+  const template = forcedTemplateId
+    ? (MACRO_POOL.find((candidate) => candidate.id === forcedTemplateId) ?? null)
+    : weightedPick(
     ctx.random,
     MACRO_POOL.map((candidate) => ({
       value: candidate,
