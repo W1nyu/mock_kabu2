@@ -14,6 +14,7 @@ export default function FuturesPositionActions({
   symbol,
   qty,
   markPrice,
+  avgPrice,
   refreshKey,
   onChanged,
 }: {
@@ -21,6 +22,8 @@ export default function FuturesPositionActions({
   /** 포지션 수량(롱 +, 숏 −) */
   qty: number;
   markPrice: number;
+  /** 평균 진입가(정수 단위) — 손절·익절 % 빠른 입력의 기준 */
+  avgPrice: number;
   refreshKey: number;
   onChanged: () => void;
 }) {
@@ -80,26 +83,48 @@ export default function FuturesPositionActions({
     );
   }
 
-  // 롱: 손절은 아래, 익절은 위. 숏은 반대. OCO는 (아래, 위) 한 쌍으로 등록한다.
-  const stop = toFutureUnits(symbol, stopText);
-  const take = toFutureUnits(symbol, takeText);
+  // 롱: 손절은 아래, 익절은 위. 숏은 반대. 둘 다면 (아래, 위) OCO, 하나만이면 단일 예약.
+  const stop = stopText.trim() ? toFutureUnits(symbol, stopText) : null;
+  const take = takeText.trim() ? toFutureUnits(symbol, takeText) : null;
   const lower = long ? stop : take;
   const upper = long ? take : stop;
-  const ocoValid = lower != null && upper != null && lower < markPrice && upper > markPrice;
+  const ocoValid =
+    (lower != null || upper != null) && (lower == null || lower < markPrice) && (upper == null || upper > markPrice);
+  const legLabel = stop != null && take != null ? "손절·익절" : stop != null ? "손절" : take != null ? "익절" : "손절·익절";
 
   function placeOco() {
     if (!ocoValid) return;
-    void run(
-      () =>
-        api("/orders/conditional/oco", {
-          method: "POST",
-          body: { symbol, side: closeSide, qty: Math.abs(qty), lowerPrice: lower, upperPrice: upper },
-        }),
-      "손절·익절을 걸었습니다",
-    );
+    const request =
+      lower != null && upper != null
+        ? () =>
+            api("/orders/conditional/oco", {
+              method: "POST",
+              body: { symbol, side: closeSide, qty: Math.abs(qty), lowerPrice: lower, upperPrice: upper },
+            })
+        : () =>
+            api("/orders/conditional", {
+              method: "POST",
+              body: {
+                symbol,
+                side: closeSide,
+                qty: Math.abs(qty),
+                direction: lower != null ? "AT_OR_BELOW" : "AT_OR_ABOVE",
+                triggerPrice: lower ?? upper,
+                orderType: "MARKET",
+              },
+            });
+    void run(request, `${legLabel}을 걸었습니다`);
   }
 
   const tick = unitsToInput(symbol, def.tickUnits);
+  /** 평균가 기준 pct% 손실/이익 가격을 틱에 맞춰 채운다. 롱 손절은 아래, 숏 손절은 위. */
+  function preset(kind: "stop" | "take", pct: number) {
+    const sign = (kind === "stop") === long ? -1 : 1;
+    const target = Math.round((avgPrice * (1 + (sign * pct) / 100)) / def.tickUnits) * def.tickUnits;
+    const text = unitsToInput(symbol, Math.max(def.tickUnits, target));
+    if (kind === "stop") setStopText(text);
+    else setTakeText(text);
+  }
   const stopHint = long ? "현재가보다 낮게" : "현재가보다 높게";
   const takeHint = long ? "현재가보다 높게" : "현재가보다 낮게";
 
@@ -117,7 +142,7 @@ export default function FuturesPositionActions({
       </button>
 
       <div>
-        <p className="mb-1.5 text-xs text-ink-muted">손절·익절 (한쪽이 발동하면 다른 쪽은 취소, 전량 시장가 청산)</p>
+        <p className="mb-1.5 text-xs text-ink-muted">손절·익절 (하나만 입력해도 됨 · 둘 다면 한쪽 발동 시 다른 쪽 취소 · 전량 시장가 청산)</p>
         <div className="grid grid-cols-2 gap-2">
           <label className="block">
             <span className="text-[11px] text-ink-faint">손절가 · {stopHint}</span>
@@ -140,8 +165,26 @@ export default function FuturesPositionActions({
             />
           </label>
         </div>
+        <div className="mt-1.5 grid grid-cols-2 gap-2 text-[11px]">
+          {(["stop", "take"] as const).map((kind) => (
+            <div key={kind} className="flex gap-1">
+              {[1, 3, 5].map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  onClick={() => preset(kind, pct)}
+                  className={`num flex-1 rounded-md py-1 ring-1 ring-hairline ring-inset ${kind === "stop" ? "text-down" : "text-up"}`}
+                  title={`평균가 대비 ${kind === "stop" ? "손실" : "이익"} ${pct}%`}
+                >
+                  {kind === "stop" ? "−" : "+"}
+                  {pct}%
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
         <button type="button" disabled={busy || !ocoValid} onClick={placeOco} className="btn btn-ghost btn-sm mt-2 w-full">
-          손절·익절 걸기
+          {legLabel} 걸기
         </button>
       </div>
 

@@ -210,10 +210,10 @@ model BracketIntent {
   accountId    String   @map("account_id")
   orderId      String   @unique @map("order_id")
   symbol       String
-  /// 손절 거리(bps, 체결 평균가 아래)
-  stopBps      Int      @map("stop_bps")
-  /// 익절 거리(bps, 체결 평균가 위)
-  takeBps      Int      @map("take_bps")
+  /// 손절 거리(bps, 체결 평균가 아래). null이면 손절 없음 — 손절·익절 중 하나는 있어야 한다
+  stopBps      Int?     @map("stop_bps")
+  /// 익절 거리(bps, 체결 평균가 위). null이면 익절 없음
+  takeBps      Int?     @map("take_bps")
   status       String   @default("PENDING") // PENDING | ARMED | CANCELED
   armedQty     Int      @default(0) @map("armed_qty")
   avgFillPrice Int?     @map("avg_fill_price")

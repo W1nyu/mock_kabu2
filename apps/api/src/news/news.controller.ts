@@ -15,6 +15,7 @@ export class NewsController {
     @Query("symbol") symbol?: string,
     @Query("limit") limit?: string,
     @Query("industry") industry?: string,
+    @Query("scope") scope?: string,
   ) {
     const take = limit ? Number(limit) : 40;
     // 산업군 피드는 소속 종목 기사와 산업군 기사 — 시장 전반 기사는 `industry=market`으로 따로 본다.
@@ -27,7 +28,8 @@ export class NewsController {
     if (symbol !== undefined && !ACTIVE_SYMBOLS.has(symbol)) {
       throw new NotFoundException(`없는 종목: ${symbol}`);
     }
-    return this.news.list(symbol, take);
+    // scope=own: 종목 화면의 "이 종목" 탭 — 그 종목 기사만(시장·업종 기사 제외)
+    return this.news.list(symbol, take, undefined, scope === "own" && symbol !== undefined);
   }
 }
 

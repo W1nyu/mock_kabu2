@@ -82,11 +82,13 @@ export class NewsService {
   /**
    * `industry`를 주면 그 산업군 피드(소속 종목 기사 + 산업군 기사), `null`이면 시장 전반 기사만.
    * 종목 피드에는 그 종목 기사, 시장 전반 기사, 그 종목이 속한 산업군 기사가 함께 나온다.
+   * `ownOnly`면 그 종목 기사만.
    */
   async list(
     symbol: string | undefined,
     limit: number,
     industry?: IndustryDef | null,
+    ownOnly = false,
   ): Promise<NewsItemDto[]> {
     const take = Number.isFinite(limit) ? Math.min(Math.max(1, Math.trunc(limit)), MAX_LIMIT) : DEFAULT_LIMIT;
     const marketWide = { symbol: null, industry: null };
@@ -96,12 +98,15 @@ export class NewsService {
         ? marketWide
         : industry
           ? { OR: [{ symbol: { in: [...industry.symbols] } }, { industry: industry.id }] }
-          : symbol
-            ? // A market-wide or industry story moved this symbol too, so it belongs in its feed.
-              { OR: [{ symbol }, marketWide, ...(own ? [{ industry: own.id }] : [])] }
-            : {};
+          : symbol && ownOnly
+            ? // 종목 화면의 "이 종목" 탭 — 그 종목을 직접 다룬 기사만.
+              { symbol }
+            : symbol
+              ? // A market-wide or industry story moved this symbol too, so it belongs in its feed.
+                { OR: [{ symbol }, marketWide, ...(own ? [{ industry: own.id }] : [])] }
+              : {};
 
-    const key = `${LIST_CACHE_PREFIX}${symbol ?? ""}:${industry === null ? "market" : (industry?.id ?? "")}:${take}`;
+    const key = `${LIST_CACHE_PREFIX}${symbol ?? ""}:${ownOnly ? "own" : ""}:${industry === null ? "market" : (industry?.id ?? "")}:${take}`;
     return this.cache.getOrCompute(key, LIST_TTL_MS, () => this.query(where, take));
   }
 

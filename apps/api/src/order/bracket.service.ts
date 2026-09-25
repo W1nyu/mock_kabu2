@@ -18,10 +18,10 @@ import { ConditionalOrderService } from "./conditional-order.service";
 import { OrderService } from "./order.service";
 
 export interface BracketSpec {
-  /** 손절 거리 bps (체결 평균가 아래) */
-  stopBps: number;
-  /** 익절 거리 bps (체결 평균가 위) */
-  takeBps: number;
+  /** 손절 거리 bps (체결 평균가 아래). 없으면 손절 없음 */
+  stopBps?: number | null;
+  /** 익절 거리 bps (체결 평균가 위). 없으면 익절 없음 */
+  takeBps?: number | null;
 }
 
 const POLL_MS = 3_000;
@@ -64,13 +64,15 @@ export class BracketService implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
-  static validateSpec(spec: BracketSpec): BracketSpec {
-    const stopBps = Number(spec.stopBps);
-    const takeBps = Number(spec.takeBps);
-    if (!Number.isInteger(stopBps) || stopBps < TRAIL_BPS_MIN || stopBps > TRAIL_BPS_MAX) {
+  /** 손절·익절은 각각 선택 — 하나만 걸 수도 있지만 둘 다 비울 수는 없다. */
+  static validateSpec(spec: BracketSpec): { stopBps: number | null; takeBps: number | null } {
+    const stopBps = spec.stopBps == null ? null : Number(spec.stopBps);
+    const takeBps = spec.takeBps == null ? null : Number(spec.takeBps);
+    if (stopBps == null && takeBps == null) throw new BadRequestException("손절과 익절 중 하나는 입력해 주세요");
+    if (stopBps != null && (!Number.isInteger(stopBps) || stopBps < TRAIL_BPS_MIN || stopBps > TRAIL_BPS_MAX)) {
       throw new BadRequestException(`손절 거리는 ${TRAIL_BPS_MIN / 100}%~${TRAIL_BPS_MAX / 100}% 사이여야 합니다`);
     }
-    if (!Number.isInteger(takeBps) || takeBps < TRAIL_BPS_MIN || takeBps > TAKE_BPS_MAX) {
+    if (takeBps != null && (!Number.isInteger(takeBps) || takeBps < TRAIL_BPS_MIN || takeBps > TAKE_BPS_MAX)) {
       throw new BadRequestException(`익절 거리는 ${TRAIL_BPS_MIN / 100}%~${TAKE_BPS_MAX / 100}% 사이여야 합니다`);
     }
     return { stopBps, takeBps };
@@ -152,14 +154,20 @@ export class BracketService implements OnModuleInit, OnModuleDestroy {
       `;
       const filledQty = Number(fill?.qty ?? 0n) || order.filledQty;
       const avgFillPrice = filledQty > 0 ? Math.round(Number(fill.amount) / filledQty) : order.price ?? 0;
-      const lowerPrice = Math.max(1, Math.floor(avgFillPrice * (1 - intent.stopBps / 10_000)));
-      const upperPrice = Math.max(lowerPrice + 1, Math.ceil(avgFillPrice * (1 + intent.takeBps / 10_000)));
+      // 손절·익절은 각각 선택 — 없는 쪽은 null.
+      const lowerPrice = intent.stopBps != null ? Math.max(1, Math.floor(avgFillPrice * (1 - intent.stopBps / 10_000))) : null;
+      const upperPrice =
+        intent.takeBps != null
+          ? Math.max((lowerPrice ?? 0) + 1, Math.ceil(avgFillPrice * (1 + intent.takeBps / 10_000)))
+          : null;
 
       const market = await this.prisma.marketSymbol.findUniqueOrThrow({ where: { symbol: intent.symbol } });
       let note: string;
-      if (conditionMet("AT_OR_BELOW", lowerPrice, market.lastPrice) || conditionMet("AT_OR_ABOVE", upperPrice, market.lastPrice)) {
+      const stopHit = lowerPrice != null && conditionMet("AT_OR_BELOW", lowerPrice, market.lastPrice);
+      const takeHit = upperPrice != null && conditionMet("AT_OR_ABOVE", upperPrice, market.lastPrice);
+      if (stopHit || takeHit) {
         // 체결과 등록 사이에 이미 선을 넘었다 — 예약 대신 즉시 시장가로 정리한다.
-        const reason = market.lastPrice <= lowerPrice ? "손절선 이미 도달" : "익절선 이미 도달";
+        const reason = stopHit ? "손절선 이미 도달" : "익절선 이미 도달";
         try {
           const sell = await this.orders.place(intent.accountId, {
             symbol: intent.symbol,
@@ -171,7 +179,7 @@ export class BracketService implements OnModuleInit, OnModuleDestroy {
         } catch (error) {
           note = `${reason}, 즉시 매도 실패: ${error instanceof HttpException ? error.message : "주문 접수 실패"}`;
         }
-      } else {
+      } else if (lowerPrice != null && upperPrice != null) {
         const legs = await this.conditional.placeOco(intent.accountId, {
           symbol: intent.symbol,
           side: "SELL",
@@ -180,6 +188,19 @@ export class BracketService implements OnModuleInit, OnModuleDestroy {
           upperPrice,
         });
         note = `OCO 등록 손절 ${lowerPrice.toLocaleString("ko-KR")} / 익절 ${upperPrice.toLocaleString("ko-KR")} (${legs[0].ocoGroupId})`;
+      } else {
+        // 한쪽만 — 단일 예약 매도.
+        const stop = lowerPrice != null;
+        const triggerPrice = (stop ? lowerPrice : upperPrice) as number;
+        const row = await this.conditional.place(intent.accountId, {
+          symbol: intent.symbol,
+          side: "SELL",
+          direction: stop ? "AT_OR_BELOW" : "AT_OR_ABOVE",
+          triggerPrice,
+          qty: filledQty,
+          orderType: "MARKET",
+        });
+        note = `${stop ? "손절" : "익절"} 등록 ${triggerPrice.toLocaleString("ko-KR")} (${row.id})`;
       }
 
       await this.prisma.bracketIntent.update({
@@ -213,8 +234,8 @@ function toDto(row: {
   id: string;
   orderId: string;
   symbol: string;
-  stopBps: number;
-  takeBps: number;
+  stopBps: number | null;
+  takeBps: number | null;
   status: string;
   armedQty: number;
   avgFillPrice: number | null;

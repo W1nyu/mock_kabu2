@@ -63,6 +63,12 @@ export default function ReferencePage({ params }: { params: Promise<{ code: stri
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
+      <Link
+        href="/market?kind=futures"
+        className="inline-flex items-center gap-1.5 text-[13px] text-ink-muted transition-colors hover:text-sky"
+      >
+        <span aria-hidden>←</span> 선물·원자재
+      </Link>
       <div className="glass p-4 sm:p-5">
         <p className="text-[13px] text-ink-muted">
           {def.code} · 선물 기초자산 <span className="text-ink-faint">(가상 지수)</span>

@@ -166,6 +166,7 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
             symbol={symbol}
             qty={position.qty}
             markPrice={position.markPrice}
+            avgPrice={position.avgPrice}
             refreshKey={refreshKey}
             onChanged={load}
           />

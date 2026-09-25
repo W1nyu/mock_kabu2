@@ -35,8 +35,10 @@ export interface BracketIntentDto {
   id: string;
   orderId: string;
   symbol: string;
-  stopBps: number;
-  takeBps: number;
+  /** null이면 손절 없음 */
+  stopBps: number | null;
+  /** null이면 익절 없음 */
+  takeBps: number | null;
   status: "PENDING" | "ARMED" | "CANCELED";
   armedQty: number;
   avgFillPrice: number | null;

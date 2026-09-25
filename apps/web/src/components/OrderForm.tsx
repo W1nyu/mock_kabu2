@@ -162,15 +162,18 @@ export default function OrderForm({
             type,
             qty: Number(qty),
             ...(type === "LIMIT" ? { price: Number(price) } : {}),
-            ...(bracketActive
-              ? { bracket: { stopBps: bracketStopBps, takeBps: bracketTakeBps } }
-              : {}),
+            ...(bracketActive ? { bracket: { stopBps: bracketStopBps, takeBps: bracketTakeBps } } : {}),
           },
         });
         setMessage({
           ok: true,
           text: bracketActive
-            ? `주문 접수 · 체결되면 손절 −${bracketStopPct}% / 익절 +${bracketTakePct}%를 자동 등록합니다`
+            ? `주문 접수 · 체결되면 ${[
+                bracketStopBps != null ? `손절 −${bracketStopPct}%` : null,
+                bracketTakeBps != null ? `익절 +${bracketTakePct}%` : null,
+              ]
+                .filter(Boolean)
+                .join(" / ")}를 자동 등록합니다`
             : "주문이 접수되었습니다",
         });
       }
@@ -207,14 +210,13 @@ export default function OrderForm({
       : side === "SELL"
         ? "AT_OR_BELOW"
         : "AT_OR_ABOVE");
-  // 브래킷: 매수 + 일반 주문에서만. 0.1%~50% / 0.1%~100%.
-  const bracketStopBps = Math.round((Number(bracketStopPct) || 0) * 100);
-  const bracketTakeBps = Math.round((Number(bracketTakePct) || 0) * 100);
+  // 브래킷: 매수 + 일반 주문에서만. 0.1%~50% / 0.1%~100%. 빈 칸은 그쪽을 걸지 않는다(하나는 필요).
+  const bracketStopBps = bracketStopPct.trim() === "" ? null : Math.round((Number(bracketStopPct) || 0) * 100);
+  const bracketTakeBps = bracketTakePct.trim() === "" ? null : Math.round((Number(bracketTakePct) || 0) * 100);
   const bracketValid =
-    bracketStopBps >= TRAIL_BPS_MIN &&
-    bracketStopBps <= TRAIL_BPS_MAX &&
-    bracketTakeBps >= TRAIL_BPS_MIN &&
-    bracketTakeBps <= 10_000;
+    (bracketStopBps != null || bracketTakeBps != null) &&
+    (bracketStopBps == null || (bracketStopBps >= TRAIL_BPS_MIN && bracketStopBps <= TRAIL_BPS_MAX)) &&
+    (bracketTakeBps == null || (bracketTakeBps >= TRAIL_BPS_MIN && bracketTakeBps <= 10_000));
   const bracketActive = side === "BUY" && type !== "STOP" && bracketOn;
   // 조건부 지정가 발동: 발동 후 걸 지정가도 호가 단위에 맞아야 한다.
   const parsedStopLimit = Number(stopLimitPrice);
@@ -580,7 +582,7 @@ export default function OrderForm({
                 className="accent-sky"
               />
               <span className="font-medium">체결 후 손절/익절 자동 등록</span>
-              <span className="text-ink-faint">(OCO)</span>
+              <span className="text-ink-faint">(하나만 입력해도 됨)</span>
             </label>
             {bracketOn && (
               <div className="num mt-2 grid grid-cols-2 gap-2">
@@ -590,6 +592,7 @@ export default function OrderForm({
                     className="field w-16 py-1 text-xs"
                     inputMode="decimal"
                     value={bracketStopPct}
+                    placeholder="없음"
                     onChange={(e) => setBracketStopPct(e.target.value.replace(/[^0-9.]/g, ""))}
                   />
                   <span className="text-ink-faint">%</span>
@@ -600,13 +603,14 @@ export default function OrderForm({
                     className="field w-16 py-1 text-xs"
                     inputMode="decimal"
                     value={bracketTakePct}
+                    placeholder="없음"
                     onChange={(e) => setBracketTakePct(e.target.value.replace(/[^0-9.]/g, ""))}
                   />
                   <span className="text-ink-faint">%</span>
                 </label>
                 <p className="col-span-2 text-[11px] text-ink-faint">
-                  체결 평균가 기준으로 계산합니다. 부분 체결이면 체결된 수량만 보호하고, 등록 전에
-                  이미 선을 넘었으면 즉시 시장가로 정리합니다.
+                  체결 평균가 기준으로 계산합니다. 한쪽을 비우면 그쪽은 걸지 않습니다. 부분 체결이면
+                  체결된 수량만 보호하고, 등록 전에 이미 선을 넘었으면 즉시 시장가로 정리합니다.
                 </p>
               </div>
             )}

@@ -134,9 +134,9 @@ export default function MyConditionalOrders({
             <span className="w-8 shrink-0 font-semibold text-sky">대기</span>
             <span className="shrink-0 text-ink-muted">체결 후 자동 보호</span>
             <span className="ml-auto whitespace-nowrap">
-              <span className="text-down">손절 −{(intent.stopBps / 100).toFixed(1)}%</span>
-              <span className="text-ink-faint"> · </span>
-              <span className="text-up">익절 +{(intent.takeBps / 100).toFixed(1)}%</span>
+              {intent.stopBps != null && <span className="text-down">손절 −{(intent.stopBps / 100).toFixed(1)}%</span>}
+              {intent.stopBps != null && intent.takeBps != null && <span className="text-ink-faint"> · </span>}
+              {intent.takeBps != null && <span className="text-up">익절 +{(intent.takeBps / 100).toFixed(1)}%</span>}
             </span>
             <button
               onClick={() => cancelBracket(intent.id)}

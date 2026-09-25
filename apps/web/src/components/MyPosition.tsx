@@ -147,19 +147,32 @@ export default function MyPosition({
     if (!holding) return;
     setProtectBusy(true);
     setProtectError(null);
+    const stop = Number(stopPrice) > 0 ? Number(stopPrice) : null;
+    const take = Number(takePrice) > 0 ? Number(takePrice) : null;
     try {
-      await api("/orders/conditional/oco", {
-        method: "POST",
-        body: {
-          symbol,
-          side: "SELL",
-          qty: Number(protectQty),
-          lowerPrice: Number(stopPrice),
-          upperPrice: Number(takePrice),
-        },
-      });
+      if (stop != null && take != null) {
+        await api("/orders/conditional/oco", {
+          method: "POST",
+          body: { symbol, side: "SELL", qty: Number(protectQty), lowerPrice: stop, upperPrice: take },
+        });
+      } else {
+        // 한쪽만 — 손절(이하면 매도) 또는 익절(이상이면 매도) 단일 예약
+        await api("/orders/conditional", {
+          method: "POST",
+          body: {
+            symbol,
+            side: "SELL",
+            qty: Number(protectQty),
+            direction: stop != null ? "AT_OR_BELOW" : "AT_OR_ABOVE",
+            triggerPrice: stop ?? take,
+            orderType: "MARKET",
+          },
+        });
+      }
       setMessage(
-        `손절 ${fmt.format(Number(stopPrice))} / 익절 ${fmt.format(Number(takePrice))} 예약 등록 (${fmt.format(Number(protectQty))}주)`,
+        `${[stop != null ? `손절 ${fmt.format(stop)}` : null, take != null ? `익절 ${fmt.format(take)}` : null]
+          .filter(Boolean)
+          .join(" / ")} 예약 등록 (${fmt.format(Number(protectQty))}주)`,
       );
       setProtecting(false);
       refresh();
@@ -275,18 +288,17 @@ export default function MyPosition({
           <button
             disabled={
               protectBusy ||
-              !(Number(stopPrice) > 0) ||
-              !(Number(takePrice) > 0) ||
-              Number(stopPrice) >= Number(takePrice) ||
+              (!(Number(stopPrice) > 0) && !(Number(takePrice) > 0)) ||
+              (Number(stopPrice) > 0 && Number(takePrice) > 0 && Number(stopPrice) >= Number(takePrice)) ||
               !(Number(protectQty) > 0) ||
               Number(protectQty) > holding.availableQty
             }
             className="btn btn-primary btn-sm"
           >
-            {protectBusy ? "등록 중…" : "OCO 예약"}
+            {protectBusy ? "등록 중…" : Number(stopPrice) > 0 && Number(takePrice) > 0 ? "OCO 예약" : "예약"}
           </button>
           <span className="text-ink-faint">
-            현재가 {fmt.format(price)} · 한쪽이 발동하면 다른 쪽은 자동 취소 · 대기 중 홀드 없음
+            현재가 {fmt.format(price)} · 한쪽만 입력해도 됩니다 · 둘 다면 한쪽이 발동할 때 다른 쪽은 자동 취소 · 대기 중 홀드 없음
           </span>
           {protectError && <span className="basis-full text-warn">{protectError}</span>}
         </form>

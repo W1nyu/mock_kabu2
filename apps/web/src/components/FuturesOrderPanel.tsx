@@ -1,8 +1,8 @@
 "use client";
 
-import { futureDef, futureMarginPerContract, MAX_FUTURES_ORDER_QTY } from "@mock-kabu/shared";
+import { futureDef, futureMarginPerContract, MARKET_BUY_HOLD_FACTOR, MAX_FUTURES_ORDER_QTY } from "@mock-kabu/shared";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, getUser, newIdempotencyKey } from "@/lib/api";
 import { everyVisible } from "@/lib/visible-interval";
 import { fmtFuture, krw, LEVERAGE_CHOICES, leverageLabel, toFutureUnits, unitsToInput, type FuturesAccount } from "@/lib/futures";
@@ -90,11 +90,30 @@ export default function FuturesOrderPanel({
   }
 
   const priceUnits = type === "LIMIT" ? toFutureUnits(symbol, priceText) : lastPrice;
-  const margin = useMemo(
-    () => (priceUnits != null ? Number(futureMarginPerContract(def, priceUnits, leverage)) * qty : null),
-    [def, priceUnits, qty, leverage],
-  );
+  // 서버가 증거금을 잡는 가격: 지정가는 그 가격, 시장가는 최근가 × 1.1(체결 상한)
+  const holdPriceUnits = type === "LIMIT" ? priceUnits : lastPrice != null ? Math.ceil(lastPrice * MARKET_BUY_HOLD_FACTOR) : null;
+  const perContract = holdPriceUnits != null ? Number(futureMarginPerContract(def, holdPriceUnits, leverage)) : null;
+  // 수량 % 버튼의 기준: 청산 방향이면 보유 포지션, 아니면 주문 가능 금액으로 열 수 있는 최대 계약
+  const sizingBase = closing
+    ? Math.min(Math.abs(positionQty), MAX_FUTURES_ORDER_QTY)
+    : available != null && perContract != null && perContract > 0
+      ? Math.min(MAX_FUTURES_ORDER_QTY, Math.floor(available / perContract))
+      : 0;
+  const [activePct, setActivePct] = useState<number | null>(null);
+  function applyPct(pct: number) {
+    if (sizingBase < 1) return;
+    setQty(Math.max(1, Math.floor(sizingBase * pct)));
+    setActivePct(pct);
+  }
+  const margin = perContract != null ? perContract * qty : null;
   const tickText = unitsToInput(symbol, def.tickUnits);
+  /** 지정가를 호가 단위만큼 올리고 내린다(입력이 비었거나 틀렸으면 현재가에서 시작, 틱에 맞춘다). */
+  function stepPrice(direction: 1 | -1) {
+    const base = toFutureUnits(symbol, priceText) ?? lastPrice;
+    if (base == null) return;
+    const snapped = Math.round(base / def.tickUnits) * def.tickUnits;
+    setPriceText(unitsToInput(symbol, Math.max(def.tickUnits, snapped + direction * def.tickUnits)));
+  }
   const invalidPrice = type === "LIMIT" && priceUnits == null;
 
   async function submit() {
@@ -207,38 +226,92 @@ export default function FuturesOrderPanel({
           <span className="text-xs text-ink-muted">
             가격 ({def.unit}, 호가 단위 {tickText})
           </span>
-          <input
-            inputMode="decimal"
-            value={priceText}
-            onChange={(e) => setPriceText(e.target.value)}
-            className={`num mt-1 w-full rounded-lg border bg-surface-2/60 px-3 py-2 text-right ${
-              invalidPrice ? "border-down/60" : "border-hairline"
-            }`}
-          />
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-ghost min-h-10 min-w-10"
+              aria-label="호가 한 단계 내리기"
+              onClick={() => stepPrice(-1)}
+            >
+              −
+            </button>
+            <input
+              inputMode="decimal"
+              value={priceText}
+              onChange={(e) => setPriceText(e.target.value)}
+              className={`num w-full rounded-lg border bg-surface-2/60 px-3 py-2 text-right ${
+                invalidPrice ? "border-down/60" : "border-hairline"
+              }`}
+            />
+            <button
+              type="button"
+              className="btn btn-ghost min-h-10 min-w-10"
+              aria-label="호가 한 단계 올리기"
+              onClick={() => stepPrice(1)}
+            >
+              +
+            </button>
+          </div>
         </label>
       )}
 
       <label className="block">
         <span className="text-xs text-ink-muted">수량 (계약)</span>
         <div className="mt-1 flex items-center gap-2">
-          <button type="button" className="btn btn-ghost min-h-10 min-w-10" onClick={() => setQty((q) => Math.max(1, q - 1))}>
+          <button type="button" className="btn btn-ghost min-h-10 min-w-10" onClick={() => {
+              setActivePct(null);
+              setQty((q) => Math.max(1, q - 1));
+            }}>
             −
           </button>
           <input
             inputMode="numeric"
             value={qty}
-            onChange={(e) => setQty(Math.max(1, Math.min(MAX_FUTURES_ORDER_QTY, Number(e.target.value.replace(/\D/g, "")) || 1)))}
+            onChange={(e) => {
+              setActivePct(null);
+              setQty(Math.max(1, Math.min(MAX_FUTURES_ORDER_QTY, Number(e.target.value.replace(/\D/g, "")) || 1)));
+            }}
             className="num w-full rounded-lg border border-hairline bg-surface-2/60 px-3 py-2 text-center"
           />
           <button
             type="button"
             className="btn btn-ghost min-h-10 min-w-10"
-            onClick={() => setQty((q) => Math.min(MAX_FUTURES_ORDER_QTY, q + 1))}
+            onClick={() => {
+              setActivePct(null);
+              setQty((q) => Math.min(MAX_FUTURES_ORDER_QTY, q + 1));
+            }}
           >
             +
           </button>
         </div>
       </label>
+
+      <div>
+        <div className="mb-1.5 flex items-center justify-between text-[11px] text-ink-faint">
+          <span>{closing ? "보유 포지션 기준 (청산)" : "주문 가능 금액 기준"}</span>
+          <span className="num">최대 {sizingBase.toLocaleString("ko-KR")}계약</span>
+        </div>
+        <div className="grid grid-cols-4 gap-1.5">
+          {([0.1, 0.25, 0.5, 1] as const).map((pct) => (
+            <button
+              key={pct}
+              type="button"
+              disabled={sizingBase < 1}
+              onClick={() => applyPct(pct)}
+              aria-pressed={activePct === pct}
+              className={`num rounded-lg border py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${
+                activePct === pct
+                  ? side === "BUY"
+                    ? "border-up/45 bg-up/15 text-up"
+                    : "border-down/45 bg-down/15 text-down"
+                  : "border-hairline-soft bg-surface-2/50 text-ink-muted hover:border-hairline hover:text-ink"
+              }`}
+            >
+              {pct * 100}%
+            </button>
+          ))}
+        </div>
+      </div>
 
       <dl className="num space-y-1 text-[13px]">
         <div className="flex justify-between">

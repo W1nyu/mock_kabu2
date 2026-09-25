@@ -1,6 +1,6 @@
 "use client";
 
-import { futureDef } from "@mock-kabu/shared";
+import { FUTURES, futureDef } from "@mock-kabu/shared";
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import FuturesBook from "@/components/FuturesBook";
@@ -70,6 +70,31 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 max-lg:pb-20">
+      {/* 뒤로 가기(선물 목록)와 다른 선물로 바로 가는 칩 — 폰은 하단 탭이 숨어 있어 이 줄이 유일한 이동 경로다. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Link
+          href="/market?kind=futures"
+          className="inline-flex shrink-0 items-center gap-1.5 text-[13px] text-ink-muted transition-colors hover:text-sky"
+        >
+          <span aria-hidden>←</span> 선물 목록
+        </Link>
+        <nav aria-label="다른 선물" className="chip-scroller flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
+          {FUTURES.map((future) => (
+            <Link
+              key={future.symbol}
+              href={`/futures/${future.symbol}`}
+              aria-current={future.symbol === def.symbol ? "page" : undefined}
+              className={`shrink-0 rounded-full px-3 py-1 text-[12px] font-medium whitespace-nowrap transition-colors ${
+                future.symbol === def.symbol
+                  ? "bg-sky/12 text-sky ring-1 ring-sky/30 ring-inset"
+                  : "text-ink-muted ring-1 ring-hairline ring-inset hover:text-ink"
+              }`}
+            >
+              {future.name.replace(" 선물", "")}
+            </Link>
+          ))}
+        </nav>
+      </div>
       <div className="glass p-4 sm:p-5">
         <p className="text-[13px] text-ink-muted">
           {def.symbol} · 1일물 선물 <span className="text-ink-faint">· 매일 04:10 현금 정산</span>
