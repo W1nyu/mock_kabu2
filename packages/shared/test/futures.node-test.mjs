@@ -8,6 +8,7 @@ import {
   futureMaintenanceMargin,
   futureMarginBps,
   futureMarkPrice,
+  isOption,
   liquidityReserveBotNumber,
   isValidLeverage,
   futureMarginPerContract,
@@ -153,7 +154,8 @@ test("liquidity reserve numbers are fixed per symbol — delistings leave gaps i
   assert.equal(liquidityReserveBotNumber("CORNF"), 40);
   assert.equal(liquidityReserveBotNumber("NOPE"), null);
   // 모든 거래 종목에 번호가 있고 겹치지 않는다
-  const numbers = TRADABLE_SYMBOLS.map((symbol) => liquidityReserveBotNumber(symbol));
+  // 옵션은 종목별 계정이 아니라 기초자산별 계정(OPT_KABU·OPT_USD)이 호가한다.
+  const numbers = TRADABLE_SYMBOLS.filter((symbol) => !isOption(symbol)).map((symbol) => liquidityReserveBotNumber(symbol));
   assert.ok(numbers.every((n) => n != null));
   assert.equal(new Set(numbers).size, numbers.length);
 });

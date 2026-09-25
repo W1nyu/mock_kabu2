@@ -208,7 +208,8 @@ export interface FutureFillResult extends FuturePositionState {
  * 누적 실현손익 + 남은 진입 금액이 총 진입 금액과 정확히 맞는다.
  */
 export function applyFutureFill(
-  def: FutureDef,
+  // 옵션 포지션도 같은 식을 쓴다(프리미엄 원가) — 필요한 것은 승수뿐
+  def: Pick<FutureDef, "unitValue">,
   position: FuturePositionState,
   side: "BUY" | "SELL",
   price: number,

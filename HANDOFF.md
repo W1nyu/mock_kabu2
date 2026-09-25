@@ -1,5 +1,17 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-26 — 옵션(주가지수·원/달러 1일물) — 미배포
+
+설계 `docs/superpowers/specs/2026-09-26-options-design.md`(결정값은 사용자 확인 전 기본값).
+- 종목 20개 고정(`KC1~5`·`KP1~5`·`UC1~5`·`UP1~5`, 3번 = 등가격), 행사가만 매일 04:11 만기 정산 뒤 다시 깐다(`market.option_series`, 마이그레이션 `20260926100000_options` — symbols.kind에 OPTION 추가). 유럽형 현금 정산, 이론가 블랙-숄즈.
+- 포지션·실현손익·정산 기록은 선물 표를 함께 쓴다(옵션 행 `entry_value` = 프리미엄 원가, `margin_held` = 쓰기 증거금). 체결 때 프리미엄이 매수자 → 매도자(원장 `OPTION_PREMIUM`), 만기에 내재가치 현금 정산(`OPTION_EXPIRY`, claim `option-settle:{sym}:{day}:{acct}`, 모자라면 미수금).
+- 사용자는 매수·보유분 매도만, 쓰기는 봇만. MM bot41(주가지수)·bot42(원/달러)가 이론가 ± 4%로 3단 호가(재고 ±40 한도), bot8·bot10이 가끔 사고 몇 분 뒤 판다.
+- 총 자산·랭킹·자산 스냅샷에 옵션 평가액(최근가 기준, `futuresValueSql`) 포함. 선물 위험 감시(반대매매)는 옵션을 보지 않는다.
+- 화면: 증권 → 선물·원자재 탭 옵션 체인, `/options/[symbol]`, 대시보드 선물·옵션 탭, 체결·만기 알림.
+- 함께 고침: 실시간 게이트웨이가 `orderbook:`/`trades:` 구독을 현물만 허용해 **선물 화면이 호가·체결을 실시간으로 받지 못하던 문제**(15초 폴링만) — 거래 가능한 전 종목으로 연다.
+- 배포 시: migrate(`20260926100000_options`) → seed(옵션 20종목 + KABUF 이름 "주가지수 선물") → api·settlement·matching-engine·bots·web 모두 교체(엔진이 새 종목을 읽어야 함). 미배포 `4b57b97`(랭킹 속도·이름)도 함께 나간다.
+- 로컬 Docker가 꺼져 있어 런타임 확인은 못 함(단위 테스트 전부 통과·타입체크만).
+
 ## 2026-09-26 07:38 KST — 원자재·환율 기사 운영 실험 (fb45e92)
 
 - 운영자용 기사 즉시 발행 추가·배포: api 컨테이너 안에서 `fetch('http://127.0.0.1:4100/internal/news/force', {method:'POST', headers:{'x-liquidity-bootstrap-token': process.env.LIQUIDITY_BOOTSTRAP_TOKEN, 'content-type':'application/json'}, body: JSON.stringify({templateId:'macro.oil.spike'})})`.

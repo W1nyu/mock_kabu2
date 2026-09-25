@@ -110,6 +110,9 @@ describe("LiquidityService.ensureReserves", () => {
       // 2026-09-26 추가 상장
       ["GOLDF", "bot39@bots.local"],
       ["CORNF", "bot40@bots.local"],
+      // 옵션 마켓메이커(기초자산별)
+      ["OPT_KABU", "bot41@bots.local"],
+      ["OPT_USD", "bot42@bots.local"],
     ]);
   });
 

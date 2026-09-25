@@ -17,10 +17,13 @@ import {
   type TradeStreamEvent,
   trimAcknowledgedStream,
   futureDef,
+  isOption,
+  optionDef,
   isFuture,
 } from "@mock-kabu/shared";
 import Redis from "ioredis";
 import { readSettlementRuntimeConfig } from "./env";
+import { settleOptionTrade } from "./options";
 import { settleFuturesTrade } from "./futures";
 
 type StreamReply = [key: string, messages: StreamMessages][] | null;
@@ -329,6 +332,7 @@ class SettlementWorker {
     const parties = [...new Set([event.buyerAccountId, event.sellerAccountId])];
 
     const future = futureDef(event.symbol);
+    const option = optionDef(event.symbol);
     const settled = await this.mutator.withAccountLock(parties, async (ctx) => {
       const duplicate = await ctx.tx.processedEvent.findUnique({ where: { eventId: event.eventId } });
       if (duplicate) return false;
@@ -339,6 +343,11 @@ class SettlementWorker {
       if (future) {
         // 선물: 대금 대신 포지션·증거금·실현손익(모자라면 미수금). 같은 트랜잭션·같은 멱등 claim.
         await settleFuturesTrade(ctx, future, event, buyOrder, sellOrder);
+        return true;
+      }
+      if (option) {
+        // 옵션: 프리미엄이 매수자 → 매도자로 이동, 포지션·쓰기 증거금·실현손익. 같은 트랜잭션·같은 멱등 claim.
+        await settleOptionTrade(ctx, option, event, buyOrder, sellOrder);
         return true;
       }
       const holdConsumed = buyOrder.holdPerUnit * BigInt(event.qty);
@@ -444,8 +453,8 @@ class SettlementWorker {
       });
 
       if (next.remainingQty <= 0) return;
-      // 선물 주문은 매수·매도 모두 현금(증거금)을 묶는다 — 남은 수량만큼 풀어 준다.
-      if (event.side === "BUY" || isFuture(event.symbol)) {
+      // 선물·옵션 주문은 매수·매도 모두 현금(증거금·프리미엄)을 묶는다 — 남은 수량만큼 풀어 준다.
+      if (event.side === "BUY" || isFuture(event.symbol) || isOption(event.symbol)) {
         const leftover = order.holdPerUnit * BigInt(next.remainingQty);
         if (leftover > 0n) {
           const account = ctx.accounts[event.accountId];

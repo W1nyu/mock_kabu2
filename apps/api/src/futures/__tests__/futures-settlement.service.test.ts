@@ -2,16 +2,26 @@ import { describe, expect, it, vi } from "vitest";
 import { FuturesSettlementService } from "../futures-settlement.service";
 
 /** 메모리 위의 계좌·포지션·원장 — Prisma·계좌 락 모양만 흉내 낸다. */
-function harness(options: { usdClose?: number | null } = {}) {
+function harness(options: { usdClose?: number | null; withOptions?: boolean } = {}) {
   const accounts: Record<string, { balance: bigint; holdAmount: bigint }> = {
     long: { balance: 5_000_000n, holdAmount: 0n },
     short: { balance: 400_000n, holdAmount: 0n },
+    optBuyer: { balance: 1_000_000n, holdAmount: 0n },
+    optWriter: { balance: 100_000n, holdAmount: 0n },
   };
   const positions = new Map<string, { accountId: string; symbol: string; qty: number; entryValue: bigint; marginHeld: bigint }>([
     // USDF 1,400.0원에 2계약 롱 / 숏
     ["long:USDF", { accountId: "long", symbol: "USDF", qty: 2, entryValue: 28_000n, marginHeld: 1n }],
     ["short:USDF", { accountId: "short", symbol: "USDF", qty: -2, entryValue: 28_000n, marginHeld: 1n }],
   ]);
+  if (options.withOptions) {
+    // 원/달러 콜 3번(행사가 1,400.0원) — 프리미엄 3.0원에 3계약. 매수자 / 쓰기(봇)
+    positions.set("optBuyer:UC3", { accountId: "optBuyer", symbol: "UC3", qty: 3, entryValue: 90n, marginHeld: 0n });
+    positions.set("optWriter:UC3", { accountId: "optWriter", symbol: "UC3", qty: -3, entryValue: 90n, marginHeld: 1_260_000n });
+    // 원/달러 풋 3번 — 만기에 외가격이라 소멸
+    positions.set("optBuyer:UP3", { accountId: "optBuyer", symbol: "UP3", qty: 1, entryValue: 25n, marginHeld: 0n });
+    positions.set("optWriter:UP3", { accountId: "optWriter", symbol: "UP3", qty: -1, entryValue: 25n, marginHeld: 420_000n });
+  }
   const claims = new Set<string>();
   const debts = new Map<string, bigint>();
   const ledger: { accountId: string; delta: bigint; reason: string }[] = [];
@@ -60,6 +70,9 @@ function harness(options: { usdClose?: number | null } = {}) {
         for (const call of marginCalls) if (call.resolvedAt == null) Object.assign(call, data);
       },
     },
+    optionSeries: {
+      findMany: async () => (options.withOptions ? [{ symbol: "UC3", strike: 14_000 }, { symbol: "UP3", strike: 14_000 }] : []),
+    },
     indexEpoch: { findFirst: async () => null },
     marketSymbol: { findMany: async () => [] },
     $queryRaw: async () => (options.usdClose === null ? [] : [{ code: "USDKRW", close: options.usdClose ?? 14_100 }]),
@@ -69,8 +82,17 @@ function harness(options: { usdClose?: number | null } = {}) {
       fn({ accounts, tx, updateAccount: async (accountId: string, next: any) => (accounts[accountId] = next) }),
   };
   const redis = { publish: vi.fn(async () => 1) };
-  const service = new FuturesSettlementService(prisma as never, mutator as never, redis as never);
-  return { service, accounts, positions, debts, ledger, settlements, outbox, marginCalls };
+  const restrikeStale = vi.fn(async (load: () => Promise<ReadonlyMap<string, number>>) => void (await load()));
+  const optionsService = { restrikeStale };
+  const service = new FuturesSettlementService(
+    prisma as never,
+    mutator as never,
+    redis as never,
+    undefined,
+    undefined,
+    optionsService as never,
+  );
+  return { service, restrikeStale, accounts, positions, debts, ledger, settlements, outbox, marginCalls };
 }
 
 describe("futures daily settlement", () => {
@@ -126,5 +148,32 @@ describe("futures daily settlement", () => {
     const h = harness({ usdClose: null });
     await expect(h.service.settle("2026-09-26")).rejects.toThrow(/no settlement price for USDF/);
     expect(h.positions.get("long:USDF")!.qty).toBe(2);
+  });
+
+  it("settles options at intrinsic value: buyers get it, writers pay it (debt if short), OTM expires worthless", async () => {
+    const h = harness({ withOptions: true });
+    const result = await h.service.settle("2026-09-26");
+
+    // 결제가 1,410.0원, 행사가 1,400.0원 콜: 내재가치 100단위 × 1,000원 × 3계약 = 30만 원
+    expect(h.accounts.optBuyer.balance).toBe(1_300_000n);
+    // 쓰기 봇 잔액 10만 원 → 0원 + 미수금 20만 원
+    expect(h.accounts.optWriter.balance).toBe(0n);
+    expect(h.debts.get("optWriter")).toBe(200_000n);
+    expect(h.ledger.filter((l) => l.reason === "OPTION_EXPIRY").map((l) => [l.accountId, l.delta])).toEqual([
+      ["optBuyer", 300_000n],
+      ["optWriter", -100_000n],
+    ]);
+    // 모든 옵션 포지션이 닫히고 쓰기 증거금이 풀린다.
+    expect([...h.positions.values()].every((p) => p.qty === 0 && p.marginHeld === 0n)).toBe(true);
+    // 실현손익 = 내재가치 − 프리미엄: 매수 (100 − 30) × 3 × 1,000 = 21만, 쓰기 −21만. 풋은 ±2.5만.
+    expect(result.symbols.find((s) => s.symbol === "UC3")).toMatchObject({ price: 100, positions: 2, realizedTotal: 0n });
+    expect(result.symbols.find((s) => s.symbol === "UP3")).toMatchObject({ price: 0, positions: 2, realizedTotal: 0n });
+    expect(h.settlements.get("KC3:2026-09-26")).toMatchObject({ price: 0, positions: 0 });
+    // 정산 뒤 다음 거래일 행사가를 다시 깐다.
+    expect(h.restrikeStale).toHaveBeenCalled();
+
+    const ledgerBefore = h.ledger.length;
+    await h.service.settle("2026-09-26");
+    expect(h.ledger.length).toBe(ledgerBefore);
   });
 });

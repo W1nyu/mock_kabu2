@@ -180,10 +180,12 @@ export class FuturesService {
     ]);
     // 평가손익·유지증거금은 반대매매 감시와 같은 평가가격으로(최근가 한 건이 아니라)
     const markBySymbol = marks;
-    const positions = positionRows.filter((row) => row.qty !== 0);
+    // 옵션 포지션도 같은 표에 있다 — 여기서는 선물만(옵션은 OptionsService.positions).
+    const futureRows = positionRows.filter((row) => futureDef(row.symbol) != null);
+    const positions = futureRows.filter((row) => row.qty !== 0);
     // 종목별 레버리지 설정(포지션이 없어도 설정 행이 있을 수 있다). null = 거래소 기준 증거금.
     const leverage: Record<string, number | null> = Object.fromEntries(FUTURES.map((future) => [future.symbol, null]));
-    for (const row of positionRows) leverage[row.symbol] = row.leverage;
+    for (const row of futureRows) leverage[row.symbol] = row.leverage;
     let unrealizedTotal = 0n;
     let maintenanceTotal = 0n;
     let initialTotal = 0n;

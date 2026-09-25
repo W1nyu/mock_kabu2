@@ -1,4 +1,5 @@
 import { FUTURES, futureDef } from "./futures";
+import { OPTIONS, optionDef } from "./options";
 
 /** 가입 시 지급되는 가상 현금 보너스 (정수 통화 단위) */
 export const SIGNUP_BONUS = 10_000_000;
@@ -100,13 +101,19 @@ export const MAX_ORDER_PRICE = 1_000_000_000;
 
 /** 종목의 호가 단위(선물은 정수 가격 단위). 모르는 종목이면 null. */
 export function tickSizeOf(symbol: string): number | null {
-  return SYMBOLS.find((definition) => definition.symbol === symbol)?.tickSize ?? futureDef(symbol)?.tickUnits ?? null;
+  return (
+    SYMBOLS.find((definition) => definition.symbol === symbol)?.tickSize ??
+    futureDef(symbol)?.tickUnits ??
+    optionDef(symbol)?.tickUnits ??
+    null
+  );
 }
 
-/** 매칭엔진·주문이 받는 모든 종목(현물 + 선물). 현물 전용 화면·지수는 SYMBOLS를 쓴다. */
+/** 매칭엔진·주문이 받는 모든 종목(현물 + 선물 + 옵션). 현물 전용 화면·지수는 SYMBOLS를 쓴다. */
 export const TRADABLE_SYMBOLS: readonly string[] = [
   ...SYMBOLS.map((definition) => definition.symbol),
   ...FUTURES.map((future) => future.symbol),
+  ...OPTIONS.map((option) => option.symbol),
 ];
 
 /** 유동성(마켓메이커) 예약 계정 번호의 시작: bot16 */
@@ -120,6 +127,8 @@ export const LIQUIDITY_RESERVE_ORDER: readonly string[] = [
   "DDAM", "SAEM", "STEL", "SLVR", "NOVA", "NRFD", "GARM", "HAVN",
   "KABUF", "USDF", "OILF", "GASF", "CPRF",
   "GOLDF", "CORNF",
+  // 옵션 마켓메이커는 기초자산별 계정 하나가 5행사가 × 콜/풋을 모두 호가한다(종목별 계정 아님).
+  "OPT_KABU", "OPT_USD",
 ];
 
 /** 종목의 유동성 예약 계정 번호(bot N). 배정이 없으면 null. */

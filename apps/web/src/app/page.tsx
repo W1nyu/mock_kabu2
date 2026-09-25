@@ -368,24 +368,31 @@ export default function DashboardPage() {
   const futuresMargin = futures?.marginHeld ?? 0;
   const futuresUnrealized = futures?.unrealized ?? 0;
   const futuresDebt = futures?.debt ?? 0;
-  const futuresValue = Math.max(0, futuresMargin + futuresUnrealized);
+  // 옵션은 프리미엄을 현금으로 냈으므로 평가액(최근가 × 수량 × 승수) 전체가 자산이다.
+  const optionsValue = futures?.optionsValue ?? 0;
+  const optionPositions = futures?.options ?? [];
+  const optionsCost = optionPositions.reduce((sum, p) => sum + p.value - p.unrealized, 0);
+  const optionsPnl = optionPositions.reduce((sum, p) => sum + p.unrealized, 0);
+  const futuresValue = Math.max(0, futuresMargin + futuresUnrealized) + Math.max(0, optionsValue);
   const cashValue = Math.max(0, (account?.balance ?? 0) - futuresMargin - futuresDebt);
   const total = cashValue + stockValue + futuresValue;
-  // 총 자산 = 현금 잔액 + 주식 평가금액 + 선물 평가손익 − 미수금
+  // 총 자산 = 현금 잔액 + 주식 평가금액 + 선물 평가손익 + 옵션 평가액 − 미수금
   const totalExact =
     BigInt(account?.balanceExact ?? String(account?.balance ?? 0)) +
     stockValueExact +
-    BigInt(Math.round(futuresUnrealized)) -
+    BigInt(Math.round(futuresUnrealized)) +
+    BigInt(Math.round(optionsValue)) -
     BigInt(Math.round(futuresDebt));
   const realizedToday = (realized?.today ?? 0) + (realized?.futures?.today ?? 0);
   const realizedTotal = (realized?.total ?? 0) + (realized?.futures?.total ?? 0);
-  const futuresPositions = futures?.positions.length ?? 0;
+  const futuresPositions = (futures?.positions.length ?? 0) + optionPositions.length;
   // 평가손익 = 주식 평가손익 + 선물 평가손익. 수익률의 분모는 주식 매입원가 + 선물 증거금(투입 금액).
   const stockCost = liveHoldings.reduce((sum, h) => sum + h.costBasis, 0);
   const stockPnl = liveHoldings.reduce((sum, h) => sum + h.pnl, 0);
-  const futuresOpen = (futures?.positions.length ?? 0) > 0;
-  const totalCost = stockCost + (futures?.marginHeld ?? 0);
-  const totalPnl = stockPnl + (futures?.unrealized ?? 0);
+  const futuresOpen = futuresPositions > 0;
+  // 옵션은 낸 프리미엄(원가)이 투입 금액이다.
+  const totalCost = stockCost + (futures?.marginHeld ?? 0) + optionsCost;
+  const totalPnl = stockPnl + (futures?.unrealized ?? 0) + optionsPnl;
   const totalPnlRate = totalCost > 0 ? totalPnl / totalCost : 0;
 
 
@@ -409,7 +416,7 @@ export default function DashboardPage() {
                 <>
                   <span
                     className={pnlTone}
-                    title={`주식 ${signedWon(stockPnl)} · 선물 ${signedWon(futures?.unrealized ?? 0)} — 수익률은 주식 매입원가 + 선물 증거금 대비`}
+                    title={`주식 ${signedWon(stockPnl)} · 선물 ${signedWon(futures?.unrealized ?? 0)} · 옵션 ${signedWon(optionsPnl)} — 수익률은 주식 매입원가 + 선물 증거금 + 옵션 매수원가 대비`}
                   >
                     {totalPnl >= 0 ? "▲" : "▼"} {totalPnl >= 0 ? "+" : ""}
                     {won(totalPnl)} ({totalPnl >= 0 ? "+" : ""}
@@ -428,9 +435,9 @@ export default function DashboardPage() {
             <Metric label="주문 가능" value={won(BigInt(account?.availableExact ?? String(account?.available ?? 0)))} />
             <Metric label="주식 평가금액" value={won(stockValueExact)} />
             <Metric
-              label="선물 평가금액"
-              value={won(Math.round(futuresMargin + futuresUnrealized))}
-              title={`묶인 증거금 ${won(futuresMargin)} + 평가손익 ${signedWon(futuresUnrealized)}`}
+              label="선물·옵션 평가금액"
+              value={won(Math.round(futuresMargin + futuresUnrealized + optionsValue))}
+              title={`선물 증거금 ${won(futuresMargin)} + 선물 평가손익 ${signedWon(futuresUnrealized)} + 옵션 평가액 ${won(optionsValue)}`}
             />
             <Metric
               label="오늘 실현손익"
@@ -464,7 +471,7 @@ export default function DashboardPage() {
                 <span className="h-2 w-2 rounded-full bg-indigo/70" />
                 주식 {((stockValue / total) * 100).toFixed(1)}%
               </span>
-              <span className="flex items-center gap-1.5" title="선물 증거금 + 평가손익">
+              <span className="flex items-center gap-1.5" title="선물 증거금 + 평가손익 + 옵션 평가액">
                 <span className="h-2 w-2 rounded-full bg-warn/70" />
                 선물 {((futuresValue / total) * 100).toFixed(1)}%
               </span>
@@ -493,7 +500,7 @@ export default function DashboardPage() {
             {(
               [
                 ["stock", `주식 ${liveHoldings.length}`],
-                ["futures", `선물 ${futuresPositions}`],
+                ["futures", `선물·옵션 ${futuresPositions}`],
               ] as const
             ).map(([id, label]) => (
               <button

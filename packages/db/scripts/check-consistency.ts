@@ -8,7 +8,7 @@
  *  6) 조건부 주문: 발동 행은 접수 주문 ID 또는 실패 사유를 갖고, 대기 행이 현재가를 오래 넘겨 있지 않음
  */
 import { PrismaClient } from "@prisma/client";
-import { futureDef, futurePositionMargin } from "@mock-kabu/shared";
+import { futureDef, futurePositionMargin, optionDef, optionPositionMargin } from "@mock-kabu/shared";
 
 const prisma = new PrismaClient();
 let failures = 0;
@@ -81,8 +81,8 @@ async function main() {
         account_id,
         SUM(hold_per_unit * GREATEST(qty - filled_qty, 0)) AS amount
       FROM "order".orders
-      -- 선물 주문은 매수·매도 모두 현금(위탁증거금)을 묶는다.
-      WHERE (side = 'BUY' OR symbol IN (SELECT symbol FROM market.symbols WHERE kind = 'FUTURE'))
+      -- 선물·옵션 주문은 매수·매도 모두 현금(위탁증거금·쓰기 증거금)을 묶는다(옵션 청산 매도는 0).
+      WHERE (side = 'BUY' OR symbol IN (SELECT symbol FROM market.symbols WHERE kind IN ('FUTURE', 'OPTION')))
         AND status IN ('OPEN', 'PARTIAL')
       GROUP BY account_id
     )
@@ -110,9 +110,9 @@ async function main() {
         symbol,
         SUM(GREATEST(qty - filled_qty, 0))::int AS qty
       FROM "order".orders
-      -- 선물 매도는 주식을 묶지 않는다.
+      -- 선물·옵션 매도는 주식을 묶지 않는다.
       WHERE side = 'SELL' AND status IN ('OPEN', 'PARTIAL')
-        AND symbol NOT IN (SELECT symbol FROM market.symbols WHERE kind = 'FUTURE')
+        AND symbol NOT IN (SELECT symbol FROM market.symbols WHERE kind IN ('FUTURE', 'OPTION'))
       GROUP BY account_id, symbol
     )
     SELECT
@@ -153,6 +153,8 @@ async function main() {
     FROM market.symbols s
     JOIN latest l ON l.symbol = s.symbol
     WHERE s.last_price <> l.price
+      -- 옵션은 매일 만기 뒤 행사가가 바뀌며 최근가를 새 이론가로 다시 둔다.
+      AND s.kind <> 'OPTION'
       AND l.created_at < CURRENT_TIMESTAMP - INTERVAL '60 seconds'
   `;
   check("cached last price matches latest trade (60s grace)", staleLastPrices.length === 0, staleLastPrices);
@@ -209,7 +211,14 @@ async function main() {
 
   // 8) 포지션 증거금 = ceil(진입 금액 × 가격 단위 가치 × 위탁증거금률) — 체결 때 같은 식으로 다시 잡는다.
   const positionRows = await prisma.futuresPosition.findMany({ where: { qty: { not: 0 } } });
+  // 옵션은 쓰기(음수) 포지션만 계약당 행사가 명목 × 비율, 매수 포지션은 0.
+  const strikes = new Map((await prisma.optionSeries.findMany()).map((row) => [row.symbol, row.strike]));
   const badMargin = positionRows.filter((row) => {
+    const option = optionDef(row.symbol);
+    if (option) {
+      const strike = strikes.get(row.symbol);
+      return strike == null || row.marginHeld !== optionPositionMargin(option, row.qty, strike);
+    }
     const def = futureDef(row.symbol);
     return !def || row.marginHeld !== futurePositionMargin(def, row.entryValue, row.leverage);
   });

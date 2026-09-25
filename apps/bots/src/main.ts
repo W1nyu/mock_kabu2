@@ -1,5 +1,5 @@
 import { requiredRuntimeEnv } from "./env";
-import { FUTURES, liquidityReserveBotNumber, SYMBOLS, type OrderSide, type SymbolDef } from "@mock-kabu/shared";
+import { FUTURES, liquidityReserveBotNumber, OPTION_FAMILIES, SYMBOLS, type OrderSide, type SymbolDef } from "@mock-kabu/shared";
 import { ApiClient, isRejection } from "./client";
 import { MarketMakerStartupBlockedError, runMarketMaker } from "./market-maker";
 import { MarketModel, referencePriceFromHistory } from "./market-model";
@@ -7,6 +7,7 @@ import { ApiNewsSink } from "./news/api-sink";
 import { startNewsEngine } from "./news/scheduler";
 import { ReferenceNewsSink, startReferenceEngine } from "./reference-engine";
 import { FuturesMarketView, runFuturesMarketMaker, runFuturesMomentumTrader, runFuturesTrader } from "./futures-bots";
+import { OptionsMarketView, runOptionsMarketMaker, runOptionsTrader } from "./options-bots";
 import { ScenarioBook, startScenarioPolling } from "./scenario";
 import { CompositeNewsSink, ConsoleNewsSink } from "./news/sink";
 import {
@@ -595,7 +596,11 @@ async function main() {
   }
 
   // 종목별 예약 계정(shared LIQUIDITY_RESERVE_ORDER로 고정된 번호) — API·매칭엔진과 같은 표.
-  const liquiditySymbols = [...SYMBOLS.map((def) => def.symbol), ...FUTURES.map((def) => def.symbol)];
+  const liquiditySymbols = [
+    ...SYMBOLS.map((def) => def.symbol),
+    ...FUTURES.map((def) => def.symbol),
+    ...OPTION_FAMILIES.map((family) => family.reserve),
+  ];
   const liquidityClients: ApiClient[] = [];
   for (const symbol of liquiditySymbols) {
     const botNumber = liquidityReserveBotNumber(symbol);
@@ -707,6 +712,14 @@ async function main() {
     // 선물 거래 흐름 3계정(bot7·8·9) — 선물 체결이 끊기지 않게. bot6은 주식 비중이 커 현금이 모자라 뺐다.
     for (const index of [6, 7, 8]) void runFuturesTrader(clients[index], futuresMarket, `bot${index + 1}`);
     void runFuturesMomentumTrader(clients[9], futuresMarket, "bot10");
+
+    // 옵션: 기초자산별 마켓메이커(bot41 주가지수, bot42 원/달러, 쓰기 가능) + 매수·청산 거래 흐름(bot8·bot10).
+    const optionsMarket = new OptionsMarketView(clients[0]);
+    optionsMarket.start();
+    const optionMakersFrom = SYMBOLS.length + FUTURES.length;
+    OPTION_FAMILIES.forEach((family, index) => void runOptionsMarketMaker(liquidityClients[optionMakersFrom + index], family, optionsMarket));
+    void runOptionsTrader(clients[7], optionsMarket, "bot8");
+    void runOptionsTrader(clients[9], optionsMarket, "bot10");
   } else {
     console.log("[bots] futures bots disabled (BOTS_FUTURES_DISABLED=1)");
   }

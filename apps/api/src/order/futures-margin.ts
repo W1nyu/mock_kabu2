@@ -1,4 +1,5 @@
-import { futureMarginPerContract, type FutureDef, type OrderSide } from "@mock-kabu/shared";
+import { UnprocessableEntityException } from "@nestjs/common";
+import { futureMarginPerContract, optionWriterMarginPerContract, type FutureDef, type OptionDef, type OrderSide } from "@mock-kabu/shared";
 
 /**
  * 선물 때문에 쓸 수 없는 현금(원) = 포지션 위탁증거금 합계 + 미수금.
@@ -77,4 +78,42 @@ export async function futuresOrderHoldPerUnit(
     if (qty <= Math.abs(held) - reserved) return 0n;
   }
   return futureMarginPerContract(def, priceUnits, position?.leverage ?? null);
+}
+
+/**
+ * 옵션 주문 한 건의 계약당 홀드(원).
+ *  - 매수: 프리미엄 = 가격 × 승수 (쓰기 포지션을 되사는 주문도 프리미엄은 내야 한다)
+ *  - 매도: 보유(매수) 수량 이내이고 이미 걸린 청산 매도를 뺀 만큼이면 0(청산).
+ *          그 밖(쓰기)은 봇만 — 계약당 쓰기 증거금(행사가 명목 × 비율). 사용자는 거부한다.
+ * 계좌 락 안의 트랜잭션으로 부른다.
+ */
+export async function optionOrderHoldPerUnit(
+  db: { [key: string]: any },
+  accountId: string,
+  def: OptionDef,
+  side: OrderSide,
+  qty: number,
+  priceUnits: number,
+): Promise<bigint> {
+  if (side === "BUY") return BigInt(priceUnits) * BigInt(def.unitValue);
+  const position = (await db.futuresPosition.findUnique({
+    where: { accountId_symbol: { accountId, symbol: def.symbol } },
+  })) as { qty: number } | null;
+  const held = Math.max(0, position?.qty ?? 0);
+  if (held > 0) {
+    const pending = (await db.order.findMany({
+      where: { accountId, symbol: def.symbol, side: "SELL", status: { in: ["OPEN", "PARTIAL"] }, holdPerUnit: 0n },
+      select: { qty: true, filledQty: true },
+    })) as { qty: number; filledQty: number }[];
+    const reserved = pending.reduce((sum, order) => sum + (order.qty - order.filledQty), 0);
+    if (qty <= held - reserved) return 0n;
+  }
+  const account = (await db.account.findUnique({ where: { id: accountId }, select: { userId: true } })) as { userId: string } | null;
+  const user = account
+    ? ((await db.user.findUnique({ where: { id: account.userId }, select: { isBot: true } })) as { isBot: boolean } | null)
+    : null;
+  if (!user?.isBot) throw new UnprocessableEntityException("옵션은 보유한 수량만 매도(청산)할 수 있습니다");
+  const series = (await db.optionSeries.findUnique({ where: { symbol: def.symbol } })) as { strike: number } | null;
+  if (!series) throw new UnprocessableEntityException("오늘의 행사가가 아직 정해지지 않았습니다");
+  return optionWriterMarginPerContract(def, series.strike);
 }

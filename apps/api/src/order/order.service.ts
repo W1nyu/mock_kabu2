@@ -17,6 +17,7 @@ import {
   MAX_ORDER_QTY,
   TRADABLE_SYMBOLS,
   futureDef,
+  optionDef,
   isOnTick,
   tickSizeOf,
   type OrderCancelRequestedEvent,
@@ -27,7 +28,7 @@ import {
 import type Redis from "ioredis";
 import { BALANCE_MUTATOR, PRISMA, REDIS } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
-import { futuresMarginHeld, futuresOrderHoldPerUnit } from "./futures-margin";
+import { futuresMarginHeld, futuresOrderHoldPerUnit, optionOrderHoldPerUnit } from "./futures-margin";
 import { OutboxRelayer } from "./outbox.relayer";
 
 export interface PlaceOrderDto {
@@ -120,8 +121,9 @@ export class OrderService {
       throw new NotFoundException(`없는 종목: ${symbol}`);
     }
     const future = futureDef(symbol);
-    if (future && qty > MAX_FUTURES_ORDER_QTY) {
-      throw new BadRequestException(`선물은 한 주문에 ${MAX_FUTURES_ORDER_QTY}계약까지입니다`);
+    const option = optionDef(symbol);
+    if ((future || option) && qty > MAX_FUTURES_ORDER_QTY) {
+      throw new BadRequestException(`${option ? "옵션" : "선물"}은 한 주문에 ${MAX_FUTURES_ORDER_QTY}계약까지입니다`);
     }
     // 격자 밖 지정가는 호가창에 낯선 단계를 만들고 봇 래더와 어긋나므로 접수 단계에서 막는다.
     const tickSize = tickSizeOf(symbol);
@@ -133,7 +135,10 @@ export class OrderService {
     if (!marketSymbol) throw new NotFoundException(`없는 종목: ${symbol}`);
 
     // 시장가 체결 상한(정수 가격 단위): 최근가 × 안전계수. 현물 매수는 이 값이 곧 홀드 단가다.
-    const marketCap = Math.ceil(marketSymbol.lastPrice * MARKET_BUY_HOLD_FACTOR);
+    // 옵션은 가격이 짧은 시간에 크게 움직여 체결 상한을 넉넉히 둔다(최근가 × 1.5 + 10호가).
+    const marketCap = option
+      ? Math.ceil(marketSymbol.lastPrice * 1.5) + option.tickUnits * 10
+      : Math.ceil(marketSymbol.lastPrice * MARKET_BUY_HOLD_FACTOR);
     // 홀드 단가(원/주, 원/계약):
     //  - 현물 BUY: LIMIT=지정가, MARKET=체결 상한. 현물 SELL은 현금이 아니라 보유 수량을 묶는다.
     //  - 선물: 계약당 위탁증거금(계좌·종목의 레버리지 반영). 보유 포지션을 줄이기만 하는 청산 주문은 0 —
@@ -143,13 +148,17 @@ export class OrderService {
     const order = await this.mutator.withAccountLock([accountId], async (ctx) => {
       if (future) {
         holdPerUnit = await futuresOrderHoldPerUnit(ctx.tx, accountId, future, side, qty, type === "LIMIT" ? price! : marketCap);
+      } else if (option) {
+        holdPerUnit = await optionOrderHoldPerUnit(ctx.tx, accountId, option, side, qty, type === "LIMIT" ? price! : marketCap);
       }
-      if (future || side === "BUY") {
+      if (future || option || side === "BUY") {
         const acc = ctx.accounts[accountId];
         const holdTotal = holdPerUnit * BigInt(qty);
         const available = acc.balance - acc.holdAmount - (await futuresMarginHeld(ctx.tx, accountId));
         if (holdTotal > 0n && available < holdTotal) {
-          throw new UnprocessableEntityException(future ? "주문 증거금이 부족합니다" : "주문 가능 금액이 부족합니다");
+          throw new UnprocessableEntityException(
+            future ? "주문 증거금이 부족합니다" : option && side === "SELL" ? "쓰기 증거금이 부족합니다" : "주문 가능 금액이 부족합니다",
+          );
         }
         await ctx.updateAccount(accountId, {
           balance: acc.balance,
@@ -183,7 +192,15 @@ export class OrderService {
         side,
         type,
         // MARKET BUY는 체결 상한을 전달 (홀드 초과 체결 방지). 선물 홀드는 증거금이라 상한과 따로 계산한다.
-        price: type === "LIMIT" ? price : side === "BUY" ? marketCap : null,
+        // 옵션 시장가 매도는 최근가의 절반을 하한으로 — 호가가 비어도 1호가에 던지지 않게.
+        price:
+          type === "LIMIT"
+            ? price
+            : side === "BUY"
+              ? marketCap
+              : option
+                ? Math.max(option.tickUnits, Math.floor(marketSymbol.lastPrice / 2))
+                : null,
         qty,
         ts: Date.now(),
       };

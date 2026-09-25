@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { ADMIN_NICKNAME, INDEX_BASE_LEVEL, SYMBOLS, FUTURES } from "@mock-kabu/shared";
+import { ADMIN_NICKNAME, INDEX_BASE_LEVEL, SYMBOLS, FUTURES, OPTIONS } from "@mock-kabu/shared";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -118,6 +118,23 @@ async function main() {
     });
   }
   console.log(`futures: ${FUTURES.length} upserted`);
+  // 옵션 20종목 — 행사가(market.option_series)와 첫 가격은 API가 기초자산을 보고 정한다.
+  for (const o of OPTIONS) {
+    await prisma.marketSymbol.upsert({
+      where: { symbol: o.symbol },
+      update: { kind: "OPTION", name: o.name },
+      create: {
+        symbol: o.symbol,
+        name: o.name,
+        initialPrice: o.tickUnits,
+        tickSize: o.tickUnits,
+        lastPrice: o.tickUnits,
+        listedShares: 0n,
+        kind: "OPTION",
+      },
+    });
+  }
+  console.log(`options: ${OPTIONS.length} upserted`);
 
   // 지수 첫 구간 — 새 DB에서는 마이그레이션 시점에 종목이 없어 여기서 만든다.
   if ((await prisma.indexEpoch.count()) === 0) {

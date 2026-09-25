@@ -5,6 +5,7 @@ import { liquidityBootstrapToken } from "../liquidity/liquidity-reserve";
 import { FuturesSettlementService } from "./futures-settlement.service";
 import { CurrentUser, JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { FuturesService } from "./futures.service";
+import { OptionsService } from "./options.service";
 
 /** 공개 시세 — 선물 5종과 기초자산 */
 @Controller("market/futures")
@@ -17,15 +18,34 @@ export class FuturesController {
   }
 }
 
-/** 내 선물 포지션·증거금 */
+/** 공개 시세 — 옵션 20종목(행사가·이론가·최근가) */
+@Controller("market/options")
+export class OptionsController {
+  constructor(private options: OptionsService) {}
+
+  @Get()
+  overview() {
+    return this.options.overview();
+  }
+}
+
+/** 내 선물·옵션 포지션·증거금 */
 @Controller("account/futures")
 @UseGuards(JwtAuthGuard)
 export class AccountFuturesController {
-  constructor(private futures: FuturesService) {}
+  constructor(
+    private futures: FuturesService,
+    private options: OptionsService,
+  ) {}
 
   @Get()
-  positions(@CurrentUser() user: { accountId: string }) {
-    return this.futures.positions(user.accountId);
+  async positions(@CurrentUser() user: { accountId: string }) {
+    const [futures, options] = await Promise.all([
+      this.futures.positions(user.accountId),
+      this.options.positions(user.accountId),
+    ]);
+    // options: 옵션 포지션, optionsValue: 옵션 평가액 합계(이론가 기준) — 총 자산에 더한다.
+    return { ...futures, options: options.positions, optionsValue: options.value };
   }
 
   /** 종목 레버리지 설정 `{symbol, leverage: 1~20 | null}` — 포지션·미체결이 없을 때만 */

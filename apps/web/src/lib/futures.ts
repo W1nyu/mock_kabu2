@@ -1,4 +1,5 @@
 import { futureDef, formatFuturePrice, standardLeverage } from "@mock-kabu/shared";
+import { fmtOption, type OptionPosition } from "./options";
 
 /** `/market/futures` 한 줄 (가격은 모두 정수 단위 = 실제 × priceScale) */
 export interface FutureRow {
@@ -41,11 +42,17 @@ export interface FuturesAccount {
   leverage: Record<string, number | null>;
   marginCall: { startedAt: string; deadline: string; required: number; shortfall: number } | null;
   liquidations: { orderId: string; symbol: string; side: "BUY" | "SELL"; qty: number; reason: "DEADLINE" | "EMERGENCY"; createdAt: string }[];
+  /** 옵션 포지션(선물과 같은 API) */
+  options?: OptionPosition[];
+  /** 옵션 평가액 합계(최근가 × 수량 × 승수) — 총 자산에 더한다 */
+  optionsValue?: number;
 }
 
 export function fmtFuture(symbol: string, units: number | null | undefined): string {
   const def = futureDef(symbol);
-  if (!def || units == null || !Number.isFinite(units)) return "—";
+  // 옵션도 같은 호가창·체결 표시를 쓰므로 선물이 아니면 옵션 표기로 넘긴다.
+  if (!def) return fmtOption(symbol, units);
+  if (units == null || !Number.isFinite(units)) return "—";
   return formatFuturePrice(def, units);
 }
 

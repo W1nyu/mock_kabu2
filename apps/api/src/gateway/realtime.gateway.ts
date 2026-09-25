@@ -19,12 +19,15 @@ import {
   referenceAsset,
   SYMBOLS,
   toSocketChannel,
+  TRADABLE_SYMBOLS,
 } from "@mock-kabu/shared";
 import { REDIS, REDIS_SUB } from "../core/tokens";
 import { readApiRuntimeConfig } from "../core/runtime-config";
 
 const WEB_ORIGINS = readApiRuntimeConfig().webOrigins;
 const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
+/** 호가·체결 채널은 선물·옵션도 연다(뉴스 채널은 현물 종목만). */
+const TRADABLE = new Set(TRADABLE_SYMBOLS);
 const MAX_CHANNELS_PER_MESSAGE = 32;
 /**
  * 호가는 매번 전체 스냅샷이라 사이 값을 버려도 정보가 줄지 않는다. 마켓메이커가 여러 단을 연달아
@@ -264,6 +267,6 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (kind === "news") return scope === NEWS_FEED_SCOPE || ACTIVE_SYMBOLS.has(scope);
     // 가상 기초자산(원/달러·원자재) 최신값 — 공개.
     if (kind === "ref") return referenceAsset(scope) !== null;
-    return (kind === "orderbook" || kind === "trades") && ACTIVE_SYMBOLS.has(scope);
+    return (kind === "orderbook" || kind === "trades") && TRADABLE.has(scope);
   }
 }

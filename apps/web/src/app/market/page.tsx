@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ChipTabs from "@/components/ChipTabs";
 import FuturesList from "@/components/FuturesList";
+import OptionChain from "@/components/OptionChain";
 import ReferenceList from "@/components/ReferenceList";
 import Sparkline from "@/components/Sparkline";
 import { api, fmt } from "@/lib/api";
@@ -355,6 +356,15 @@ export default function MarketPage() {
               <span className="text-[11px] text-ink-faint">1일물 · 매일 04:10 현금 정산</span>
             </div>
             <FuturesList />
+          </section>
+
+          {/* ── 옵션 (1일물, 주가지수·원/달러) ───────────────────────── */}
+          <section className="glass overflow-hidden">
+            <div className="panel-head">
+              <span className="panel-title">옵션</span>
+              <span className="text-[11px] text-ink-faint">1일물 · 매일 04:10 만기 정산</span>
+            </div>
+            <OptionChain />
           </section>
 
           {/* ── 원자재·환율 (선물 기초자산) ───────────────────────────── */}

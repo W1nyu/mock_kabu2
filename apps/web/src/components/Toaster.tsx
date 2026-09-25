@@ -1,6 +1,6 @@
 "use client";
 
-import { isFuture } from "@mock-kabu/shared";
+import { isFuture, isOption } from "@mock-kabu/shared";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { fmt, getUser } from "@/lib/api";
@@ -61,10 +61,10 @@ export default function Toaster() {
       if (!fill) return;
       pending.delete(key);
       const avg = fill.qty > 0 ? Math.round(fill.amount / fill.qty) : 0;
-      if (isFuture(fill.symbol)) {
+      if (isFuture(fill.symbol) || isOption(fill.symbol)) {
         push({
           id: `fill:${key}:${Date.now()}`,
-          href: `/futures/${fill.symbol}`,
+          href: `/${isOption(fill.symbol) ? "options" : "futures"}/${fill.symbol}`,
           tone: fill.side === "BUY" ? "up" : "down",
           title: `${fill.symbol} ${fill.side === "BUY" ? "매수" : "매도"} 체결 ${fmt.format(fill.qty)}계약`,
           detail: fill.count > 1 ? `${fill.count}건 · 평균 ${fmtFuture(fill.symbol, avg)}` : fmtFuture(fill.symbol, avg),
@@ -123,10 +123,10 @@ export default function Toaster() {
         const realized = Number(data.realized);
         push({
           id: `futures-settled:${data.symbol}:${data.tradingDay}`,
-          href: `/futures/${data.symbol}`,
+          href: `/${isOption(data.symbol) ? "options" : "futures"}/${data.symbol}`,
           tone: realized > 0 ? "up" : realized < 0 ? "down" : "info",
-          title: `${data.symbol} 일일 정산`,
-          detail: `결제가 ${fmtFuture(data.symbol, Number(data.price))} · 정산손익 ${realized > 0 ? "+" : ""}${krw(realized || 0)}`,
+          title: `${data.symbol} ${isOption(data.symbol) ? "만기 정산" : "일일 정산"}`,
+          detail: `${isOption(data.symbol) ? "내재가치" : "결제가"} ${fmtFuture(data.symbol, Number(data.price))} · 정산손익 ${realized > 0 ? "+" : ""}${krw(realized || 0)}`,
         });
         return;
       }

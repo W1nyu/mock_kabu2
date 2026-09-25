@@ -177,6 +177,19 @@ export class ApiClient {
     return this.request("GET", "/account/futures") as Promise<{ positions: { symbol: string; qty: number }[] }>;
   }
 
+  /** 옵션 20종목 시세(행사가·이론가). API 2초 캐시. */
+  optionsOverview() {
+    return this.request("GET", "/market/options") as Promise<
+      { symbol: string; family: string; strike: number | null; theo: number | null; lastPrice: number; tickUnits: number }[]
+    >;
+  }
+
+  /** 내 옵션 포지션(/account/futures의 options) */
+  async optionsPositions() {
+    const body = (await this.request("GET", "/account/futures")) as { options?: { symbol: string; qty: number }[] };
+    return body.options ?? [];
+  }
+
   /** 재시작 때 마지막 기초자산 값을 이어받기 위한 공개 조회. */
   referenceOverview() {
     return this.request("GET", "/market/reference") as Promise<{ code: string; value: number | null }[]>;

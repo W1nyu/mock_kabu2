@@ -11,13 +11,17 @@ import {
   futuresTradingDay,
   indexLevel,
   nextFuturesSettlementAt,
+  optionIntrinsic,
+  OPTIONS,
   type FutureDef,
+  type OptionDef,
   type OrderCancelRequestedEvent,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
 import { BackgroundStatusRegistry } from "../core/background-status";
 import { BALANCE_MUTATOR, PRISMA, REDIS } from "../core/tokens";
 import { OutboxRelayer } from "../order/outbox.relayer";
+import { OptionsService } from "./options.service";
 
 /** 여러 API 인스턴스·재시작이 같은 거래일을 두 번 돌리지 않게 잡는 잠금 (정산은 이것과 별개로 멱등). */
 const LOCK_TTL_SECONDS = 15 * 60;
@@ -47,6 +51,7 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
     @Inject(REDIS) private redis: Redis,
     @Optional() private outboxRelayer?: OutboxRelayer,
     @Optional() private background?: BackgroundStatusRegistry,
+    @Optional() private options?: OptionsService,
   ) {}
 
   onModuleInit() {
@@ -96,7 +101,7 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
     // 낮에 API가 재시작돼 따라잡기가 다시 돌아도 그 포지션을 닫거나 미체결을 취소하면 안 된다.
     const doneRows = await this.prisma.futuresSettlement.findMany({ where: { tradingDay } });
     const doneBySymbol = new Map(doneRows.map((row) => [row.symbol, row]));
-    const pending = FUTURES.filter((def) => !doneBySymbol.has(def.symbol)).map((def) => def.symbol);
+    const pending = [...FUTURES, ...OPTIONS].filter((def) => !doneBySymbol.has(def.symbol)).map((def) => def.symbol);
     const canceledOrders = pending.length > 0 ? await this.cancelOpenFuturesOrders(pending) : 0;
     const prices = pending.length > 0 ? await this.settlementPrices() : new Map<string, number>();
     const symbols: FuturesSettlementResult["symbols"] = [];
@@ -134,6 +139,43 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
         data: { symbol: def.symbol, tradingDay, price, positions, realizedTotal },
       });
       symbols.push({ symbol: def.symbol, price, positions, realizedTotal });
+    }
+    // 옵션 만기 정산(선물 결제가로 내재가치 현금 정산) → 다음 거래일 행사가를 다시 깐다.
+    const series = new Map((await this.prisma.optionSeries.findMany()).map((row) => [row.symbol, row.strike]));
+    for (const def of OPTIONS) {
+      const done = doneBySymbol.get(def.symbol);
+      if (done) {
+        symbols.push({ symbol: def.symbol, price: done.price, positions: 0, realizedTotal: 0n });
+        continue;
+      }
+      const underlying = prices.get(def.family.future) ?? null;
+      const strike = series.get(def.symbol) ?? null;
+      const open = await this.prisma.futuresPosition.findMany({ where: { symbol: def.symbol, qty: { not: 0 } } });
+      if (underlying == null || strike == null) {
+        if (open.length > 0) throw new Error(`no settlement price/strike for ${def.symbol}`);
+        await this.prisma.futuresSettlement.create({
+          data: { symbol: def.symbol, tradingDay, price: 0, positions: 0, realizedTotal: 0n },
+        });
+        symbols.push({ symbol: def.symbol, price: null, positions: 0, realizedTotal: 0n });
+        continue;
+      }
+      const intrinsic = optionIntrinsic(def.type, underlying, strike);
+      let positions = 0;
+      let realizedTotal = 0n;
+      for (const position of open) {
+        const realized = await this.settleOptionPosition(def, tradingDay, intrinsic, position.accountId);
+        if (realized != null) {
+          positions += 1;
+          realizedTotal += realized;
+        }
+      }
+      await this.prisma.futuresSettlement.create({
+        data: { symbol: def.symbol, tradingDay, price: intrinsic, positions, realizedTotal },
+      });
+      symbols.push({ symbol: def.symbol, price: intrinsic, positions, realizedTotal });
+    }
+    if (this.options) {
+      await this.options.restrikeStale(async () => (prices.size > 0 ? prices : await this.settlementPrices()));
     }
     // 정산으로 포지션이 사라졌으니 진행 중이던 추가증거금도 끝낸다. 이번 실행이 실제로 포지션을 닫았을 때만 —
     // 낮의 재기동 따라잡기가 정산 뒤에 새로 걸린 추가증거금을 지우면 안 된다.
@@ -185,6 +227,55 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
         .publish(
           CHANNELS.account(accountId),
           JSON.stringify({ type: "futures_settled", symbol: def.symbol, tradingDay, price, realized }),
+        )
+        .catch(() => undefined);
+    }
+    return realizedOut;
+  }
+
+  /**
+   * 옵션 한 포지션 만기 정산: 매수는 내재가치 × 수량 × 승수를 받고, 쓰기는 낸다(모자라면 미수금).
+   * 프리미엄은 체결 때 이미 오갔으므로 현금은 내재가치만, 실현손익은 내재가치 − 프리미엄 원가.
+   */
+  private async settleOptionPosition(def: OptionDef, tradingDay: string, intrinsic: number, accountId: string): Promise<bigint | null> {
+    const eventId = `option-settle:${def.symbol}:${tradingDay}:${accountId}`;
+    let realizedOut: bigint | null = null;
+    await this.mutator.withAccountLock([accountId], async (ctx) => {
+      const claimed = await ctx.tx.processedEvent.findUnique({ where: { eventId } });
+      if (claimed) return;
+      await ctx.tx.processedEvent.create({ data: { eventId } });
+
+      const where = { accountId_symbol: { accountId, symbol: def.symbol } };
+      const position = await ctx.tx.futuresPosition.findUnique({ where });
+      if (!position || position.qty === 0) return;
+      const closeSide = position.qty > 0 ? "SELL" : "BUY";
+      const fill = applyFutureFill(def, { qty: position.qty, entryValue: position.entryValue }, closeSide, intrinsic, Math.abs(position.qty));
+      await ctx.tx.futuresPosition.update({ where, data: { qty: 0, entryValue: 0n, marginHeld: 0n } });
+      await ctx.tx.futuresRealized.create({
+        data: { accountId, symbol: def.symbol, tradeId: eventId, side: "SETTLE", closedQty: fill.closedQty, price: intrinsic, realized: fill.realized },
+      });
+
+      const payoff = BigInt(position.qty) * BigInt(intrinsic) * BigInt(def.unitValue);
+      const account = ctx.accounts[accountId];
+      const debtRow = await ctx.tx.futuresDebt.findUnique({ where: { accountId } });
+      const cash = applyFuturesCash({ balance: account.balance, holdAmount: account.holdAmount, debt: debtRow?.amount ?? 0n }, payoff);
+      await ctx.updateAccount(accountId, { balance: cash.balance, holdAmount: account.holdAmount });
+      if (cash.ledgerDelta !== 0n) {
+        await ctx.tx.ledgerEntry.create({
+          data: { accountId, delta: cash.ledgerDelta, balanceAfter: cash.balance, reason: "OPTION_EXPIRY", refId: eventId },
+        });
+      }
+      if (cash.debt !== (debtRow?.amount ?? 0n)) {
+        await ctx.tx.futuresDebt.upsert({ where: { accountId }, update: { amount: cash.debt }, create: { accountId, amount: cash.debt } });
+      }
+      realizedOut = fill.realized;
+    });
+    if (realizedOut != null) {
+      const realized = String(realizedOut);
+      this.redis
+        .publish(
+          CHANNELS.account(accountId),
+          JSON.stringify({ type: "futures_settled", symbol: def.symbol, tradingDay, price: intrinsic, realized }),
         )
         .catch(() => undefined);
     }

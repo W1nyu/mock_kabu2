@@ -2,6 +2,7 @@ import {
   FUTURES,
   LIQUIDITY_RESERVE_OVERLAP_MULTIPLIER,
   LIQUIDITY_RESERVE_START_INDEX,
+  OPTION_FAMILIES,
   SYMBOLS,
   liquidityReserveBotNumber,
   liquidityTotalQtyForPrice,
@@ -52,9 +53,10 @@ export interface FuturesLiquidityReserve {
 export const FUTURES_LIQUIDITY_MIN_AVAILABLE_CASH = 500_000_000n;
 
 export function futuresLiquidityReserves(): FuturesLiquidityReserve[] {
-  return FUTURES.map((future) => {
-    const botNumber = reserveBotNumber(future.symbol);
-    return { symbol: future.symbol, email: `bot${botNumber}@bots.local`, nickname: `Liquidity ${future.symbol}` };
+  // 옵션 마켓메이커(기초자산별 1계정, 예: OPT_KABU)도 재고 없이 쓰기 증거금용 현금만 필요해 같은 방식으로 채운다.
+  return [...FUTURES.map((future) => future.symbol), ...OPTION_FAMILIES.map((family) => family.reserve)].map((name) => {
+    const botNumber = reserveBotNumber(name);
+    return { symbol: name, email: `bot${botNumber}@bots.local`, nickname: `Liquidity ${name}` };
   });
 }
 
