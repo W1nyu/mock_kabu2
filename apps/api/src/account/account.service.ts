@@ -11,6 +11,41 @@ const LEADERBOARD_TTL_MS = 10_000;
 
 export type LeaderboardPeriod = "all" | "today" | "week";
 
+interface RealizedTotalsRow {
+  today: bigint;
+  today_qty: bigint;
+  total: bigint;
+  total_qty: bigint;
+  fills: bigint;
+  wins: bigint;
+  losses: bigint;
+  win_sum: bigint;
+  loss_sum: bigint;
+  best: bigint | null;
+  worst: bigint | null;
+}
+
+/** 청산 체결 단위 성과(승률·평균 손익·손익비·최고/최저). 손익 0인 체결은 승/패 어느 쪽에도 넣지 않는다. */
+function realizedStats(row: RealizedTotalsRow | undefined) {
+  const fills = Number(row?.fills ?? 0n);
+  const wins = Number(row?.wins ?? 0n);
+  const losses = Number(row?.losses ?? 0n);
+  const winSum = Number(row?.win_sum ?? 0n);
+  const lossSum = Math.abs(Number(row?.loss_sum ?? 0n));
+  return {
+    fills,
+    wins,
+    losses,
+    winRate: wins + losses > 0 ? wins / (wins + losses) : null,
+    avgWin: wins > 0 ? winSum / wins : null,
+    avgLoss: losses > 0 ? lossSum / losses : null,
+    // 손익비(profit factor) = 총이익 / 총손실. 손실이 없으면 정의하지 않는다.
+    profitFactor: lossSum > 0 ? winSum / lossSum : null,
+    best: row?.best != null ? Number(row.best) : null,
+    worst: row?.worst != null ? Number(row.worst) : null,
+  };
+}
+
 @Injectable()
 export class AccountService {
   constructor(
@@ -69,22 +104,8 @@ export class AccountService {
    */
   async getRealizedPnl(accountId: string, limit = 50) {
     const dayStart = koreaDayStart();
-    const [totals, bySymbol, recent] = await Promise.all([
-      this.prisma.$queryRaw<
-        {
-          today: bigint;
-          today_qty: bigint;
-          total: bigint;
-          total_qty: bigint;
-          fills: bigint;
-          wins: bigint;
-          losses: bigint;
-          win_sum: bigint;
-          loss_sum: bigint;
-          best: bigint | null;
-          worst: bigint | null;
-        }[]
-      >`
+    const [totals, bySymbol, recent, futuresTotals] = await Promise.all([
+      this.prisma.$queryRaw<RealizedTotalsRow[]>`
         SELECT
           COALESCE(SUM(realized) FILTER (WHERE traded_at >= ${dayStart}), 0) AS today,
           COALESCE(SUM(qty) FILTER (WHERE traded_at >= ${dayStart}), 0) AS today_qty,
@@ -111,30 +132,40 @@ export class AccountService {
         orderBy: { id: "desc" },
         take: Math.min(Math.max(1, limit), 200),
       }),
+      // 선물 청산(반대매매·일일 정산 포함) 한 건 = 한 행. 주식 매도 체결과 같은 모양으로 집계한다.
+      this.prisma.$queryRaw<RealizedTotalsRow[]>`
+        SELECT
+          COALESCE(SUM(realized) FILTER (WHERE created_at >= ${dayStart}), 0) AS today,
+          COALESCE(SUM(closed_qty) FILTER (WHERE created_at >= ${dayStart}), 0) AS today_qty,
+          COALESCE(SUM(realized), 0) AS total,
+          COALESCE(SUM(closed_qty), 0) AS total_qty,
+          COUNT(*) AS fills,
+          COUNT(*) FILTER (WHERE realized > 0) AS wins,
+          COUNT(*) FILTER (WHERE realized < 0) AS losses,
+          COALESCE(SUM(realized) FILTER (WHERE realized > 0), 0) AS win_sum,
+          COALESCE(SUM(realized) FILTER (WHERE realized < 0), 0) AS loss_sum,
+          MAX(realized) AS best,
+          MIN(realized) AS worst
+        FROM account.futures_realized
+        WHERE account_id = ${accountId}
+      `,
     ]);
     const row = totals[0];
-    const fills = Number(row?.fills ?? 0n);
-    const wins = Number(row?.wins ?? 0n);
-    const losses = Number(row?.losses ?? 0n);
-    const winSum = Number(row?.win_sum ?? 0n);
-    const lossSum = Math.abs(Number(row?.loss_sum ?? 0n));
+    const futuresRow = futuresTotals[0];
     return {
       today: Number(row?.today ?? 0n),
       todayQty: Number(row?.today_qty ?? 0n),
       total: Number(row?.total ?? 0n),
       totalQty: Number(row?.total_qty ?? 0n),
       /** 매도 체결 단위 성과. 손익 0인 체결은 승/패 어느 쪽에도 넣지 않는다. */
-      stats: {
-        fills,
-        wins,
-        losses,
-        winRate: wins + losses > 0 ? wins / (wins + losses) : null,
-        avgWin: wins > 0 ? winSum / wins : null,
-        avgLoss: losses > 0 ? lossSum / losses : null,
-        // 손익비(profit factor) = 총이익 / 총손실. 손실이 없으면 정의하지 않는다.
-        profitFactor: lossSum > 0 ? winSum / lossSum : null,
-        best: row?.best != null ? Number(row.best) : null,
-        worst: row?.worst != null ? Number(row.worst) : null,
+      stats: realizedStats(row),
+      /** 선물 청산 실현손익(원). 주식과 같은 모양 — 대시보드가 주식/선물을 나눠 보여 준다. */
+      futures: {
+        today: Number(futuresRow?.today ?? 0n),
+        todayQty: Number(futuresRow?.today_qty ?? 0n),
+        total: Number(futuresRow?.total ?? 0n),
+        totalQty: Number(futuresRow?.total_qty ?? 0n),
+        stats: realizedStats(futuresRow),
       },
       bySymbol: bySymbol.map((group) => {
         const realized = Number(group._sum.realized ?? 0n);

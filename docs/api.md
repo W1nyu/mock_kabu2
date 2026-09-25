@@ -73,7 +73,7 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/account` | `{id, balance, balanceExact, holdAmount, available, availableExact}` (`*Exact`는 큰 잔액의 정확한 십진 문자열) |
 | GET | `/account/holdings` | 보유 `[{symbol, qty, holdQty, availableQty, lastPrice, value, costBasis, avgCost, pnl, pnlRate}]` |
 | GET | `/account/trades?symbol=&limit=` | 내 체결 `[{tradeId, symbol, side: BUY|SELL|SELF, price, qty, amount, taker, realized, costBasis, ts}]` |
-| GET | `/account/realized?limit=` | 실현손익 `{today, todayQty, total, totalQty, bySymbol[], recent[], stats: {fills, wins, losses, winRate, avgWin, avgLoss, profitFactor, best, worst}}` |
+| GET | `/account/realized?limit=` | 실현손익 `{today, todayQty, total, totalQty, bySymbol[], recent[], stats: {fills, wins, losses, winRate, avgWin, avgLoss, profitFactor, best, worst}, futures: {today, todayQty, total, totalQty, stats}}` — `futures`는 선물 청산(반대매매·일일 정산 포함) 실현손익, 주식과 같은 모양 |
 | GET | `/account/equity?range=1d|1w|all` | 분 단위 자산 스냅샷 `[{ts, cash, stockValue, equity}]` (1분/10분/1시간 버킷의 마지막 값) |
 | GET | `/account/daily?days=` | KST 일별 `[{date, closeEquity, closeCash, change, changeRate, realized, fills}]` 최신순 |
 | GET | `/account/leaderboard?limit=&period=all|today|week` | 사용자 계정 수익률 순위 `{total, rows: [{rank, nickname, equity, deposits, pnl, returnRate, indexRate, indexBase, indexCurrent, alpha, realized, me}]}` — 지수 수준은 `/market/index`와 같은 시가총액 가중(기준 시각의 지수 구간 사용). `indexRate = indexCurrent / indexBase − 1`; `alpha = returnRate − indexRate`. today/week는 첫 자산 스냅샷을 기준으로, 전체는 가입 시점을 기준으로 비교한다. 봇·관리자·`smoke-*` 제외 |

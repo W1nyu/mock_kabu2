@@ -33,16 +33,8 @@ const PERIODS: { id: Period; label: string; hint: string }[] = [
 ];
 const PERIOD_STORAGE_KEY = "dashboard:leaderboard-period";
 
-/** 사용자 계정 수익률 랭킹. 봇은 제외된다. showMine이면 내 순위가 상위 밖이어도 마지막 줄에 붙인다. */
-export default function Leaderboard({
-  refreshKey,
-  topN = DEFAULT_TOP_N,
-  showMine = false,
-}: {
-  refreshKey?: number;
-  topN?: number;
-  showMine?: boolean;
-}) {
+/** 사용자 계정 수익률 랭킹(상위 topN). 봇은 제외된다. */
+export default function Leaderboard({ refreshKey, topN = DEFAULT_TOP_N }: { refreshKey?: number; topN?: number }) {
   const [board, setBoard] = useState<LeaderboardDto | null>(null);
   const [period, setPeriod] = useState<Period>("all");
 
@@ -83,8 +75,8 @@ export default function Leaderboard({
     };
   }, [refreshKey, period, topN]);
 
-  // API는 순위 밖이어도 내 행을 덧붙인다 — showMine일 때만 보여 준다.
-  const topRows = board?.rows.filter((row) => row.rank <= topN || (showMine && row.me)) ?? [];
+  // API는 순위 밖이어도 내 행을 덧붙이지만, 랭킹은 상위 topN만 보여 준다.
+  const topRows = board?.rows.filter((row) => row.rank <= topN) ?? [];
 
   return (
     <section className="glass overflow-hidden">

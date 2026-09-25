@@ -10,7 +10,9 @@ import DailyPerformance from "@/components/DailyPerformance";
 import dynamic from "next/dynamic";
 import PerformanceCard, { type RealizedStats } from "@/components/PerformanceCard";
 import { NewsList } from "@/components/NewsFeed";
+import FuturesHoldings from "@/components/FuturesHoldings";
 import FuturesList from "@/components/FuturesList";
+import type { FuturesAccount } from "@/lib/futures";
 import ReferenceList from "@/components/ReferenceList";
 import Sparkline from "@/components/Sparkline";
 import ChipTabs from "@/components/ChipTabs";
@@ -59,6 +61,8 @@ interface RealizedSummary {
   total: number;
   totalQty: number;
   stats: RealizedStats;
+  /** 선물 청산 실현손익 — 주식과 같은 모양 */
+  futures?: { today: number; total: number; stats: RealizedStats };
 }
 interface MarketSummary {
   turnover: number | string | null;
@@ -108,6 +112,8 @@ export default function DashboardPage() {
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
   const [realized, setRealized] = useState<RealizedSummary | null>(null);
+  const [futures, setFutures] = useState<FuturesAccount | null>(null);
+  const [holdingsTab, setHoldingsTab] = useState<"stock" | "futures">("stock");
   const [symbols, setSymbols] = useState<SymbolRow[]>([]);
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [turnovers, setTurnovers] = useState<Record<string, number>>({});
@@ -170,6 +176,7 @@ export default function DashboardPage() {
     api<AccountInfo>("/account").then(setAccount).catch(() => {});
     api<HoldingRow[]>("/account/holdings").then(setHoldings).catch(() => {});
     api<RealizedSummary>("/account/realized?limit=1").then(setRealized).catch(() => {});
+    api<FuturesAccount>("/account/futures").then(setFutures).catch(() => {});
   }, []);
 
   const refreshSymbols = useCallback(() => {
@@ -355,8 +362,22 @@ export default function DashboardPage() {
 
   const stockValue = liveHoldings.reduce((sum, h) => sum + h.value, 0);
   const stockValueExact = liveHoldings.reduce((sum, h) => sum + BigInt(h.qty) * BigInt(h.lastPrice), 0n);
-  const total = (account?.balance ?? 0) + stockValue;
-  const totalExact = BigInt(account?.balanceExact ?? String(account?.balance ?? 0)) + stockValueExact;
+  // 선물 몫 = 묶인 증거금 + 평가손익(음수면 0으로 본다). 증거금은 현금 잔액 안에 있으므로 현금 몫에서 뺀다.
+  const futuresMargin = futures?.marginHeld ?? 0;
+  const futuresUnrealized = futures?.unrealized ?? 0;
+  const futuresDebt = futures?.debt ?? 0;
+  const futuresValue = Math.max(0, futuresMargin + futuresUnrealized);
+  const cashValue = Math.max(0, (account?.balance ?? 0) - futuresMargin - futuresDebt);
+  const total = cashValue + stockValue + futuresValue;
+  // 총 자산 = 현금 잔액 + 주식 평가금액 + 선물 평가손익 − 미수금
+  const totalExact =
+    BigInt(account?.balanceExact ?? String(account?.balance ?? 0)) +
+    stockValueExact +
+    BigInt(Math.round(futuresUnrealized)) -
+    BigInt(Math.round(futuresDebt));
+  const realizedToday = (realized?.today ?? 0) + (realized?.futures?.today ?? 0);
+  const realizedTotal = (realized?.total ?? 0) + (realized?.futures?.total ?? 0);
+  const futuresPositions = futures?.positions.length ?? 0;
   const totalCost = liveHoldings.reduce((sum, h) => sum + h.costBasis, 0);
   const totalPnl = liveHoldings.reduce((sum, h) => sum + h.pnl, 0);
   const totalPnlRate = totalCost > 0 ? totalPnl / totalCost : 0;
@@ -393,43 +414,50 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-5">
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
             <Metric label="현금 잔액" value={won(BigInt(account?.balanceExact ?? String(account?.balance ?? 0)))} />
             <Metric label="주문 가능" value={won(BigInt(account?.availableExact ?? String(account?.available ?? 0)))} />
             <Metric label="주식 평가금액" value={won(stockValueExact)} />
             <Metric
+              label="선물 평가금액"
+              value={won(Math.round(futuresMargin + futuresUnrealized))}
+              title={`묶인 증거금 ${won(futuresMargin)} + 평가손익 ${signedWon(futuresUnrealized)}`}
+            />
+            <Metric
               label="오늘 실현손익"
-              value={realized ? signedWon(realized.today) : "—"}
-              tone={realized ? toneOf(realized.today) : undefined}
-              title="KST 당일 매도 체결에서 평단가 대비 확정된 손익"
+              value={realized ? signedWon(realizedToday) : "—"}
+              tone={realized ? toneOf(realizedToday) : undefined}
+              title={`KST 당일 확정 손익 — 주식 ${signedWon(realized?.today ?? 0)} · 선물 ${signedWon(realized?.futures?.today ?? 0)}`}
             />
             <Metric
               label="누적 실현손익"
-              value={realized ? signedWon(realized.total) : "—"}
-              tone={realized ? toneOf(realized.total) : undefined}
-              title="지금까지의 모든 매도 체결에서 확정된 손익 합계"
+              value={realized ? signedWon(realizedTotal) : "—"}
+              tone={realized ? toneOf(realizedTotal) : undefined}
+              title={`지금까지 확정된 손익 — 주식 ${signedWon(realized?.total ?? 0)} · 선물 ${signedWon(realized?.futures?.total ?? 0)}`}
             />
           </dl>
         </div>
 
-        {/* Allocation bar — cash vs. equity at a glance. */}
+        {/* Allocation bar — cash vs. stocks vs. futures at a glance. */}
         {total > 0 && (
           <div className="border-t border-hairline-soft px-5 py-3 sm:px-6">
             <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-surface-3/35">
-              <div
-                className="bg-sky/70"
-                style={{ width: `${((account?.balance ?? 0) / total) * 100}%` }}
-              />
+              <div className="bg-sky/70" style={{ width: `${(cashValue / total) * 100}%` }} />
               <div className="bg-indigo/70" style={{ width: `${(stockValue / total) * 100}%` }} />
+              <div className="bg-warn/70" style={{ width: `${(futuresValue / total) * 100}%` }} />
             </div>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-muted">
               <span className="flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-sky/70" />
-                현금 {(((account?.balance ?? 0) / total) * 100).toFixed(1)}%
+                현금 {((cashValue / total) * 100).toFixed(1)}%
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-indigo/70" />
                 주식 {((stockValue / total) * 100).toFixed(1)}%
+              </span>
+              <span className="flex items-center gap-1.5" title="선물 증거금 + 평가손익">
+                <span className="h-2 w-2 rounded-full bg-warn/70" />
+                선물 {((futuresValue / total) * 100).toFixed(1)}%
               </span>
             </div>
           </div>
@@ -441,7 +469,7 @@ export default function DashboardPage() {
         <div className="lg:col-span-2">
           <EquityChart />
         </div>
-        <PerformanceCard stats={realized?.stats ?? null} />
+        <PerformanceCard stats={realized?.stats ?? null} futuresStats={realized?.futures?.stats ?? null} />
       </div>
 
       {/* ── Market ─────────────────────────────────────────────── */}
@@ -576,11 +604,30 @@ export default function DashboardPage() {
       <section className="glass overflow-hidden">
         <div className="panel-head">
           <span className="panel-title">보유 자산</span>
-          {hasHoldings && (
-            <span className="text-[11px] text-ink-faint">{liveHoldings.length}개 종목</span>
-          )}
+          <div className="well flex gap-0.5 p-0.5" role="group" aria-label="주식·선물">
+            {(
+              [
+                ["stock", `주식 ${liveHoldings.length}`],
+                ["futures", `선물 ${futuresPositions}`],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={holdingsTab === id}
+                onClick={() => setHoldingsTab(id)}
+                className={`num rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                  holdingsTab === id ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35" : "text-ink-muted hover:text-ink"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
-        {!hasHoldings ? (
+        {holdingsTab === "futures" ? (
+          <FuturesHoldings account={futures} />
+        ) : !hasHoldings ? (
           <div className="px-5 py-12 text-center">
             <p className="text-sm text-ink-muted">보유 종목이 없습니다.</p>
             <p className="mt-1 text-xs text-ink-faint">
