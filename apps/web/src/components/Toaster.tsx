@@ -119,13 +119,24 @@ export default function Toaster() {
         }
         return;
       }
+      if (data.type === "futures_settled" && typeof data.symbol === "string") {
+        const realized = Number(data.realized);
+        push({
+          id: `futures-settled:${data.symbol}:${data.tradingDay}`,
+          href: `/futures/${data.symbol}`,
+          tone: realized > 0 ? "up" : realized < 0 ? "down" : "info",
+          title: `${data.symbol} 일일 정산`,
+          detail: `결제가 ${fmtFuture(data.symbol, Number(data.price))} · 정산손익 ${realized > 0 ? "+" : ""}${krw(realized || 0)}`,
+        });
+        return;
+      }
       if (data.type === "futures_margin_call") {
         const at = Date.now();
         if (data.status === "OPEN") {
           const deadline = new Date(String(data.deadline));
           push({
             id: `margin-call:${at}`,
-            href: "/futures/KABUF",
+            href: "/market?kind=futures",
             tone: "warn",
             title: "선물 추가증거금 발생",
             detail: `${krw(Number(data.required))} · ${deadline.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" })}까지 채우지 않으면 반대매매`,

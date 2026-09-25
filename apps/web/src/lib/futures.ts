@@ -1,4 +1,6 @@
 import { futureDef, formatFuturePrice } from "@mock-kabu/shared";
+import type { ChartOverlay } from "@/components/UnitCandleChart";
+import { api } from "@/lib/api";
 
 /** `/market/futures` 한 줄 (가격은 모두 정수 단위 = 실제 × priceScale) */
 export interface FutureRow {
@@ -65,3 +67,25 @@ export function unitsToInput(symbol: string, units: number): string {
 }
 
 export const krw = (n: number) => `${Math.round(n).toLocaleString("ko-KR")}원`;
+
+/** 선물 차트에 겹칠 기초자산 선. KABU 지수는 지수 추이, 나머지는 가상 기초자산 봉의 종가. */
+export function underlyingOverlay(symbol: string): ChartOverlay | undefined {
+  const def = futureDef(symbol);
+  if (!def) return undefined;
+  if (def.underlying === "KABU_INDEX") {
+    return {
+      label: "KABU 지수",
+      load: (interval) => {
+        const range = interval === "1d" ? "all" : interval === "1h" || interval === "4h" ? "1w" : "1d";
+        return api<{ ts: number; value: number }[]>(`/market/index?range=${range}`, { auth: false });
+      },
+    };
+  }
+  return {
+    label: "기초자산",
+    load: (interval) =>
+      api<{ ts: string; close: number }[]>(`/market/reference/${def.underlying}/candles?interval=${interval}&limit=500`, {
+        auth: false,
+      }).then((rows) => rows.map((row) => ({ ts: Date.parse(row.ts), value: row.close / def.priceScale }))),
+  };
+}

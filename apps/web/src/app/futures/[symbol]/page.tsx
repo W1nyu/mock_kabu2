@@ -2,19 +2,22 @@
 
 import { futureDef } from "@mock-kabu/shared";
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import FuturesBook from "@/components/FuturesBook";
 import FuturesOrderPanel from "@/components/FuturesOrderPanel";
+import FuturesOrderSheet from "@/components/FuturesOrderSheet";
 import FuturesPositionPanel from "@/components/FuturesPositionPanel";
+import { MobileTradeBar } from "@/components/MobileOrderSheet";
 import UnitCandleChart from "@/components/UnitCandleChart";
-import { api } from "@/lib/api";
-import { changePct, fmtFuture, type FutureRow } from "@/lib/futures";
+import { api, getUser } from "@/lib/api";
+import { changePct, fmtFuture, underlyingOverlay, type FutureRow } from "@/lib/futures";
+import { COMPACT_TRADE_QUERY, useMediaQuery } from "@/lib/media";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
 
 /**
- * 선물 거래 화면. PC는 왼쪽 차트·호가, 오른쪽 주문·포지션. 폰은 위에서부터 시세 → 차트 → 주문 →
- * 포지션 → 호가 순으로 쌓아 한 손으로 내려가며 볼 수 있게 한다.
+ * 선물 거래 화면. PC는 왼쪽 차트(기초자산 겹침)·호가, 오른쪽 주문·포지션.
+ * 폰은 현물 거래 화면처럼 시세 → 차트 → 내 포지션 순으로 두고, 호가·주문은 하단 매수/매도 버튼이 여는 시트에 둔다.
  */
 export default function FuturePage({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = use(params);
@@ -23,6 +26,12 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
   const [last, setLast] = useState<number | null>(null);
   const [priceHint, setPriceHint] = useState<{ price: number; seq: number } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const compact = useMediaQuery(COMPACT_TRADE_QUERY);
+  const [sheet, setSheet] = useState<{ side: "BUY" | "SELL"; seq: number } | null>(null);
+  const closeSheet = useCallback(() => setSheet(null), []);
+  const [loggedIn, setLoggedIn] = useState(false);
+  useEffect(() => setLoggedIn(getUser() != null), []);
+  const overlay = useMemo(() => (def ? underlyingOverlay(def.symbol) : undefined), [def]);
 
   useEffect(() => {
     if (!def) return;
@@ -61,7 +70,7 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
   const tone = change == null ? "text-ink-faint" : change > 0 ? "text-up" : change < 0 ? "text-down" : "text-ink-muted";
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4">
+    <div className="mx-auto max-w-6xl space-y-4 max-lg:pb-20">
       <div className="glass p-4 sm:p-5">
         <p className="text-[13px] text-ink-muted">
           {def.symbol} · 1일물 선물 <span className="text-ink-faint">· 매일 04:10 현금 정산</span>
@@ -101,22 +110,54 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
               }}
               scale={def.priceScale}
               decimals={def.decimals}
+              overlay={overlay}
             />
           </section>
         </div>
         <div className="space-y-4 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-          <FuturesOrderPanel
-            symbol={def.symbol}
-            lastPrice={price}
-            priceHint={priceHint}
-            onPlaced={() => setRefreshKey((k) => k + 1)}
-          />
+          {!compact && (
+            <FuturesOrderPanel
+              symbol={def.symbol}
+              lastPrice={price}
+              priceHint={priceHint}
+              onPlaced={() => setRefreshKey((k) => k + 1)}
+            />
+          )}
           <FuturesPositionPanel symbol={def.symbol} refreshKey={refreshKey} />
         </div>
-        <div className="lg:col-start-1 lg:row-start-2 lg:self-start">
-          <FuturesBook symbol={def.symbol} onPick={(p) => setPriceHint({ price: p, seq: Date.now() })} />
-        </div>
+        {!compact && (
+          <div className="lg:col-start-1 lg:row-start-2 lg:self-start">
+            <FuturesBook symbol={def.symbol} onPick={(p) => setPriceHint({ price: p, seq: Date.now() })} />
+          </div>
+        )}
       </div>
+
+      {compact && loggedIn && (
+        <MobileTradeBar
+          onOpen={(side) => {
+            setPriceHint(null);
+            setSheet({ side, seq: Date.now() });
+          }}
+        />
+      )}
+      {compact && !loggedIn && (
+        <p className="text-center text-sm text-ink-muted">
+          선물 주문은 <Link href="/login" className="text-sky">로그인</Link> 후 이용할 수 있습니다.
+        </p>
+      )}
+      {compact && sheet && (
+        <FuturesOrderSheet
+          key={sheet.seq}
+          symbol={def.symbol}
+          name={def.name}
+          side={sheet.side}
+          lastPrice={price}
+          priceHint={priceHint}
+          onPick={(p) => setPriceHint({ price: p, seq: Date.now() })}
+          onPlaced={() => setRefreshKey((k) => k + 1)}
+          onClose={closeSheet}
+        />
+      )}
     </div>
   );
 }

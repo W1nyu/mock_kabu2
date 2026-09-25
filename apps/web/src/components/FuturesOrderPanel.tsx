@@ -19,14 +19,16 @@ export default function FuturesOrderPanel({
   lastPrice,
   priceHint,
   onPlaced,
+  initialSide = "BUY",
 }: {
   symbol: string;
   lastPrice: number | null;
   priceHint: { price: number; seq: number } | null;
   onPlaced: () => void;
+  initialSide?: "BUY" | "SELL";
 }) {
   const def = futureDef(symbol)!;
-  const [side, setSide] = useState<"BUY" | "SELL">("BUY");
+  const [side, setSide] = useState<"BUY" | "SELL">(initialSide);
   const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT");
   const [priceText, setPriceText] = useState("");
   const [qty, setQty] = useState(1);

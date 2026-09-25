@@ -6,7 +6,7 @@ import { MarketModel, referencePriceFromHistory } from "./market-model";
 import { ApiNewsSink } from "./news/api-sink";
 import { startNewsEngine } from "./news/scheduler";
 import { ReferenceNewsSink, startReferenceEngine } from "./reference-engine";
-import { FuturesMarketView, runFuturesMarketMaker, runFuturesTrader } from "./futures-bots";
+import { FuturesMarketView, runFuturesMarketMaker, runFuturesMomentumTrader, runFuturesTrader } from "./futures-bots";
 import { ScenarioBook, startScenarioPolling } from "./scenario";
 import { CompositeNewsSink, ConsoleNewsSink } from "./news/sink";
 import {
@@ -681,11 +681,17 @@ async function main() {
   void runMomentumTrader(clients[9], ref, activity, "bot10");
   void runJanitor(clients.slice(5));
 
-  // 선물: 종목별 전담 마켓메이커(bot34~38)와 가끔 시장가로 거래하는 흐름(bot7).
-  const futuresMarket = new FuturesMarketView(clients[0]);
-  futuresMarket.start();
-  FUTURES.forEach((def, index) => void runFuturesMarketMaker(liquidityClients[SYMBOLS.length + index], def, futuresMarket));
-  void runFuturesTrader(clients[6], futuresMarket, "bot7");
+  // 선물: 종목별 전담 마켓메이커(bot34~38), 가끔 시장가로 거래하는 흐름(bot7), 기초자산 모멘텀(bot10).
+  // BOTS_FUTURES_DISABLED=1이면 선물 봇을 모두 끈다(부하 비교·장애 대응용 스위치).
+  if (process.env.BOTS_FUTURES_DISABLED !== "1") {
+    const futuresMarket = new FuturesMarketView(clients[0]);
+    futuresMarket.start();
+    FUTURES.forEach((def, index) => void runFuturesMarketMaker(liquidityClients[SYMBOLS.length + index], def, futuresMarket));
+    void runFuturesTrader(clients[6], futuresMarket, "bot7");
+    void runFuturesMomentumTrader(clients[9], futuresMarket, "bot10");
+  } else {
+    console.log("[bots] futures bots disabled (BOTS_FUTURES_DISABLED=1)");
+  }
 
   console.log(
     `[bots] dedicated market makers x${SYMBOLS.length}, event-aware flow x${SYMBOLS.length} across ${FLOW_BOT_COUNT} accounts, retail x2, whale x1, noise x1, depth shaper x1, momentum x1 running`,

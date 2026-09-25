@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { futureDef } from "@mock-kabu/shared";
 import type { LiveOrder } from "../client";
-import { diffFuturesLadder, futuresQuoteCenter, planFuturesLadder, FUTURES_LADDER_LEVELS } from "../futures-bots";
+import {
+  diffFuturesLadder,
+  futuresMomentumSide,
+  futuresQuoteCenter,
+  futuresRiskMode,
+  FuturesMarketView,
+  planFuturesLadder,
+  reduceOrder,
+  FUTURES_LADDER_LEVELS,
+} from "../futures-bots";
 
 const KABUF = futureDef("KABUF")!;
 
@@ -37,4 +46,30 @@ test("reconciling keeps matching orders, cancels strays, and only fills gaps", (
   assert.deepEqual(diff.cancel.map((o) => o.id), ["dup", "stray"]);
   assert.equal(diff.place.length, desired.length - 1);
   assert.ok(!diff.place.some((q) => q.side === "BUY" && q.price === 87_995));
+});
+
+test("trading bots only reduce when a margin call is open or equity is under 2x maintenance", () => {
+  assert.equal(futuresRiskMode({ positions: [], equity: 1_000, maintenanceMargin: 400, marginCall: null }), "normal");
+  assert.equal(futuresRiskMode({ positions: [], equity: 700, maintenanceMargin: 400, marginCall: null }), "reduce");
+  assert.equal(futuresRiskMode({ positions: [], equity: 10_000, maintenanceMargin: 400, marginCall: { deadline: "x" } }), "reduce");
+  assert.equal(futuresRiskMode({ positions: [] }), "normal");
+});
+
+test("reduceOrder shrinks an open position toward zero, never past it", () => {
+  const order = reduceOrder([{ symbol: "USDF", qty: 0 }, { symbol: "OILF", qty: -2 }], () => 0.99);
+  assert.deepEqual(order, { symbol: "OILF", side: "BUY", qty: 2 });
+  assert.equal(reduceOrder([{ symbol: "USDF", qty: 0 }]), null);
+});
+
+test("momentum reads the underlying's move over the window against a per-asset threshold", () => {
+  const view = new FuturesMarketView({} as never);
+  view.record("OILF", 0, 10_000);
+  view.record("OILF", 60_000, 10_020);
+  view.record("OILF", 100_000, 10_050);
+  // 90초 창: t=0(10,000) 대비 +50bps
+  assert.equal(Math.round(view.changeBps("OILF", 90_000, 100_000)!), 50);
+  assert.equal(futuresMomentumSide(50, 40), "BUY");
+  assert.equal(futuresMomentumSide(-45, 40), "SELL");
+  assert.equal(futuresMomentumSide(30, 40), null);
+  assert.equal(view.changeBps("USDF", 90_000, 100_000), null);
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { futureDef } from "@mock-kabu/shared";
+import { FUTURES_EMERGENCY_LOSS_BPS, futureDef } from "@mock-kabu/shared";
 import { useCallback, useEffect, useState } from "react";
 import { api, getUser } from "@/lib/api";
 import { fmtFuture, krw, type FuturesAccount } from "@/lib/futures";
@@ -21,6 +21,41 @@ function remaining(deadline: string, now: number): string {
   const m = Math.floor(ms / 60_000);
   const sec = Math.floor((ms % 60_000) / 1000);
   return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/**
+ * 긴급 반대매매가 걸리는 선물 가격(정수 단위) 추정: 평가손실 = 포지션 위탁증거금 × 90%가 되는 가격.
+ * 계좌 전체의 추가증거금(30분 유예)은 현금에 따라 더 일찍 걸릴 수 있다.
+ */
+function emergencyPrice(qty: number, avgPrice: number, marginHeld: number, unitValue: number): number {
+  const lossUnits = (marginHeld * FUTURES_EMERGENCY_LOSS_BPS) / 10_000 / (Math.abs(qty) * unitValue);
+  return qty > 0 ? avgPrice - lossUnits : avgPrice + lossUnits;
+}
+
+/** 평가예탁금 ÷ 유지증거금 게이지. 100% 아래는 추가증거금, 위탁증거금(= 유지 × 1.5) 위는 여유. */
+function MarginGauge({ equity, maintenance, initial }: { equity: number; maintenance: number; initial: number }) {
+  const ratio = maintenance > 0 ? equity / maintenance : 0;
+  const initialRatio = maintenance > 0 ? initial / maintenance : 1.5;
+  const max = Math.max(3, initialRatio * 1.6);
+  const pct = (value: number) => `${Math.max(0, Math.min(100, (value / max) * 100))}%`;
+  const color = ratio < 1 ? "bg-down" : ratio < initialRatio ? "bg-warn" : "bg-ok";
+  return (
+    <div className="space-y-1">
+      <div className="relative h-2 overflow-hidden rounded-full bg-surface-2">
+        <div className={`h-full rounded-full ${color}`} style={{ width: pct(ratio) }} />
+        <span className="absolute inset-y-0 w-px bg-down" style={{ left: pct(1) }} aria-hidden />
+        <span className="absolute inset-y-0 w-px bg-ink-faint" style={{ left: pct(initialRatio) }} aria-hidden />
+      </div>
+      <div className="relative h-3 text-[10px] text-ink-faint">
+        <span className="absolute -translate-x-1/2" style={{ left: pct(1) }}>
+          유지
+        </span>
+        <span className="absolute -translate-x-1/2" style={{ left: pct(initialRatio) }}>
+          위탁
+        </span>
+      </div>
+    </div>
+  );
 }
 
 function tone(n: number): string {
@@ -47,8 +82,12 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
 
   const load = useCallback(() => {
     if (!getUser()) return;
-    api<FuturesAccount>("/account/futures").then(setAccount).catch(() => {});
-    api<LiveOrder[]>(`/orders?symbol=${symbol}&status=live&limit=50`).then(setOrders).catch(() => {});
+    api<FuturesAccount>("/account/futures")
+      .then(setAccount)
+      .catch(() => {});
+    api<LiveOrder[]>(`/orders?symbol=${symbol}&status=live&limit=50`)
+      .then(setOrders)
+      .catch(() => {});
   }, [symbol]);
 
   useEffect(() => {
@@ -72,7 +111,9 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
       <div className="panel-head">
         <span className="panel-title">내 선물</span>
         {ratio != null && (
-          <span className={`num text-[11px] font-medium ${ratio < 100 ? "text-down" : ratio < 150 ? "text-warn" : "text-ink-muted"}`}>
+          <span
+            className={`num text-[11px] font-medium ${ratio < 100 ? "text-down" : ratio < 150 ? "text-warn" : "text-ink-muted"}`}
+          >
             유지증거금 대비 {ratio.toFixed(0)}%
           </span>
         )}
@@ -109,28 +150,37 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
             </dd>
             <dt className="text-ink-muted">증거금</dt>
             <dd className="text-right">{krw(position.marginHeld)}</dd>
+            <dt className="text-ink-muted">긴급 반대매매가</dt>
+            <dd className="text-right text-ink-muted">
+              {fmtFuture(symbol, Math.round(emergencyPrice(position.qty, position.avgPrice, position.marginHeld, def.unitValue)))}
+            </dd>
           </dl>
         ) : (
           <p className="text-ink-faint">{def.name} 포지션이 없습니다.</p>
         )}
 
         {account && (account.positions.length > 0 || account.debt > 0) && (
-          <dl className="num grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-hairline-soft pt-3">
-            <dt className="text-ink-muted">선물 평가손익 합계</dt>
-            <dd className={`text-right ${tone(account.unrealized)}`}>{krw(account.unrealized)}</dd>
-            <dt className="text-ink-muted">묶인 증거금</dt>
-            <dd className="text-right">{krw(account.marginHeld)}</dd>
-            <dt className="text-ink-muted">평가예탁금</dt>
-            <dd className="text-right">{krw(account.equity)}</dd>
-            <dt className="text-ink-muted">유지증거금</dt>
-            <dd className="text-right">{krw(account.maintenanceMargin)}</dd>
-            {account.debt > 0 && (
-              <>
-                <dt className="text-down">미수금</dt>
-                <dd className="text-right text-down">{krw(account.debt)}</dd>
-              </>
+          <div className="space-y-2 border-t border-hairline-soft pt-3">
+            {account.maintenanceMargin > 0 && (
+              <MarginGauge equity={account.equity} maintenance={account.maintenanceMargin} initial={account.initialMargin} />
             )}
-          </dl>
+            <dl className="num grid grid-cols-2 gap-x-4 gap-y-1.5">
+              <dt className="text-ink-muted">선물 평가손익 합계</dt>
+              <dd className={`text-right ${tone(account.unrealized)}`}>{krw(account.unrealized)}</dd>
+              <dt className="text-ink-muted">묶인 증거금</dt>
+              <dd className="text-right">{krw(account.marginHeld)}</dd>
+              <dt className="text-ink-muted">평가예탁금</dt>
+              <dd className="text-right">{krw(account.equity)}</dd>
+              <dt className="text-ink-muted">유지증거금</dt>
+              <dd className="text-right">{krw(account.maintenanceMargin)}</dd>
+              {account.debt > 0 && (
+                <>
+                  <dt className="text-down">미수금</dt>
+                  <dd className="text-right text-down">{krw(account.debt)}</dd>
+                </>
+              )}
+            </dl>
+          </div>
         )}
 
         {account && account.liquidations.length > 0 && (
@@ -173,7 +223,11 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    onClick={() => api(`/orders/${order.id}`, { method: "DELETE" }).then(load).catch(() => {})}
+                    onClick={() =>
+                      api(`/orders/${order.id}`, { method: "DELETE" })
+                        .then(load)
+                        .catch(() => {})
+                    }
                   >
                     취소
                   </button>

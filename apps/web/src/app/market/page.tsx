@@ -43,6 +43,12 @@ const SORTS: { id: SortKey; label: string }[] = [
   { id: "name", label: "이름순" },
 ];
 const SORT_STORAGE_KEY = "market:symbol-sort";
+const KIND_STORAGE_KEY = "market:kind";
+type MarketKind = "stock" | "futures";
+const KINDS: { id: MarketKind; label: string }[] = [
+  { id: "stock", label: "현물" },
+  { id: "futures", label: "선물·원자재" },
+];
 const indexFormatter = new Intl.NumberFormat("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function toneClass(delta: number): string {
@@ -63,6 +69,7 @@ export default function MarketPage() {
   const [sparks, setSparks] = useState<Record<string, number[]>>({});
   const [sort, setSort] = useState<SortKey>("change");
   const [industry, setIndustry] = useState<string>(ALL_INDUSTRIES);
+  const [kind, setKind] = useState<MarketKind>("stock");
 
   useEffect(() => {
     try {
@@ -81,7 +88,27 @@ export default function MarketPage() {
       }
     }
     if (initial && industryById(initial)) setIndustry(initial);
+    // ?kind=futures(선물 알림·링크) 우선, 없으면 마지막으로 본 탭.
+    let savedKind = readQueryParam("kind");
+    if (!savedKind) {
+      try {
+        savedKind = window.localStorage.getItem(KIND_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+    }
+    if (savedKind === "futures" || savedKind === "stock") setKind(savedKind);
   }, []);
+
+  function chooseKind(next: MarketKind) {
+    setKind(next);
+    writeQueryParams({ kind: next === "stock" ? null : next });
+    try {
+      window.localStorage.setItem(KIND_STORAGE_KEY, next);
+    } catch {
+      // ignore
+    }
+  }
 
   function chooseIndustry(next: string) {
     setIndustry(next);
@@ -185,14 +212,15 @@ export default function MarketPage() {
       return { ...r, lastPrice, change, turnover: Number.isFinite(turnover) ? turnover : 0 };
     });
     return withLive.sort((a, b) =>
-      sort === "name" ? a.name.localeCompare(b.name, "ko") : sort === "change" ? b.change - a.change : b.turnover - a.turnover,
+      sort === "name"
+        ? a.name.localeCompare(b.name, "ko")
+        : sort === "change"
+          ? b.change - a.change
+          : b.turnover - a.turnover,
     );
   }, [rows, live, sort]);
 
-  const industryItems = useMemo(
-    () => industryChipItems(new Map(list.map((row) => [row.symbol, row.change]))),
-    [list],
-  );
+  const industryItems = useMemo(() => industryChipItems(new Map(list.map((row) => [row.symbol, row.change]))), [list]);
 
   const selectedIndustry = industryById(industry);
   const shown = selectedIndustry ? list.filter((row) => selectedIndustry.symbols.includes(row.symbol)) : list;
@@ -211,7 +239,9 @@ export default function MarketPage() {
           <p className="num mt-1 text-2xl font-semibold tracking-tight">
             {indexNow != null ? indexFormatter.format(indexNow) : "—"}
           </p>
-          <p className={`num mt-0.5 text-[13px] font-medium ${indexDelta != null ? toneClass(indexDelta) : "text-ink-faint"}`}>
+          <p
+            className={`num mt-0.5 text-[13px] font-medium ${indexDelta != null ? toneClass(indexDelta) : "text-ink-faint"}`}
+          >
             {indexDelta != null && indexRate != null
               ? `${indexDelta > 0 ? "+" : ""}${indexDelta.toFixed(2)} (${indexRate > 0 ? "+" : ""}${indexRate.toFixed(2)}%) 오늘`
               : "—"}
@@ -223,91 +253,120 @@ export default function MarketPage() {
         </span>
       </Link>
 
-      {/* ── 산업군 태그 ───────────────────────────────────────── */}
-      <ChipTabs label="산업군" items={industryItems} value={industry} onChange={chooseIndustry} />
+      {/* ── 현물 | 선물 전환 ──────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-2/60 p-1" role="tablist" aria-label="시장 구분">
+        {KINDS.map((k) => (
+          <button
+            key={k.id}
+            type="button"
+            role="tab"
+            aria-selected={kind === k.id}
+            onClick={() => chooseKind(k.id)}
+            className={`min-h-10 rounded-lg text-sm font-semibold transition-colors ${
+              kind === k.id ? "bg-surface-3 text-ink shadow-sm" : "text-ink-muted"
+            }`}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
 
-      {/* ── 종목 목록 ─────────────────────────────────────────── */}
-      <section className="glass overflow-hidden">
-        <div className="panel-head">
-          <span className="panel-title">
-            {selectedIndustry ? selectedIndustry.label : "전체 종목"}
-            <span className="num ml-1.5 font-medium text-ink-faint">{shown.length}</span>
-          </span>
-          <div className="flex gap-1" role="group" aria-label="정렬">
-            {SORTS.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => chooseSort(s.id)}
-                aria-pressed={sort === s.id}
-                className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                  sort === s.id ? "bg-sky/12 text-sky ring-1 ring-inset ring-sky/30" : "text-ink-muted"
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <ul className="divide-y divide-hairline-soft">
-          {shown.map((s) => {
-            const spark = sparks[s.symbol];
-            const series = spark && spark.length > 0 ? [...spark.slice(0, -1), s.lastPrice] : [];
-            return (
-              <li key={s.symbol}>
-                <Link
-                  href={`/symbol/${s.symbol}`}
-                  className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-3/30 active:bg-surface-3/45"
-                >
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-hairline-soft bg-surface-2/70 text-[12px] font-semibold text-ink-muted">
-                    {s.name.slice(0, 2)}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-semibold">{s.name}</span>
-                    <span className="num block truncate text-xs text-ink-faint">
-                      {s.symbol}
-                      {!selectedIndustry && industryOf(s.symbol) && (
-                        <span className="hidden sm:inline"> · {industryOf(s.symbol)!.label}</span>
-                      )}
-                      {/* 폰은 폭이 좁아 거래대금을 빼고 종목 코드만 둔다. */}
-                      <span className="hidden sm:inline"> · {fmt.format(Math.round(s.turnover / 10_000))}만 원</span>
-                    </span>
-                  </span>
-                  <span className="hidden min-[380px]:block">
-                    <Sparkline values={series} tone={sparkTone(series)} width={64} height={28} />
-                  </span>
-                  <span className="w-[5.5rem] shrink-0 text-right">
-                    <span className="num block font-semibold">{fmt.format(s.lastPrice)}원</span>
-                    <span className={`num block text-xs font-medium ${toneClass(s.change)}`}>
-                      {s.change > 0 ? "+" : ""}
-                      {s.change.toFixed(2)}%
-                    </span>
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-          {list.length === 0 && <li className="py-10 text-center text-sm text-ink-faint">종목을 불러오는 중…</li>}
-        </ul>
-      </section>
+      {kind === "stock" && (
+        <>
+          {/* ── 산업군 태그 ───────────────────────────────────────── */}
+          <ChipTabs label="산업군" items={industryItems} value={industry} onChange={chooseIndustry} />
 
-      {/* ── 선물 (1일물) ─────────────────────────────────────────── */}
-      <section className="glass overflow-hidden">
-        <div className="panel-head">
-          <span className="panel-title">선물</span>
-          <span className="text-[11px] text-ink-faint">1일물 · 매일 04:10 현금 정산</span>
-        </div>
-        <FuturesList />
-      </section>
+          {/* ── 종목 목록 ─────────────────────────────────────────── */}
+          <section className="glass overflow-hidden">
+            <div className="panel-head">
+              <span className="panel-title">
+                {selectedIndustry ? selectedIndustry.label : "전체 종목"}
+                <span className="num ml-1.5 font-medium text-ink-faint">{shown.length}</span>
+              </span>
+              <div className="flex gap-1" role="group" aria-label="정렬">
+                {SORTS.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => chooseSort(s.id)}
+                    aria-pressed={sort === s.id}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      sort === s.id ? "bg-sky/12 text-sky ring-1 ring-inset ring-sky/30" : "text-ink-muted"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <ul className="divide-y divide-hairline-soft">
+              {shown.map((s) => {
+                const spark = sparks[s.symbol];
+                const series = spark && spark.length > 0 ? [...spark.slice(0, -1), s.lastPrice] : [];
+                return (
+                  <li key={s.symbol}>
+                    <Link
+                      href={`/symbol/${s.symbol}`}
+                      className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-3/30 active:bg-surface-3/45"
+                    >
+                      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-hairline-soft bg-surface-2/70 text-[12px] font-semibold text-ink-muted">
+                        {s.name.slice(0, 2)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-semibold">{s.name}</span>
+                        <span className="num block truncate text-xs text-ink-faint">
+                          {s.symbol}
+                          {!selectedIndustry && industryOf(s.symbol) && (
+                            <span className="hidden sm:inline"> · {industryOf(s.symbol)!.label}</span>
+                          )}
+                          {/* 폰은 폭이 좁아 거래대금을 빼고 종목 코드만 둔다. */}
+                          <span className="hidden sm:inline">
+                            {" "}
+                            · {fmt.format(Math.round(s.turnover / 10_000))}만 원
+                          </span>
+                        </span>
+                      </span>
+                      <span className="hidden min-[380px]:block">
+                        <Sparkline values={series} tone={sparkTone(series)} width={64} height={28} />
+                      </span>
+                      <span className="w-[5.5rem] shrink-0 text-right">
+                        <span className="num block font-semibold">{fmt.format(s.lastPrice)}원</span>
+                        <span className={`num block text-xs font-medium ${toneClass(s.change)}`}>
+                          {s.change > 0 ? "+" : ""}
+                          {s.change.toFixed(2)}%
+                        </span>
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+              {list.length === 0 && <li className="py-10 text-center text-sm text-ink-faint">종목을 불러오는 중…</li>}
+            </ul>
+          </section>
+        </>
+      )}
 
-      {/* ── 원자재·환율 (선물 기초자산) ───────────────────────────── */}
-      <section className="glass overflow-hidden">
-        <div className="panel-head">
-          <span className="panel-title">원자재·환율</span>
-          <span className="text-[11px] text-ink-faint">선물 기초자산 · 가상 지수</span>
-        </div>
-        <ReferenceList />
-      </section>
+      {kind === "futures" && (
+        <>
+          {/* ── 선물 (1일물) ─────────────────────────────────────────── */}
+          <section className="glass overflow-hidden">
+            <div className="panel-head">
+              <span className="panel-title">선물</span>
+              <span className="text-[11px] text-ink-faint">1일물 · 매일 04:10 현금 정산</span>
+            </div>
+            <FuturesList />
+          </section>
+
+          {/* ── 원자재·환율 (선물 기초자산) ───────────────────────────── */}
+          <section className="glass overflow-hidden">
+            <div className="panel-head">
+              <span className="panel-title">원자재·환율</span>
+              <span className="text-[11px] text-ink-faint">선물 기초자산 · 가상 지수</span>
+            </div>
+            <ReferenceList />
+          </section>
+        </>
+      )}
     </div>
   );
 }
