@@ -104,7 +104,7 @@ async function main() {
   for (const f of FUTURES) {
     await prisma.marketSymbol.upsert({
       where: { symbol: f.symbol },
-      // 이름은 바뀔 수 있다(2026-09-26 KABU 지수 선물 → 주가 지수 선물).
+      // 이름은 바뀔 수 있다(2026-09-26 KABU 지수 선물 → 주가지수 선물).
       update: { kind: "FUTURE", name: f.name },
       create: {
         symbol: f.symbol,

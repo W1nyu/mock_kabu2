@@ -156,7 +156,7 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
         )}
       </div>
 
-      {/* 주가 지수 선물은 시장 전반 기사, 나머지는 그 기초자산을 움직인 기사 */}
+      {/* 주가지수 선물은 시장 전반 기사, 나머지는 그 기초자산을 움직인 기사 */}
       <AssetNews
         reference={def.underlying === "KABU_INDEX" ? "market" : def.underlying}
         title={def.underlying === "KABU_INDEX" ? "시장 뉴스" : "관련 뉴스"}

@@ -11,7 +11,7 @@ import { NewsList } from "./NewsFeed";
 /**
  * 선물·원자재·환율 화면의 관련 뉴스.
  *  - reference 코드(USDKRW·OIL·GAS·COPPER·GOLD·CORN)면 그 기초자산을 움직인 기사
- *  - "market"이면 시장 전반 기사(주가 지수 선물)
+ *  - "market"이면 시장 전반 기사(주가지수 선물)
  * 실시간은 전체 뉴스 피드를 받아 해당하는 기사만 붙이고, 15초마다(보일 때) 다시 읽어 빈틈을 메운다.
  */
 export default function AssetNews({ reference, title = "관련 뉴스" }: { reference: string | "market"; title?: string }) {

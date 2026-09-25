@@ -35,7 +35,7 @@ export interface FutureDef {
 export const FUTURES: readonly FutureDef[] = [
   {
     symbol: "KABUF",
-    name: "주가 지수 선물",
+    name: "주가지수 선물",
     underlying: "KABU_INDEX",
     priceScale: 100,
     decimals: 2,

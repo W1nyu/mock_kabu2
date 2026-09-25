@@ -353,28 +353,26 @@ export class AccountService {
           AND l.reason IN ('SIGNUP_BONUS', 'SEED', 'TRANSFER_IN', 'TRANSFER_OUT')
           AND l.created_at > COALESCE(b.ts, ${since})
       ) f ON ${period !== "all"}
-      LEFT JOIN (
-        SELECT h.account_id, SUM(h.qty::bigint * s.last_price) AS stock_value
+      -- 아래 합계는 모두 순위 대상 계정별로(LATERAL + 계정 인덱스) 구한다. 예전에는 봇까지 포함한 원장(180만+ 행)과
+      -- 실현손익(90만+ 행)을 통째로 합산한 뒤 조인해, 봇 매매가 쌓일수록 랭킹이 수 초씩 느려졌다.
+      LEFT JOIN LATERAL (
+        SELECT SUM(h.qty::bigint * s.last_price) AS stock_value
         FROM account.holdings h
         JOIN market.symbols s ON s.symbol = h.symbol
-        GROUP BY h.account_id
-      ) v ON v.account_id = a.id
-      LEFT JOIN (
-        SELECT account_id, SUM(delta) AS deposits
+        WHERE h.account_id = a.id
+      ) v ON true
+      LEFT JOIN LATERAL (
+        SELECT SUM(delta) AS deposits
         FROM account.ledger_entries
-        WHERE reason IN ('SIGNUP_BONUS', 'SEED', 'TRANSFER_IN', 'TRANSFER_OUT')
-        GROUP BY account_id
-      ) d ON d.account_id = a.id
+        WHERE account_id = a.id AND reason IN ('SIGNUP_BONUS', 'SEED', 'TRANSFER_IN', 'TRANSFER_OUT')
+      ) d ON true
       -- 실현손익 = 주식 매도 체결 + 선물 청산(반대매매·일일 정산 포함)
-      LEFT JOIN (
-        SELECT account_id, SUM(realized) AS realized
-        FROM (
-          SELECT account_id, realized FROM account.realized_pnl WHERE traded_at >= ${since}
-          UNION ALL
-          SELECT account_id, realized FROM account.futures_realized WHERE created_at >= ${since}
-        ) x
-        GROUP BY account_id
-      ) r ON r.account_id = a.id
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE((SELECT SUM(realized) FROM account.realized_pnl WHERE account_id = a.id AND traded_at >= ${since}), 0)
+          + COALESCE((SELECT SUM(realized) FROM account.futures_realized WHERE account_id = a.id AND created_at >= ${since}), 0)
+          AS realized
+      ) r ON true
       -- 선물 평가손익 − 미수금 (총 자산에 포함)
       LEFT JOIN (${futuresValueSql()}) fv ON fv.account_id = a.id
     `;
