@@ -6,6 +6,7 @@
 - **산업군 뉴스**: 봇 뉴스 범위 SECTOR(15~30분, `sectorExposure`로 업종별 방향·크기). `news_items.industry`(마이그레이션 `20260925190000_news_industry`). 종목 뉴스 +47·후속 12·시장 +16.
 - **최적화**: 웹 폴링 `everyVisible`(숨은 탭 중지), 점검 조회 탭당 1개, `/market/sparks` 묶음(1분 캐시), 뉴스 2초·체결/1분봉 1초 캐시, 비로그인은 `/account`·`/orders` 요청 안 함, 게이트웨이 빈 방 건너뛰기·호가 150ms 합치기. GCP 오버레이 한도 상향(api 1.5CPU/768M/연결 12, web 1.5CPU/512M, postgres 2CPU/1.5G/shared_buffers 512MB).
 - **운영 적용**: 사용자가 절차서대로 직접 실행 — pgBackRest diff → postgres 재생성 → migrate → seed(18) → 지수 편입(18종목) → 서비스 교체. 정합성 검사 전부 통과, 18종목 양측 10단, `/market/sparks` 18종목. 롤백 이미지 `mock-kabu2-app:pre-newsperf-20260925`, 원본 `/tmp/src-before-pre-newsperf-20260925.tgz`.
+- **머신 변경 (같은 날 18:50 KST)**: 콘솔에서 e2-standard-4 → **e2-highcpu-8 (vCPU 8, 8GB)**. VM 중지→유형 변경→시작, 컨테이너 자동 기동·`/health/ready` 200. 재기동 2분 뒤 load 1.1, api 23~37%·postgres 12~21%. GCP 오버레이의 vCPU 8 기준 한도(엔진·정산·봇 1.5, postgres 3, 커밋 eb7f300)는 아직 서버 미적용 — 설정 교체 후 해당 서비스 `up -d --no-deps`로 재생성 필요.
 - **관찰 필요**: 적용 직후 load average 7.15/6.27/5.52(vCPU 4, 10종목 때 약 2.3). 컨테이너 CPU api 45~106%·postgres 52~99%·엔진 31~57%·봇 22~36%. 대부분 봇 주문이 종목 수(10→18)에 비례해 늘어난 몫이며 웹 최적화로는 줄지 않는다. 계속 높으면 봇 주문 빈도 조정이나 머신 상향을 검토.
 
 ## 2026-09-25 — 신규 5종목(15종목)·산업군 필터·1분봉 30일 보존 (GCP 운영 적용)
