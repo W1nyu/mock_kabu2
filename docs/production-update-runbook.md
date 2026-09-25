@@ -153,6 +153,8 @@ $C exec -T -u postgres postgres pgbackrest --stanza=mock-kabu --type=diff backup
 변경 종류에 맞는 것만 실행한다.
 
 ```bash
+$C up -d --no-deps postgres              # deploy/gcp/compose.gcp.yml의 postgres 설정(한도·command)이 바뀐 경우
+$C ps postgres                           # (healthy)가 될 때까지 몇 번 확인 — DB 재시작 10~20초
 $C run --rm migrate                      # Prisma 마이그레이션이 추가된 경우
 $C up -d --no-deps api web               # 거의 항상
 $C run --rm seed 2>&1 | tail -4          # 종목 추가·봇 계정 변경
