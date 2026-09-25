@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Patch, Post, UseGuards } from "@nestjs/common";
 import { AuthService, type JwtUser } from "./auth.service";
-import { LoginRateLimitGuard, SignupRateLimitGuard, TransferRateLimitGuard } from "./login-rate-limit.guard";
+import { LoginRateLimitGuard, SignupRateLimitGuard, PasswordRecheckRateLimitGuard } from "./login-rate-limit.guard";
 import { CurrentUser, JwtAuthGuard } from "./jwt-auth.guard";
 
 @Controller("auth")
@@ -34,7 +34,7 @@ export class AuthController {
   }
 
   @Post("password")
-  @UseGuards(JwtAuthGuard, TransferRateLimitGuard)
+  @UseGuards(JwtAuthGuard, PasswordRecheckRateLimitGuard)
   changePassword(@CurrentUser() user: JwtUser, @Body() body: { currentPassword: string; newPassword: string }) {
     return this.auth.changePassword(user.userId, body.currentPassword, body.newPassword);
   }

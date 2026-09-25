@@ -1,25 +1,13 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Inject,
-  Injectable,
-  NotFoundException,
-  Optional,
-  UnprocessableEntityException,
-  UnauthorizedException,
-} from "@nestjs/common";
-import type { BalanceMutator } from "@mock-kabu/concurrency";
+import { Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { Prisma, type PrismaClient } from "@mock-kabu/db";
 import { ADMIN_NICKNAME, SYMBOLS } from "@mock-kabu/shared";
-import * as bcrypt from "bcryptjs";
 import { koreaDayStart } from "../common/market-time";
 import { MemoCache } from "../core/memo-cache";
-import { futuresEncumbrance, futuresMarginHeld } from "../order/futures-margin";
-import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
+import { futuresEncumbrance } from "../order/futures-margin";
+import { PRISMA } from "../core/tokens";
 
 /** 랭킹은 모든 사용자 계정을 LATERAL 조인으로 훑는다 — 보는 사람 수만큼 반복할 이유가 없다. */
 const LEADERBOARD_TTL_MS = 10_000;
-import { RealtimeGateway } from "../gateway/realtime.gateway";
 
 export type LeaderboardPeriod = "all" | "today" | "week";
 
@@ -27,8 +15,6 @@ export type LeaderboardPeriod = "all" | "today" | "week";
 export class AccountService {
   constructor(
     @Inject(PRISMA) private prisma: PrismaClient,
-    @Inject(BALANCE_MUTATOR) private mutator: BalanceMutator,
-    private realtime: RealtimeGateway,
     @Optional() private cache: MemoCache = new MemoCache(),
   ) {}
 
@@ -372,161 +358,5 @@ export class AccountService {
       take: Math.min(limit, 200),
     });
     return rows.map((row) => ({ ...row, deltaExact: row.delta.toString(), balanceAfterExact: row.balanceAfter.toString() }));
-  }
-
-  /** Only the seeded admin may browse recipients; searching covers the entire investor table. */
-  async adminRecipients(userId: string, query = "") {
-    const caller = await this.prisma.user.findUnique({ where: { id: userId }, select: { isAdmin: true } });
-    if (!caller?.isAdmin) throw new ForbiddenException("관리자만 조회할 수 있습니다");
-    const q = typeof query === "string" ? query.trim().slice(0, 50) : "";
-    const eligible = { isBot: false, isAdmin: false, NOT: { nickname: { startsWith: "smoke-" } } } as const;
-    const [total, rows] = await Promise.all([
-      this.prisma.user.count({ where: eligible }),
-      this.prisma.user.findMany({
-        where: { ...eligible, nickname: { contains: q, mode: "insensitive" } },
-        select: { id: true, nickname: true },
-        orderBy: { nickname: "asc" },
-        take: 50,
-      }),
-    ]);
-    return { total, rows };
-  }
-
-  /** Atomic equal-amount distribution to every non-bot investor at commit time. */
-  async transferAll(fromAccountId: string, userId: string, amountEach: number, adminPassword: string, requestId: string) {
-    if (!Number.isSafeInteger(amountEach) || amountEach <= 0) {
-      throw new BadRequestException("1인당 이체 금액은 안전한 양의 정수여야 합니다");
-    }
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId ?? "")) {
-      throw new BadRequestException("유효한 이체 요청 ID가 필요합니다");
-    }
-    if (this.mutator.strategy !== "pessimistic") {
-      throw new UnprocessableEntityException("일괄 이체에는 비관적 계좌 잠금이 필요합니다");
-    }
-    const caller = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!caller?.isAdmin) throw new ForbiddenException("관리자만 이체할 수 있습니다");
-    if (!(await bcrypt.compare(adminPassword ?? "", caller.passwordHash))) {
-      throw new ForbiddenException("관리자 비밀번호가 올바르지 않습니다");
-    }
-
-    const each = BigInt(amountEach);
-    const result = await this.prisma.$transaction(async (tx) => {
-      // A committed request ID can be replayed safely after a network timeout.
-      const inserted = await tx.$executeRaw`
-        INSERT INTO account.admin_distributions (request_id, account_id, amount_each)
-        VALUES (${requestId}::uuid, ${fromAccountId}, ${each})
-        ON CONFLICT (request_id) DO NOTHING
-      `;
-      if (inserted === 0) {
-        const previous = await tx.adminDistribution.findUnique({ where: { requestId } });
-        if (!previous || previous.accountId !== fromAccountId || previous.amountEach !== each) {
-          throw new BadRequestException("이미 다른 이체에 사용한 요청 ID입니다");
-        }
-        return { ok: true, requestId, recipients: previous.recipientCount, total: previous.total.toString(), replay: true, recipientIds: [] as string[] };
-      }
-
-      await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '3000ms'");
-      const rows = await tx.$queryRaw<{ id: string; balance: bigint; hold_amount: bigint }[]>`
-        SELECT a.id, a.balance, a.hold_amount
-        FROM account.accounts a JOIN auth.users u ON u.id = a.user_id
-        WHERE a.id = ${fromAccountId} OR (u.is_bot = false AND u.is_admin = false AND u.nickname NOT LIKE 'smoke-%')
-        ORDER BY a.id FOR UPDATE OF a
-      `;
-      const sender = rows.find((row) => row.id === fromAccountId);
-      if (!sender) throw new NotFoundException("관리자 계좌가 없습니다");
-      const recipientIds = rows.filter((row) => row.id !== fromAccountId).map((row) => row.id);
-      if (recipientIds.length === 0) throw new UnprocessableEntityException("이체할 투자자가 없습니다");
-      const total = each * BigInt(recipientIds.length);
-      if (sender.balance - sender.hold_amount < total) throw new UnprocessableEntityException("잔액이 부족합니다");
-
-      await tx.account.update({ where: { id: fromAccountId }, data: { balance: { decrement: total }, version: { increment: 1 } } });
-      await tx.ledgerEntry.create({ data: {
-        accountId: fromAccountId, delta: -total, balanceAfter: sender.balance - total,
-        reason: "TRANSFER_OUT", refId: requestId,
-      } });
-      await tx.$executeRaw`
-        UPDATE account.accounts SET balance = balance + ${each}, version = version + 1
-        WHERE id IN (${Prisma.join(recipientIds)})
-      `;
-      await tx.$executeRaw`
-        INSERT INTO account.ledger_entries (account_id, delta, balance_after, reason, ref_id)
-        SELECT id, ${each}, balance, 'TRANSFER_IN', ${requestId}
-        FROM account.accounts WHERE id IN (${Prisma.join(recipientIds)})
-      `;
-      await tx.adminDistribution.update({ where: { requestId }, data: { recipientCount: recipientIds.length, total } });
-      return { ok: true, requestId, recipients: recipientIds.length, total: total.toString(), replay: false, recipientIds };
-    }, { timeout: 30_000 });
-
-    if (!result.replay) {
-      this.realtime.notifyAccount(fromAccountId, { type: "balance" });
-      for (const accountId of result.recipientIds) this.realtime.notifyAccount(accountId, { type: "balance" });
-    }
-    const { recipientIds: _recipientIds, ...publicResult } = result;
-    return publicResult;
-  }
-
-  /** 계좌 이체 — 두 계좌를 ID 오름차순으로 잠근다 (스펙 S1 해결 지점) */
-  async transfer(fromAccountId: string, toNickname: string, amount: number, userId?: string, adminPassword?: string) {
-    if (!Number.isSafeInteger(amount) || amount <= 0) {
-      throw new BadRequestException("이체 금액은 양의 정수여야 합니다");
-    }
-    if (userId) {
-      const caller = await this.prisma.user.findUnique({ where: { id: userId } });
-      if (!caller) throw new UnauthorizedException("사용자를 찾을 수 없습니다");
-      if (caller.isAdmin && !(await bcrypt.compare(adminPassword ?? "", caller.passwordHash))) {
-        throw new ForbiddenException("관리자 비밀번호가 올바르지 않습니다");
-      }
-    }
-    const nickname = (toNickname ?? "").trim();
-    if (!nickname) throw new BadRequestException("받는 사람 닉네임을 입력하세요");
-    const toUser = await this.prisma.user.findUnique({ where: { nickname } });
-    if (!toUser) throw new NotFoundException("받는 사람을 찾을 수 없습니다");
-    const toAccount = await this.prisma.account.findUnique({ where: { userId: toUser.id } });
-    if (!toAccount) throw new NotFoundException("받는 사람의 계좌가 없습니다");
-    if (toAccount.id === fromAccountId) {
-      throw new BadRequestException("자기 자신에게는 이체할 수 없습니다");
-    }
-
-    const delta = BigInt(amount);
-
-    await this.mutator.withAccountLock([fromAccountId, toAccount.id], async (ctx) => {
-      const from = ctx.accounts[fromAccountId];
-      const to = ctx.accounts[toAccount.id];
-      const available = from.balance - from.holdAmount - (await futuresMarginHeld(ctx.tx, fromAccountId));
-      if (available < delta) {
-        throw new UnprocessableEntityException("잔액이 부족합니다");
-      }
-
-      await ctx.updateAccount(fromAccountId, {
-        balance: from.balance - delta,
-        holdAmount: from.holdAmount,
-      });
-      await ctx.updateAccount(toAccount.id, {
-        balance: to.balance + delta,
-        holdAmount: to.holdAmount,
-      });
-      await ctx.tx.ledgerEntry.create({
-        data: {
-          accountId: fromAccountId,
-          delta: -delta,
-          balanceAfter: from.balance - delta,
-          reason: "TRANSFER_OUT",
-          refId: toAccount.id,
-        },
-      });
-      await ctx.tx.ledgerEntry.create({
-        data: {
-          accountId: toAccount.id,
-          delta,
-          balanceAfter: to.balance + delta,
-          reason: "TRANSFER_IN",
-          refId: fromAccountId,
-        },
-      });
-    });
-
-    this.realtime.notifyAccount(fromAccountId, { type: "balance" });
-    this.realtime.notifyAccount(toAccount.id, { type: "balance" });
-    return { ok: true };
   }
 }

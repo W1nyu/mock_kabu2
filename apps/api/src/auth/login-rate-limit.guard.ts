@@ -77,11 +77,11 @@ export class LoginRateLimitGuard implements CanActivate {
   }
 }
 
-/** Bound password rechecks on transfers by signed account identity, independent of client IP. */
+/** 비밀번호 재확인(비밀번호 변경) 시도를 로그인한 사용자 기준으로 1분 10회로 제한한다. IP와 무관. */
 @Injectable()
-export class TransferRateLimitGuard implements CanActivate {
+export class PasswordRecheckRateLimitGuard implements CanActivate {
   static readonly rule: RateLimitRule = {
-    scope: "transfer",
+    scope: "password",
     windowSeconds: 60,
     maxAttempts: 10,
     keyOf: (request) => (request as Request & { user?: { userId?: string } }).user?.userId ?? "anonymous",
@@ -90,7 +90,7 @@ export class TransferRateLimitGuard implements CanActivate {
   constructor(@Inject(REDIS) private redis: Redis) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    await enforceRateLimit(this.redis, TransferRateLimitGuard.rule, context.switchToHttp().getRequest<Request>());
+    await enforceRateLimit(this.redis, PasswordRecheckRateLimitGuard.rule, context.switchToHttp().getRequest<Request>());
     return true;
   }
 }

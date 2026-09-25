@@ -20,11 +20,17 @@ import NotificationBell from "./NotificationBell";
  * Below `sm` these links are replaced by the bottom tab bar (MobileTabBar).
  */
 const PRIMARY_NAV_LINKS = [
-  { href: "/", label: "대시보드" },
-  { href: "/market-index", label: "지수" },
-  { href: "/news", label: "뉴스" },
-  { href: "/orders", label: "주문내역" },
-  { href: "/transfer", label: "이체" },
+  { href: "/", label: "대시보드", match: (p: string) => p === "/" },
+  // 폰 하단 탭의 "증권"과 같은 입구. 종목·선물 거래 화면에서도 켜 둔다.
+  {
+    href: "/market",
+    label: "증권",
+    match: (p: string) => p === "/market" || p.startsWith("/symbol/") || p.startsWith("/futures/") || p.startsWith("/reference/"),
+  },
+  { href: "/market-index", label: "지수", match: (p: string) => p === "/market-index" },
+  { href: "/news", label: "뉴스", match: (p: string) => p === "/news" },
+  { href: "/orders", label: "주문내역", match: (p: string) => p === "/orders" },
+  { href: "/ranking", label: "랭킹", match: (p: string) => p === "/ranking" },
 ] as const;
 
 export default function Nav() {
@@ -56,7 +62,7 @@ export default function Nav() {
 
         <div className="ml-2 hidden items-center gap-1 sm:flex">
           {PRIMARY_NAV_LINKS.map((l) => {
-            const active = pathname === l.href;
+            const active = l.match(pathname);
             return (
               <Link
                 key={l.href}

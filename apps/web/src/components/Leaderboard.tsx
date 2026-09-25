@@ -22,8 +22,8 @@ interface LeaderboardDto {
 }
 
 const REFRESH_MS = 30_000;
-/** 랭킹은 상위 몇 등까지만 보여 준다. */
-const TOP_N = 10;
+/** 기본으로 보여 줄 상위 등수 */
+const DEFAULT_TOP_N = 10;
 
 type Period = "all" | "today" | "week";
 const PERIODS: { id: Period; label: string; hint: string }[] = [
@@ -33,8 +33,16 @@ const PERIODS: { id: Period; label: string; hint: string }[] = [
 ];
 const PERIOD_STORAGE_KEY = "dashboard:leaderboard-period";
 
-/** 사용자 계정 수익률 랭킹. 봇은 제외되며, 내 순위는 상위 밖이어도 마지막 줄에 붙는다. */
-export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
+/** 사용자 계정 수익률 랭킹. 봇은 제외된다. showMine이면 내 순위가 상위 밖이어도 마지막 줄에 붙인다. */
+export default function Leaderboard({
+  refreshKey,
+  topN = DEFAULT_TOP_N,
+  showMine = false,
+}: {
+  refreshKey?: number;
+  topN?: number;
+  showMine?: boolean;
+}) {
   const [board, setBoard] = useState<LeaderboardDto | null>(null);
   const [period, setPeriod] = useState<Period>("all");
 
@@ -61,7 +69,7 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
     if (!getToken()) return;
     let active = true;
     const load = () => {
-      api<LeaderboardDto>(`/account/leaderboard?limit=${TOP_N}&period=${period}`)
+      api<LeaderboardDto>(`/account/leaderboard?limit=${topN}&period=${period}`)
         .then((data) => {
           if (active) setBoard(data);
         })
@@ -73,10 +81,10 @@ export default function Leaderboard({ refreshKey }: { refreshKey?: number }) {
       active = false;
       t();
     };
-  }, [refreshKey, period]);
+  }, [refreshKey, period, topN]);
 
-  // 상위 10등까지만 보여 준다. API는 순위 밖이어도 내 행을 덧붙이지만 여기서는 뺀다.
-  const topRows = board?.rows.filter((row) => row.rank <= TOP_N) ?? [];
+  // API는 순위 밖이어도 내 행을 덧붙인다 — showMine일 때만 보여 준다.
+  const topRows = board?.rows.filter((row) => row.rank <= topN || (showMine && row.me)) ?? [];
 
   return (
     <section className="glass overflow-hidden">

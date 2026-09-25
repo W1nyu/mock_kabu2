@@ -8,7 +8,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmt, getToken, getUser, won } from "@/lib/api";
 import DailyPerformance from "@/components/DailyPerformance";
 import dynamic from "next/dynamic";
-import Leaderboard from "@/components/Leaderboard";
 import PerformanceCard, { type RealizedStats } from "@/components/PerformanceCard";
 import { NewsList } from "@/components/NewsFeed";
 import FuturesList from "@/components/FuturesList";
@@ -568,9 +567,8 @@ export default function DashboardPage() {
         <NewsList items={news} emptyLabel="아직 뉴스가 없습니다" />
       </section>
 
-      {/* ── Leaderboard + daily performance ────────────────────── */}
-      <div className="grid grid-cols-1 gap-6 max-sm:order-1 lg:grid-cols-2">
-        <Leaderboard />
+      {/* ── Daily performance (투자자 랭킹은 /ranking으로 옮겼다) ─── */}
+      <div className="max-sm:order-1">
         <DailyPerformance />
       </div>
 

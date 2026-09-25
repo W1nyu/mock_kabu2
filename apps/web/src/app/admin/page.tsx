@@ -52,7 +52,7 @@ export default function AdminPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">동시성 실험 관전 모드</h1>
         <p className="mt-1.5 max-w-3xl text-sm text-ink-muted">
-          잔액/보유자산 변경(주문 홀드·이체·정산)이 통과하는 락 계층의 실시간 상태입니다. api의{" "}
+          잔액/보유자산 변경(주문 홀드·정산)이 통과하는 락 계층의 실시간 상태입니다. api의{" "}
           <code className="num rounded-[6px] border border-hairline-soft bg-surface-2/70 px-1.5 py-0.5 text-[13px] text-sky">
             LOCK_STRATEGY
           </code>{" "}

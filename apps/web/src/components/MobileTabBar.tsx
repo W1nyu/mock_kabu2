@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 /**
  * 폰 전용 하단 탭 (sm 미만). 데스크톱 상단 메뉴와 같은 페이지로 가지만, 폰에서는 증권 앱처럼
  * 엄지가 닿는 아래에 둔다. 지수는 `/market`(증권) 안에서 들어간다.
- * 거래 화면(`/symbol/*`)에서는 매수/매도 버튼이 이 자리를 쓰므로 숨긴다.
+ * 거래 화면(`/symbol/*`, `/futures/*`)에서는 매수/매도 버튼이 이 자리를 쓰므로 숨긴다.
  */
 const TABS = [
   { href: "/", label: "홈", icon: HomeIcon, match: (p: string) => p === "/" },
@@ -18,10 +18,10 @@ const TABS = [
   },
   { href: "/news", label: "뉴스", icon: NewsIcon, match: (p: string) => p === "/news" },
   { href: "/orders", label: "내역", icon: ListIcon, match: (p: string) => p === "/orders" },
-  { href: "/transfer", label: "이체", icon: TransferIcon, match: (p: string) => p === "/transfer" },
+  { href: "/ranking", label: "랭킹", icon: TrophyIcon, match: (p: string) => p === "/ranking" },
 ] as const;
 
-const HIDDEN_PREFIXES = ["/symbol/", "/login", "/signup"];
+const HIDDEN_PREFIXES = ["/symbol/", "/futures/", "/login", "/signup"];
 
 export default function MobileTabBar() {
   const pathname = usePathname();
@@ -109,10 +109,12 @@ function ListIcon({ active }: { active: boolean }) {
   );
 }
 
-function TransferIcon({ active }: { active: boolean }) {
+function TrophyIcon({ active }: { active: boolean }) {
   return (
     <Svg active={active}>
-      <path d="M4 8h14l-4-4M20 16H6l4 4" />
+      <path d="M8 4h8v5a4 4 0 0 1-8 0z" />
+      <path d="M16 6h3a3 3 0 0 1-3 4M8 6H5a3 3 0 0 0 3 4" />
+      <path d="M12 13v4M8 21h8M9 17h6" />
     </Svg>
   );
 }
