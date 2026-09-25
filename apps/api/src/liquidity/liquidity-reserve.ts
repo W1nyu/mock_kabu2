@@ -2,8 +2,7 @@ import {
   LIQUIDITY_RESERVE_OVERLAP_MULTIPLIER,
   SYMBOLS,
   liquidityTotalQtyForPrice,
-  type SymbolDef,
-} from "@mock-kabu/shared";
+  type SymbolDef, FUTURES } from "@mock-kabu/shared";
 
 /**
  * Dedicated accounts are deliberately outside the original bot1..bot10 pool.
@@ -36,6 +35,23 @@ export interface LiquidityReserve {
   symbol: SymbolDef;
   email: string;
   nickname: string;
+}
+
+/** 선물 마켓메이커 예약 계정 — 현물 예약 뒤 번호(bot34~)를 이어 쓴다. 매칭엔진의 매핑과 같은 순서. */
+export interface FuturesLiquidityReserve {
+  symbol: string;
+  email: string;
+  nickname: string;
+}
+
+/** 선물 예약 계정이 유지할 가용 현금 하한(원) — 양쪽 호가의 계약별 위탁증거금을 충분히 덮는다. */
+export const FUTURES_LIQUIDITY_MIN_AVAILABLE_CASH = 500_000_000n;
+
+export function futuresLiquidityReserves(): FuturesLiquidityReserve[] {
+  return FUTURES.map((future, index) => {
+    const botNumber = LIQUIDITY_RESERVE_START_INDEX + SYMBOLS.length + index;
+    return { symbol: future.symbol, email: `bot${botNumber}@bots.local`, nickname: `Liquidity ${future.symbol}` };
+  });
 }
 
 export function liquidityReserves(): LiquidityReserve[] {

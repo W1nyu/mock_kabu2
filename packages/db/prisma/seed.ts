@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { ADMIN_NICKNAME, INDEX_BASE_LEVEL, SYMBOLS } from "@mock-kabu/shared";
+import { ADMIN_NICKNAME, INDEX_BASE_LEVEL, SYMBOLS, FUTURES } from "@mock-kabu/shared";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -99,6 +99,24 @@ async function main() {
     });
   }
   console.log(`symbols: ${SYMBOLS.length} upserted`);
+
+  // 선물 — 같은 표에 kind=FUTURE로 둔다(매칭엔진·체결·봉 재사용). 가격은 정수 단위(실제 × priceScale).
+  for (const f of FUTURES) {
+    await prisma.marketSymbol.upsert({
+      where: { symbol: f.symbol },
+      update: { kind: "FUTURE" },
+      create: {
+        symbol: f.symbol,
+        name: f.name,
+        initialPrice: f.initialPrice,
+        tickSize: f.tickUnits,
+        lastPrice: f.initialPrice,
+        listedShares: 0n,
+        kind: "FUTURE",
+      },
+    });
+  }
+  console.log(`futures: ${FUTURES.length} upserted`);
 
   // 지수 첫 구간 — 새 DB에서는 마이그레이션 시점에 종목이 없어 여기서 만든다.
   if ((await prisma.indexEpoch.count()) === 0) {

@@ -1,3 +1,4 @@
+import { futureDef, futureMarginPerContract } from "@mock-kabu/shared";
 import { describe, expect, it, vi } from "vitest";
 import { OrderService } from "../order.service";
 
@@ -99,5 +100,60 @@ describe("OrderService.amend", () => {
     const service = new OrderService(prisma as never, {} as never, {} as never, {} as never);
     await expect(service.amend("account-1", "order-1", { price: 7_000, qty: 8 })).rejects.toThrow(/바뀐 내용/);
     await expect(service.amend("account-1", "order-1", { price: 7_005 })).rejects.toThrow(/호가 단위/);
+  });
+});
+
+describe("OrderService.place for futures", () => {
+  function harness(balance: bigint, holdAmount = 0n, positionMargin = 0n, debt = 0n) {
+    const accounts: Record<string, { balance: bigint; holdAmount: bigint }> = { a: { balance, holdAmount } };
+    const created: Record<string, unknown>[] = [];
+    const outbox: Record<string, unknown>[] = [];
+    const tx = {
+      futuresPosition: { aggregate: vi.fn(async () => ({ _sum: { marginHeld: positionMargin } })) },
+      futuresDebt: { findUnique: vi.fn(async () => (debt > 0n ? { amount: debt } : null)) },
+      holding: { findUnique: vi.fn(), update: vi.fn() },
+      order: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => (created.push(data), { id: "o1", ...data })) },
+      outbox: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => outbox.push(data)) },
+    };
+    const mutator = {
+      withAccountLock: vi.fn(async (_ids: string[], fn: (ctx: unknown) => Promise<unknown>) =>
+        fn({ accounts, tx, updateAccount: async (id: string, next: { balance: bigint; holdAmount: bigint }) => (accounts[id] = next) }),
+      ),
+    };
+    const prisma = { marketSymbol: { findUnique: vi.fn(async () => ({ symbol: "KABUF", lastPrice: 88_000 })) } };
+    const service = new OrderService(prisma as never, mutator as never, {} as never, { notifyAccount: vi.fn() } as never);
+    return { service, accounts, created, outbox, tx };
+  }
+
+  it("holds the initial margin in cash for a short as well as a long, and never touches share holdings", async () => {
+    const { service, accounts, created, tx } = harness(10_000_000n);
+    await service.place("a", { symbol: "KABUF", side: "SELL", type: "LIMIT", price: 88_000, qty: 2 });
+    // 880.00pt × 10,000원 × 21.75% = 1,914,000원/계약
+    expect(created[0].holdPerUnit).toBe(1_914_000n);
+    expect(accounts.a.holdAmount).toBe(3_828_000n);
+    expect(tx.holding.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("counts position margin and debt against the available cash", async () => {
+    const { service } = harness(3_000_000n, 0n, 1_000_000n, 200_000n);
+    // 가용 = 300만 − 100만(포지션 증거금) − 20만(미수) = 180만 < 1계약 증거금 191만4천
+    await expect(
+      service.place("a", { symbol: "KABUF", side: "BUY", type: "LIMIT", price: 88_000, qty: 1 }),
+    ).rejects.toThrow(/증거금이 부족/);
+  });
+
+  it("caps contracts per order and enforces the futures tick grid", async () => {
+    const { service } = harness(1_000_000_000n);
+    await expect(service.place("a", { symbol: "KABUF", side: "BUY", type: "LIMIT", price: 88_000, qty: 101 })).rejects.toThrow(/100계약/);
+    await expect(service.place("a", { symbol: "KABUF", side: "BUY", type: "LIMIT", price: 88_003, qty: 1 })).rejects.toThrow(/호가 단위/);
+  });
+
+  it("sends a market buy with a price cap in contract price units, separate from the margin hold", async () => {
+    const { service, outbox, created } = harness(100_000_000n);
+    await service.place("a", { symbol: "KABUF", side: "BUY", type: "MARKET", qty: 1 });
+    const payload = outbox[0].payload as { price: number };
+    expect(payload.price).toBe(Math.ceil(88_000 * 1.1));
+    // 증거금은 체결 상한(최근가 × 1.1, 올림) 기준
+    expect(created[0].holdPerUnit).toBe(futureMarginPerContract(futureDef("KABUF")!, Math.ceil(88_000 * 1.1)));
   });
 });

@@ -10,6 +10,7 @@ import {
   ROLLUP_CANDLE_INTERVAL,
   ROLLUP_CANDLE_SECONDS,
   SYMBOLS,
+  TRADABLE_SYMBOLS,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
 import { koreaSessionStart } from "../common/market-time";
@@ -40,6 +41,8 @@ const INDEX_META_TTL_MS = 10_000;
 const LISTED_SINCE = Prisma.sql`COALESCE(s.listed_at, '-infinity'::timestamp)`;
 
 const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
+/** 호가·체결·봉·요약 조회는 선물도 받는다. 목록·지수·순위는 현물(ACTIVE_SYMBOLS)만. */
+const TRADABLE = new Set(TRADABLE_SYMBOLS);
 const BASE_CANDLE_SECONDS = candleIntervalSeconds(BASE_CANDLE_INTERVAL) ?? 60;
 /**
  * 1시간 이상으로 묶는 조회는 보존 기간이 지나 1시간 봉으로 합쳐진 행도 함께 읽는다.
@@ -442,6 +445,6 @@ export class MarketController {
   }
 
   private assertActiveSymbol(symbol: string): void {
-    if (!ACTIVE_SYMBOLS.has(symbol)) throw new NotFoundException(`없는 종목: ${symbol}`);
+    if (!TRADABLE.has(symbol)) throw new NotFoundException(`없는 종목: ${symbol}`);
   }
 }

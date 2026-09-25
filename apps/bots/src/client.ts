@@ -166,6 +166,16 @@ export class ApiClient {
     }
   }
 
+  /** 선물 5종 시세와 기초자산(정수 단위). API 2초 캐시. */
+  futuresOverview() {
+    return this.request("GET", "/market/futures") as Promise<{ symbol: string; lastPrice: number; underlying: number | null }[]>;
+  }
+
+  /** 내 선물 포지션 */
+  futuresPositions() {
+    return this.request("GET", "/account/futures") as Promise<{ positions: { symbol: string; qty: number }[] }>;
+  }
+
   /** 재시작 때 마지막 기초자산 값을 이어받기 위한 공개 조회. */
   referenceOverview() {
     return this.request("GET", "/market/reference") as Promise<{ code: string; value: number | null }[]>;

@@ -11,6 +11,7 @@ import dynamic from "next/dynamic";
 import Leaderboard from "@/components/Leaderboard";
 import PerformanceCard, { type RealizedStats } from "@/components/PerformanceCard";
 import { NewsList } from "@/components/NewsFeed";
+import FuturesList from "@/components/FuturesList";
 import ReferenceList from "@/components/ReferenceList";
 import Sparkline from "@/components/Sparkline";
 import ChipTabs from "@/components/ChipTabs";
@@ -536,6 +537,15 @@ export default function DashboardPage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* ── 선물 (1일물) ─────────────────────────────────────────── */}
+      <section className="glass overflow-hidden max-sm:hidden">
+        <div className="panel-head">
+          <span className="panel-title">선물</span>
+          <span className="text-[11px] text-ink-faint">1일물 · 매일 04:10 현금 정산</span>
+        </div>
+        <FuturesList />
       </section>
 
       {/* ── 원자재·환율 (선물 기초자산) ───────────────────────────── */}

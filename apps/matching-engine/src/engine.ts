@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient } from "@mock-kabu/db";
 import {
   CHANNELS,
   KEYS,
-  SYMBOLS,
+  TRADABLE_SYMBOLS,
   STREAMS,
   type OrderClosedEvent,
   type OrderStreamEvent,
@@ -30,11 +30,21 @@ const DEPTH = 10;
 // Keep this matching-side identity check deliberately exact so ordinary bot
 // or user accounts can never gain bootstrap priority.
 const LIQUIDITY_RESERVE_START_INDEX = 16;
+// 현물 뒤에 선물이 이어진다(bot16~33 현물, bot34~38 선물) — API의 liquidityReserves()와 같은 순서.
 const reserveSymbolByEmail = new Map(
-  SYMBOLS.map((symbol, index) => [`bot${LIQUIDITY_RESERVE_START_INDEX + index}@bots.local`, symbol.symbol]),
+  TRADABLE_SYMBOLS.map((symbol, index) => [`bot${LIQUIDITY_RESERVE_START_INDEX + index}@bots.local`, symbol]),
 );
 
 type PlacedOrderEvent = Extract<OrderStreamEvent, { topic: "order.placed" }>;
+
+/**
+ * 체결 시각은 엔진 안에서 엄격히 증가해야 한다. 한 주문이 여러 호가를 쓸어 같은 밀리초에 체결이
+ * 여러 건 나면, "(created_at, id) 최신순"이 무작위 UUID에 따라 첫 체결을 마지막으로 골라
+ * 재기동 시 최근가 복원·정합성 검사가 틀린 가격을 봤다. 단일 작성자라 1ms씩 밀어도 순서가 곧 사실이다.
+ */
+export function nextTradeMs(previous: number, now: number): number {
+  return Math.max(now, previous + 1);
+}
 
 interface PersistedTrade {
   id: string;
@@ -89,6 +99,8 @@ function crossesRestoredBook(book: Orderbook, side: "BUY" | "SELL", price: numbe
 }
 
 export class MatchingEngine {
+  /** 마지막으로 매긴 체결 시각(ms) — nextTradeMs 참고 */
+  private lastTradeMs = 0;
   private books = new Map<string, Orderbook>();
   /** outbox 재발행 등으로 인한 중복 이벤트 방어 (최근 이벤트 id 기억) */
   private seenEventIds = new Set<string>();
@@ -172,7 +184,7 @@ export class MatchingEngine {
   async bootstrap(): Promise<void> {
     // The DB can retain delisted rows as historical data while runtime books
     // only exist for the currently configured exchange symbols.
-    const activeSymbolList = SYMBOLS.map((symbol) => symbol.symbol);
+    const activeSymbolList = [...TRADABLE_SYMBOLS];
     const activeSymbols = new Set(activeSymbolList);
     const persistedSymbols = await this.prisma.marketSymbol.findMany();
     const symbols = persistedSymbols.filter((symbol) => activeSymbols.has(symbol.symbol));
@@ -486,11 +498,10 @@ export class MatchingEngine {
     book: Orderbook,
     result: MatchResult,
   ): Promise<{ applied: boolean; hasSettlementEvents: boolean }> {
-    const trades: PersistedTrade[] = result.fills.map((fill) => ({
-      id: randomUUID(),
-      createdAt: new Date(),
-      fill,
-    }));
+    const trades: PersistedTrade[] = result.fills.map((fill) => {
+      this.lastTradeMs = nextTradeMs(this.lastTradeMs, Date.now());
+      return { id: randomUUID(), createdAt: new Date(this.lastTradeMs), fill };
+    });
     const settlementEvents = this.settlementEventsForResult(book, result, trades);
 
     const applied = await this.prisma.$transaction(async (tx) => {

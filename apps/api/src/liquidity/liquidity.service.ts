@@ -4,14 +4,14 @@ import type { PrismaClient } from "@mock-kabu/db";
 import * as bcrypt from "bcryptjs";
 import { timingSafeEqual } from "node:crypto";
 import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
+import { futuresMarginHeld } from "../order/futures-margin";
 import {
   LIQUIDITY_BOT_PASSWORD,
   LIQUIDITY_MIN_AVAILABLE_CASH,
   liquidityMinimumAvailableQty,
   liquidityBootstrapToken,
   liquidityReserves,
-  type LiquidityReserve,
-} from "./liquidity-reserve";
+  type LiquidityReserve, futuresLiquidityReserves, FUTURES_LIQUIDITY_MIN_AVAILABLE_CASH, type FuturesLiquidityReserve } from "./liquidity-reserve";
 
 const RETRYABLE_PRISMA_CODES = new Set(["P2002", "P2034"]);
 
@@ -52,7 +52,35 @@ export class LiquidityService {
     for (const reserve of liquidityReserves()) {
       reserves.push(await this.ensureReserve(reserve));
     }
+    // 선물 마켓메이커는 재고가 필요 없다 — 증거금용 현금만 하한까지 채운다.
+    for (const reserve of futuresLiquidityReserves()) {
+      reserves.push(await this.ensureFuturesReserve(reserve));
+    }
     return { reserves };
+  }
+
+  private async ensureFuturesReserve(reserve: FuturesLiquidityReserve) {
+    const identity = await this.ensureIdentityWithRetry(reserve);
+    const cashAdded = await this.mutator.withAccountLock([identity.accountId], async (ctx) => {
+      const account = ctx.accounts[identity.accountId];
+      const available = account.balance - account.holdAmount - (await futuresMarginHeld(ctx.tx, identity.accountId));
+      const added =
+        available < FUTURES_LIQUIDITY_MIN_AVAILABLE_CASH ? FUTURES_LIQUIDITY_MIN_AVAILABLE_CASH - available : 0n;
+      if (added > 0n) {
+        const balanceAfter = account.balance + added;
+        await ctx.updateAccount(identity.accountId, { balance: balanceAfter, holdAmount: account.holdAmount });
+        await ctx.tx.ledgerEntry.create({
+          data: {
+            accountId: identity.accountId,
+            delta: added,
+            balanceAfter,
+            reason: identity.created ? "LIQUIDITY_BOOTSTRAP" : "LIQUIDITY_REBALANCE",
+          },
+        });
+      }
+      return added;
+    });
+    return { symbol: reserve.symbol, email: reserve.email, created: identity.created, cashAdded, qtyAdded: 0 };
   }
 
   private assertToken(presentedToken: string | undefined) {
@@ -131,7 +159,7 @@ export class LiquidityService {
    * collide. Retrying unique/serializable conflicts is safe because every
    * subsequent step raises an available floor rather than adding a fixed sum.
    */
-  private async ensureIdentityWithRetry(reserve: LiquidityReserve): Promise<ReserveIdentity> {
+  private async ensureIdentityWithRetry(reserve: LiquidityReserve | FuturesLiquidityReserve): Promise<ReserveIdentity> {
     for (let attempt = 1; attempt <= 4; attempt++) {
       try {
         return await this.ensureIdentity(reserve);
@@ -144,7 +172,7 @@ export class LiquidityService {
     throw new Error("unreachable liquidity identity retry");
   }
 
-  private async ensureIdentity(reserve: LiquidityReserve): Promise<ReserveIdentity> {
+  private async ensureIdentity(reserve: LiquidityReserve | FuturesLiquidityReserve): Promise<ReserveIdentity> {
     let user = await this.prisma.user.findUnique({ where: { email: reserve.email } });
     if (user && !user.isBot) {
       // A human account must never be adopted just because it happens to have

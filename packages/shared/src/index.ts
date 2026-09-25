@@ -8,3 +8,4 @@ export * from "./stream-retention";
 export * from "./log-retention";
 export * from "./industries";
 export * from "./reference";
+export * from "./futures";

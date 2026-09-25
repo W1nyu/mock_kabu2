@@ -310,6 +310,9 @@ model MarketSymbol {
   /// 재상장 시각. 이 시각 전 체결은 원장으로만 남고 시세(현재가·기준가·통계·체결 목록)에서는 제외된다.
   listedAt     DateTime? @map("listed_at")
 
+  /// STOCK | FUTURE — 현물 전용 조회(목록·지수·순위)는 STOCK만 본다
+  kind         String @default("STOCK")
+
   @@map("symbols")
   @@schema("market")
 }
@@ -372,6 +375,48 @@ model NewsItem {
   @@index([industry, createdAt])
   @@map("news_items")
   @@schema("market")
+}
+
+/// 선물 포지션. qty 부호 있음(+롱 −숏), entryValue = Σ(진입가 × 계약 수) 정수 가격 단위, marginHeld = 묶인 위탁증거금(원)
+model FuturesPosition {
+  accountId  String   @map("account_id")
+  symbol     String
+  qty        Int      @default(0)
+  entryValue BigInt   @default(0) @map("entry_value")
+  marginHeld BigInt   @default(0) @map("margin_held")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@id([accountId, symbol])
+  @@map("futures_positions")
+  @@schema("account")
+}
+
+/// 선물 미수금(원). 손실이 잔액을 넘은 부분 — 이후 선물 이익으로 먼저 갚는다.
+model FuturesDebt {
+  accountId String   @id @map("account_id")
+  amount    BigInt   @default(0)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("futures_debts")
+  @@schema("account")
+}
+
+/// 선물 청산 실현손익(원). 체결·방향당 한 행.
+model FuturesRealized {
+  id        String   @id @default(uuid())
+  accountId String   @map("account_id")
+  symbol    String
+  tradeId   String   @map("trade_id")
+  side      String
+  closedQty Int      @map("closed_qty")
+  price     Int
+  realized  BigInt
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([tradeId, side])
+  @@index([accountId, createdAt])
+  @@map("futures_realized")
+  @@schema("account")
 }
 
 /// 가상 기초자산 1분봉 (선물 기초자산 — 원/달러·원자재). 값은 실제값 × scale 정수.

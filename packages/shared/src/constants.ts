@@ -1,3 +1,5 @@
+import { FUTURES, futureDef } from "./futures";
+
 /** 가입 시 지급되는 가상 현금 보너스 (정수 통화 단위) */
 export const SIGNUP_BONUS = 10_000_000;
 /** 시드가 만드는 관리자 계정의 닉네임. 닉네임은 유일하므로 이 이름이 곧 시스템 계정 식별자다(랭킹 제외). */
@@ -88,10 +90,16 @@ export function epochAt<T extends Pick<IndexEpoch, "startsAt">>(epochs: readonly
 export const MAX_ORDER_QTY = 10_000_000;
 export const MAX_ORDER_PRICE = 1_000_000_000;
 
-/** 종목의 호가 단위. 모르는 종목이면 null. */
+/** 종목의 호가 단위(선물은 정수 가격 단위). 모르는 종목이면 null. */
 export function tickSizeOf(symbol: string): number | null {
-  return SYMBOLS.find((definition) => definition.symbol === symbol)?.tickSize ?? null;
+  return SYMBOLS.find((definition) => definition.symbol === symbol)?.tickSize ?? futureDef(symbol)?.tickUnits ?? null;
 }
+
+/** 매칭엔진·주문이 받는 모든 종목(현물 + 선물). 현물 전용 화면·지수는 SYMBOLS를 쓴다. */
+export const TRADABLE_SYMBOLS: readonly string[] = [
+  ...SYMBOLS.map((definition) => definition.symbol),
+  ...FUTURES.map((future) => future.symbol),
+];
 
 /** 지정가가 호가 단위 격자 위에 있는지. */
 export function isOnTick(price: number, tickSize: number): boolean {

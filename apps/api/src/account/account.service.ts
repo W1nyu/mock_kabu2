@@ -14,6 +14,7 @@ import { ADMIN_NICKNAME, SYMBOLS } from "@mock-kabu/shared";
 import * as bcrypt from "bcryptjs";
 import { koreaDayStart } from "../common/market-time";
 import { MemoCache } from "../core/memo-cache";
+import { futuresEncumbrance, futuresMarginHeld } from "../order/futures-margin";
 import { BALANCE_MUTATOR, PRISMA } from "../core/tokens";
 
 /** 랭킹은 모든 사용자 계정을 LATERAL 조인으로 훑는다 — 보는 사람 수만큼 반복할 이유가 없다. */
@@ -34,13 +35,18 @@ export class AccountService {
   async getAccount(accountId: string) {
     const acc = await this.prisma.account.findUnique({ where: { id: accountId } });
     if (!acc) throw new NotFoundException("계좌를 찾을 수 없습니다");
+    // 선물 포지션 증거금은 holdAmount와 따로 묶여 있다 — 주문·이체 가능 금액에서 함께 뺀다.
+    const futures = await futuresEncumbrance(this.prisma, accountId);
+    const available = acc.balance - acc.holdAmount - futures.total;
     return {
       id: acc.id,
       balance: acc.balance,
       balanceExact: acc.balance.toString(),
       holdAmount: acc.holdAmount,
-      available: acc.balance - acc.holdAmount,
-      availableExact: (acc.balance - acc.holdAmount).toString(),
+      futuresMargin: futures.margin,
+      futuresDebt: futures.debt,
+      available,
+      availableExact: available.toString(),
     };
   }
 
@@ -486,7 +492,7 @@ export class AccountService {
     await this.mutator.withAccountLock([fromAccountId, toAccount.id], async (ctx) => {
       const from = ctx.accounts[fromAccountId];
       const to = ctx.accounts[toAccount.id];
-      const available = from.balance - from.holdAmount;
+      const available = from.balance - from.holdAmount - (await futuresMarginHeld(ctx.tx, fromAccountId));
       if (available < delta) {
         throw new UnprocessableEntityException("잔액이 부족합니다");
       }

@@ -4,6 +4,7 @@ import { industryById, industryOf } from "@mock-kabu/shared";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ChipTabs from "@/components/ChipTabs";
+import FuturesList from "@/components/FuturesList";
 import ReferenceList from "@/components/ReferenceList";
 import Sparkline from "@/components/Sparkline";
 import { api, fmt } from "@/lib/api";
@@ -288,6 +289,15 @@ export default function MarketPage() {
           })}
           {list.length === 0 && <li className="py-10 text-center text-sm text-ink-faint">종목을 불러오는 중…</li>}
         </ul>
+      </section>
+
+      {/* ── 선물 (1일물) ─────────────────────────────────────────── */}
+      <section className="glass overflow-hidden">
+        <div className="panel-head">
+          <span className="panel-title">선물</span>
+          <span className="text-[11px] text-ink-faint">1일물 · 매일 04:10 현금 정산</span>
+        </div>
+        <FuturesList />
       </section>
 
       {/* ── 원자재·환율 (선물 기초자산) ───────────────────────────── */}

@@ -13,8 +13,11 @@ import {
   KEYS,
   MARKET_BUY_HOLD_FACTOR,
   MAX_ORDER_PRICE,
+  MAX_FUTURES_ORDER_QTY,
   MAX_ORDER_QTY,
-  SYMBOLS,
+  TRADABLE_SYMBOLS,
+  futureDef,
+  futureMarginPerContract,
   isOnTick,
   tickSizeOf,
   type OrderCancelRequestedEvent,
@@ -25,6 +28,7 @@ import {
 import type Redis from "ioredis";
 import { BALANCE_MUTATOR, PRISMA, REDIS } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
+import { futuresMarginHeld } from "./futures-margin";
 import { OutboxRelayer } from "./outbox.relayer";
 
 export interface PlaceOrderDto {
@@ -106,8 +110,12 @@ export class OrderService {
     if (type === "LIMIT" && price! > MAX_ORDER_PRICE) {
       throw new BadRequestException(`지정가는 ${MAX_ORDER_PRICE.toLocaleString("ko-KR")}원까지입니다`);
     }
-    if (!SYMBOLS.some((definition) => definition.symbol === symbol)) {
+    if (!TRADABLE_SYMBOLS.includes(symbol)) {
       throw new NotFoundException(`없는 종목: ${symbol}`);
+    }
+    const future = futureDef(symbol);
+    if (future && qty > MAX_FUTURES_ORDER_QTY) {
+      throw new BadRequestException(`선물은 한 주문에 ${MAX_FUTURES_ORDER_QTY}계약까지입니다`);
     }
     // 격자 밖 지정가는 호가창에 낯선 단계를 만들고 봇 래더와 어긋나므로 접수 단계에서 막는다.
     const tickSize = tickSizeOf(symbol);
@@ -118,19 +126,24 @@ export class OrderService {
     const marketSymbol = await this.prisma.marketSymbol.findUnique({ where: { symbol } });
     if (!marketSymbol) throw new NotFoundException(`없는 종목: ${symbol}`);
 
-    // BUY 홀드 단가: LIMIT=지정가, MARKET=최근가*안전계수(체결 상한으로도 사용)
-    const holdPerUnit =
-      side === "BUY"
-        ? BigInt(type === "LIMIT" ? price! : Math.ceil(marketSymbol.lastPrice * MARKET_BUY_HOLD_FACTOR))
+    // 시장가 체결 상한(정수 가격 단위): 최근가 × 안전계수. 현물 매수는 이 값이 곧 홀드 단가다.
+    const marketCap = Math.ceil(marketSymbol.lastPrice * MARKET_BUY_HOLD_FACTOR);
+    // 홀드 단가(원/주, 원/계약):
+    //  - 현물 BUY: LIMIT=지정가, MARKET=체결 상한. 현물 SELL은 현금이 아니라 보유 수량을 묶는다.
+    //  - 선물: 매수·매도 모두 계약당 위탁증거금. 신규·청산을 나누지 않고 보수적으로 묶었다가 체결 때 포지션 증거금으로 바꾼다.
+    const holdPerUnit = future
+      ? futureMarginPerContract(future, type === "LIMIT" ? price! : marketCap)
+      : side === "BUY"
+        ? BigInt(type === "LIMIT" ? price! : marketCap)
         : 0n;
 
     const order = await this.mutator.withAccountLock([accountId], async (ctx) => {
-      if (side === "BUY") {
+      if (future || side === "BUY") {
         const acc = ctx.accounts[accountId];
         const holdTotal = holdPerUnit * BigInt(qty);
-        const available = acc.balance - acc.holdAmount;
+        const available = acc.balance - acc.holdAmount - (await futuresMarginHeld(ctx.tx, accountId));
         if (available < holdTotal) {
-          throw new UnprocessableEntityException("주문 가능 금액이 부족합니다");
+          throw new UnprocessableEntityException(future ? "주문 증거금이 부족합니다" : "주문 가능 금액이 부족합니다");
         }
         await ctx.updateAccount(accountId, {
           balance: acc.balance,
@@ -163,8 +176,8 @@ export class OrderService {
         symbol,
         side,
         type,
-        // MARKET BUY는 홀드 단가를 체결 상한으로 전달 (홀드 초과 체결 방지)
-        price: type === "LIMIT" ? price : side === "BUY" ? Number(holdPerUnit) : null,
+        // MARKET BUY는 체결 상한을 전달 (홀드 초과 체결 방지). 선물 홀드는 증거금이라 상한과 따로 계산한다.
+        price: type === "LIMIT" ? price : side === "BUY" ? marketCap : null,
         qty,
         ts: Date.now(),
       };
@@ -284,7 +297,7 @@ export class OrderService {
    */
   async liveQuoteState(accountId: string, rawSymbol?: string) {
     const symbol = rawSymbol?.trim() || "";
-    if (!SYMBOLS.some((definition) => definition.symbol === symbol)) {
+    if (!TRADABLE_SYMBOLS.includes(symbol)) {
       throw new NotFoundException(`없는 종목: ${symbol || "(empty)"}`);
     }
 

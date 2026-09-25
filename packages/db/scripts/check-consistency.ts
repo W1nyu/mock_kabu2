@@ -8,6 +8,7 @@
  *  6) 조건부 주문: 발동 행은 접수 주문 ID 또는 실패 사유를 갖고, 대기 행이 현재가를 오래 넘겨 있지 않음
  */
 import { PrismaClient } from "@prisma/client";
+import { futureDef, futurePositionMargin } from "@mock-kabu/shared";
 
 const prisma = new PrismaClient();
 let failures = 0;
@@ -80,7 +81,9 @@ async function main() {
         account_id,
         SUM(hold_per_unit * GREATEST(qty - filled_qty, 0)) AS amount
       FROM "order".orders
-      WHERE side = 'BUY' AND status IN ('OPEN', 'PARTIAL')
+      -- 선물 주문은 매수·매도 모두 현금(위탁증거금)을 묶는다.
+      WHERE (side = 'BUY' OR symbol IN (SELECT symbol FROM market.symbols WHERE kind = 'FUTURE'))
+        AND status IN ('OPEN', 'PARTIAL')
       GROUP BY account_id
     )
     SELECT
@@ -92,7 +95,7 @@ async function main() {
     WHERE a.hold_amount <> COALESCE(e.amount, 0::bigint)
   `;
   check(
-    "cash reservations match active buy orders",
+    "cash reservations match active buy (and futures) orders",
     cashReservationMismatches.length === 0,
     cashReservationMismatches,
   );
@@ -107,7 +110,9 @@ async function main() {
         symbol,
         SUM(GREATEST(qty - filled_qty, 0))::int AS qty
       FROM "order".orders
+      -- 선물 매도는 주식을 묶지 않는다.
       WHERE side = 'SELL' AND status IN ('OPEN', 'PARTIAL')
+        AND symbol NOT IN (SELECT symbol FROM market.symbols WHERE kind = 'FUTURE')
       GROUP BY account_id, symbol
     )
     SELECT
@@ -194,6 +199,21 @@ async function main() {
       )
   `;
   check("conditional orders: triggered rows have an order, no stale waiting rows", badConditional.length === 0, badConditional);
+
+  // 7) 선물은 제로섬 — 종목별 포지션 합은 늘 0 (체결마다 매수 +q, 매도 −q).
+  const unbalancedFutures = await prisma.$queryRaw<{ symbol: string; net: bigint }[]>`
+    SELECT symbol, SUM(qty)::bigint AS net FROM account.futures_positions GROUP BY symbol HAVING SUM(qty) <> 0
+  `;
+  check("futures positions net to zero per contract", unbalancedFutures.length === 0, unbalancedFutures);
+
+  // 8) 포지션 증거금 = ceil(진입 금액 × 가격 단위 가치 × 위탁증거금률) — 체결 때 같은 식으로 다시 잡는다.
+  const positionRows = await prisma.futuresPosition.findMany({ where: { qty: { not: 0 } } });
+  const badMargin = positionRows.filter((row) => {
+    const def = futureDef(row.symbol);
+    return !def || row.marginHeld !== futurePositionMargin(def, row.entryValue);
+  });
+  check("futures position margin matches its entry value", badMargin.length === 0,
+    badMargin.map((row) => ({ accountId: row.accountId, symbol: row.symbol, marginHeld: row.marginHeld })));
 
   const totals = await prisma.$queryRaw<{ symbol: string; total: bigint }[]>`
     SELECT symbol, SUM(qty) AS total FROM account.holdings GROUP BY symbol ORDER BY symbol

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  FUTURES_LIQUIDITY_MIN_AVAILABLE_CASH,
   LIQUIDITY_MIN_AVAILABLE_CASH,
+  futuresLiquidityReserves,
   liquidityMinimumAvailableQty,
   liquidityReserves,
 } from "../liquidity-reserve";
@@ -53,6 +55,8 @@ function makeService() {
               lastPrice: 100,
             })),
           },
+          futuresPosition: { aggregate: vi.fn(async () => ({ _sum: { marginHeld: null } })) },
+          futuresDebt: { findUnique: vi.fn(async () => null) },
           holding: {
             findUnique: vi.fn(async () => null),
             upsert: vi.fn(async (args: { where: unknown; create: Record<string, unknown>; update: Record<string, unknown> }) => {
@@ -98,6 +102,16 @@ describe("LiquidityService.ensureReserves", () => {
     ]);
   });
 
+  it("gives the futures makers the numbers right after the stock reserves (cash only)", () => {
+    expect(futuresLiquidityReserves().map((reserve) => [reserve.symbol, reserve.email])).toEqual([
+      ["KABUF", "bot34@bots.local"],
+      ["USDF", "bot35@bots.local"],
+      ["OILF", "bot36@bots.local"],
+      ["GASF", "bot37@bots.local"],
+      ["CPRF", "bot38@bots.local"],
+    ]);
+  });
+
   it("scales the reserve inventory floor for a future low-priced listing and keeps overlap headroom", () => {
     // ₩100 needs 1,200,000 shares for one ₩120m side; four copies cover the
     // current ladder plus safe post-before-cancel replacement overlap.
@@ -113,9 +127,13 @@ describe("LiquidityService.ensureReserves", () => {
 
     const result = await service.ensureReserves("test-liquidity-token");
     const reserves = liquidityReserves();
+    const futures = futuresLiquidityReserves();
 
-    expect(result.reserves.map((reserve) => reserve.email)).toEqual(reserves.map((reserve) => reserve.email));
+    expect(result.reserves.map((reserve) => reserve.email)).toEqual(
+      [...reserves, ...futures].map((reserve) => reserve.email),
+    );
     expect(result.reserves.every((reserve) => reserve.created)).toBe(true);
+    // 선물 예약은 재고 없이 현금만 받는다.
     expect(holdingUpserts).toHaveLength(reserves.length);
     expect(holdingUpserts.map((call) => call.create.symbol)).toEqual(
       reserves.map((reserve) => reserve.symbol.symbol),
@@ -123,9 +141,10 @@ describe("LiquidityService.ensureReserves", () => {
     expect(holdingUpserts.map((call) => call.create.accountId)).toEqual(
       reserves.map((reserve) => `account:user:${reserve.email}`),
     );
-    expect(ledgerCreates).toHaveLength(reserves.length);
+    expect(ledgerCreates).toHaveLength(reserves.length + futures.length);
     expect(ledgerCreates.every((entry) => entry.reason === "LIQUIDITY_BOOTSTRAP")).toBe(true);
-    expect(ledgerCreates.every((entry) => entry.balanceAfter === LIQUIDITY_MIN_AVAILABLE_CASH)).toBe(true);
+    expect(ledgerCreates.slice(0, reserves.length).every((entry) => entry.balanceAfter === LIQUIDITY_MIN_AVAILABLE_CASH)).toBe(true);
+    expect(ledgerCreates.slice(reserves.length).every((entry) => entry.balanceAfter === FUTURES_LIQUIDITY_MIN_AVAILABLE_CASH)).toBe(true);
   });
 
   it("refuses to adopt a non-bot user in a reserved email slot", async () => {

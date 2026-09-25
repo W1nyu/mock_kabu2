@@ -34,6 +34,8 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/market/news?symbol=&industry=&limit=` | 가상 뉴스(호재/악재·강도는 응답에서 제외). `symbol`은 그 종목·시장 전반·소속 산업군 기사, `industry=<산업군 id>`는 그 산업군 종목 기사와 산업군 기사(`INDUSTRIES`: tech·battery·industrial·mobility·media·health·energy·consumer·finance), `industry=market`은 시장 전반 기사만 |
 | GET | `/market/sparks` | 전 종목 미니 추세선 `{ 종목: [5분봉 종가…] }` (최근 72개). 1분 공유 캐시 — 화면마다 종목 수만큼 봉을 요청하지 않게 한 묶음 API |
 | GET | `/market/reference` | 선물 기초자산 가상 지수(원/달러·원유·천연가스·구리) `[{code,name,unit,scale,decimals,value,ts,base,spark}]`. 값은 실제값 × scale 정수, `base`는 09:00 KST 이후 첫 1분봉 시가(없으면 직전 종가). 5초 공유 캐시. 실시간은 소켓 `ref:{code}` |
+| GET | `/market/futures` | 선물 5종(KABUF·USDF·OILF·GASF·CPRF) `[{symbol,name,unit,priceScale,decimals,tickUnits,unitValue,initialMarginBps,maintenanceMarginBps,lastPrice,base,underlying,volume}]`. 가격은 정수 단위(실제 × priceScale), `underlying`은 기초자산(KABU 지수는 현물 최근가로 계산). 2초 공유 캐시 |
+| GET | `/account/futures` 🔒 | 내 선물 포지션 `{positions:[{symbol,qty(±),avgPrice,markPrice,unrealized,marginHeld,maintenanceMargin}],marginHeld,debt,unrealized,maintenanceMargin,equity}` |
 | GET | `/market/reference/:code/candles?interval=&limit=` | 기초자산 봉(1분만 저장, 나머지 조회 시 집계, 30일 지난 1분봉은 1시간봉으로 압축) |
 | GET | `/market/trades/latest?limit=` | 전 종목 최근 체결 `{ 종목: [최신순…] }` (봇 시장 관찰용, 0.25초 공유 캐시) |
 

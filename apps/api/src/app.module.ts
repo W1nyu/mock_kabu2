@@ -9,6 +9,7 @@ import { LiquidityModule } from "./liquidity/liquidity.module";
 import { MarketModule } from "./market/market.module";
 import { NewsModule } from "./news/news.module";
 import { ReferenceModule } from "./reference/reference.module";
+import { FuturesModule } from "./futures/futures.module";
 import { OrderModule } from "./order/order.module";
 import { ReplayModule } from "./replay/replay.module";
 import { ScenarioModule } from "./scenario/scenario.module";
@@ -25,6 +26,7 @@ import { ScenarioModule } from "./scenario/scenario.module";
     MarketModule,
     NewsModule,
     ReferenceModule,
+    FuturesModule,
     ReplayModule,
     AdminModule,
     ScenarioModule,
