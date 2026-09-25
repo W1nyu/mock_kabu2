@@ -22,7 +22,12 @@ interface EquityPoint {
   equity: number;
 }
 
-type Market = "stock" | "futures";
+type Market = "all" | "stock" | "futures";
+const MARKET_TABS: { id: Market; label: string }[] = [
+  { id: "all", label: "전체" },
+  { id: "stock", label: "주식" },
+  { id: "futures", label: "선물" },
+];
 
 /**
  * 청산 체결 단위 성과 요약 — 승률·평균 손익·손익비·최고/최저 + 자산 추이의 최대 낙폭.
@@ -31,13 +36,16 @@ type Market = "stock" | "futures";
 export default function PerformanceCard({
   stats: stockStats,
   futuresStats = null,
+  combinedStats = null,
 }: {
   stats: RealizedStats | null;
   futuresStats?: RealizedStats | null;
+  /** 주식 매도 체결 + 선물 청산 합산 */
+  combinedStats?: RealizedStats | null;
 }) {
-  const [market, setMarket] = useState<Market>("stock");
-  const stats = market === "stock" ? stockStats : futuresStats;
-  const fillLabel = market === "stock" ? "매도 체결" : "청산";
+  const [market, setMarket] = useState<Market>("all");
+  const stats = market === "all" ? combinedStats : market === "stock" ? stockStats : futuresStats;
+  const fillLabel = market === "stock" ? "매도 체결" : market === "futures" ? "청산" : "청산 체결";
   const empty = !stats || stats.fills === 0;
   const [drawdown, setDrawdown] = useState<Drawdown | null>(null);
 
@@ -57,7 +65,7 @@ export default function PerformanceCard({
       active = false;
       t();
     };
-  }, [stockStats?.fills, futuresStats?.fills]);
+  }, [stockStats?.fills, futuresStats?.fills, combinedStats?.fills]);
   return (
     <section className="glass flex h-full flex-col overflow-hidden">
       <div className="panel-head">
@@ -69,7 +77,7 @@ export default function PerformanceCard({
             </span>
           )}
           <div className="well flex gap-0.5 p-0.5" role="group" aria-label="주식·선물">
-            {(["stock", "futures"] as const).map((id) => (
+            {MARKET_TABS.map(({ id, label }) => (
               <button
                 key={id}
                 type="button"
@@ -79,7 +87,7 @@ export default function PerformanceCard({
                   market === id ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35" : "text-ink-muted hover:text-ink"
                 }`}
               >
-                {id === "stock" ? "주식" : "선물"}
+                {label}
               </button>
             ))}
           </div>
@@ -99,9 +107,9 @@ export default function PerformanceCard({
       {empty ? (
         <div className="grid flex-1 place-items-center px-5 py-10 text-center">
           <p className="text-sm text-ink-faint">
-            {market === "stock"
-              ? "아직 매도 체결이 없습니다. 첫 매도 뒤 승률과 손익비가 계산됩니다."
-              : "아직 선물 청산이 없습니다. 포지션을 청산(또는 일일 정산)하면 계산됩니다."}
+            {market === "futures"
+              ? "아직 선물 청산이 없습니다. 포지션을 청산(또는 일일 정산)하면 계산됩니다."
+              : "아직 매도 체결이 없습니다. 첫 매도 뒤 승률과 손익비가 계산됩니다."}
           </p>
         </div>
       ) : null}

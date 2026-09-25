@@ -2,6 +2,7 @@ import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from "@ne
 import type { PrismaClient } from "@mock-kabu/db";
 import { BackgroundStatusRegistry } from "../core/background-status";
 import { PRISMA } from "../core/tokens";
+import { futuresValueSql } from "./futures-equity";
 
 const SNAPSHOT_INTERVAL_MS = 60_000;
 /** 하루 한 번 오래된 1분 행을 솎아낸다. 7일 지나면 10분 격자만, 90일 지나면 1시간 격자만 남긴다. */
@@ -128,7 +129,8 @@ export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
           ${ts},
           a.balance,
           COALESCE(v.stock_value, 0),
-          a.balance + COALESCE(v.stock_value, 0)
+          -- 총 자산 = 현금 + 주식 + 선물 평가손익 − 미수금 (대시보드와 같은 식)
+          a.balance + COALESCE(v.stock_value, 0) + COALESCE(fv.futures_value, 0)
         FROM account.accounts a
         JOIN auth.users u ON u.id = a.user_id AND u.is_bot = false
         LEFT JOIN (
@@ -137,6 +139,7 @@ export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
           JOIN market.symbols s ON s.symbol = h.symbol
           GROUP BY h.account_id
         ) v ON v.account_id = a.id
+        LEFT JOIN (${futuresValueSql()}) fv ON fv.account_id = a.id
         ON CONFLICT (account_id, ts) DO NOTHING
       `;
       this.lastSnapshotAt = Date.now();
@@ -174,11 +177,15 @@ export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
         ) s
         ORDER BY day DESC, ts DESC
       ),
+      -- 실현손익 = 주식 매도 체결 + 선물 청산(반대매매·일일 정산 포함)
       pnl AS (
-        SELECT date_trunc('day', traded_at + interval '9 hours') AS day,
+        SELECT date_trunc('day', at + interval '9 hours') AS day,
           SUM(realized) AS realized, COUNT(*) AS fills
-        FROM account.realized_pnl
-        WHERE account_id = ${accountId}
+        FROM (
+          SELECT traded_at AS at, realized FROM account.realized_pnl WHERE account_id = ${accountId}
+          UNION ALL
+          SELECT created_at AS at, realized FROM account.futures_realized WHERE account_id = ${accountId}
+        ) x
         GROUP BY 1
       )
       SELECT

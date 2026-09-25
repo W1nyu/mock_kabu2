@@ -63,6 +63,8 @@ interface RealizedSummary {
   stats: RealizedStats;
   /** 선물 청산 실현손익 — 주식과 같은 모양 */
   futures?: { today: number; total: number; stats: RealizedStats };
+  /** 주식 + 선물 합산 */
+  combined?: { today: number; total: number; stats: RealizedStats };
 }
 interface MarketSummary {
   turnover: number | string | null;
@@ -378,8 +380,12 @@ export default function DashboardPage() {
   const realizedToday = (realized?.today ?? 0) + (realized?.futures?.today ?? 0);
   const realizedTotal = (realized?.total ?? 0) + (realized?.futures?.total ?? 0);
   const futuresPositions = futures?.positions.length ?? 0;
-  const totalCost = liveHoldings.reduce((sum, h) => sum + h.costBasis, 0);
-  const totalPnl = liveHoldings.reduce((sum, h) => sum + h.pnl, 0);
+  // 평가손익 = 주식 평가손익 + 선물 평가손익. 수익률의 분모는 주식 매입원가 + 선물 증거금(투입 금액).
+  const stockCost = liveHoldings.reduce((sum, h) => sum + h.costBasis, 0);
+  const stockPnl = liveHoldings.reduce((sum, h) => sum + h.pnl, 0);
+  const futuresOpen = (futures?.positions.length ?? 0) > 0;
+  const totalCost = stockCost + (futures?.marginHeld ?? 0);
+  const totalPnl = stockPnl + (futures?.unrealized ?? 0);
   const totalPnlRate = totalCost > 0 ? totalPnl / totalCost : 0;
 
 
@@ -399,9 +405,12 @@ export default function DashboardPage() {
               {won(totalExact)}
             </p>
             <p className="num mt-2 text-sm font-medium">
-              {hasHoldings ? (
+              {hasHoldings || futuresOpen ? (
                 <>
-                  <span className={pnlTone}>
+                  <span
+                    className={pnlTone}
+                    title={`주식 ${signedWon(stockPnl)} · 선물 ${signedWon(futures?.unrealized ?? 0)} — 수익률은 주식 매입원가 + 선물 증거금 대비`}
+                  >
                     {totalPnl >= 0 ? "▲" : "▼"} {totalPnl >= 0 ? "+" : ""}
                     {won(totalPnl)} ({totalPnl >= 0 ? "+" : ""}
                     {(totalPnlRate * 100).toFixed(2)}%)
@@ -469,7 +478,11 @@ export default function DashboardPage() {
         <div className="lg:col-span-2">
           <EquityChart />
         </div>
-        <PerformanceCard stats={realized?.stats ?? null} futuresStats={realized?.futures?.stats ?? null} />
+        <PerformanceCard
+          stats={realized?.stats ?? null}
+          futuresStats={realized?.futures?.stats ?? null}
+          combinedStats={realized?.combined?.stats ?? null}
+        />
       </div>
 
       {/* ── Market ─────────────────────────────────────────────── */}

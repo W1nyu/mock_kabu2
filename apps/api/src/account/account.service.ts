@@ -4,6 +4,7 @@ import { ADMIN_NICKNAME, SYMBOLS } from "@mock-kabu/shared";
 import { koreaDayStart } from "../common/market-time";
 import { MemoCache } from "../core/memo-cache";
 import { futuresEncumbrance } from "../order/futures-margin";
+import { futuresValueSql } from "./futures-equity";
 import { PRISMA } from "../core/tokens";
 
 /** 랭킹은 모든 사용자 계정을 LATERAL 조인으로 훑는다 — 보는 사람 수만큼 반복할 이유가 없다. */
@@ -104,7 +105,7 @@ export class AccountService {
    */
   async getRealizedPnl(accountId: string, limit = 50) {
     const dayStart = koreaDayStart();
-    const [totals, bySymbol, recent, futuresTotals] = await Promise.all([
+    const [totals, bySymbol, recent, futuresTotals, combinedTotals] = await Promise.all([
       this.prisma.$queryRaw<RealizedTotalsRow[]>`
         SELECT
           COALESCE(SUM(realized) FILTER (WHERE traded_at >= ${dayStart}), 0) AS today,
@@ -149,6 +150,26 @@ export class AccountService {
         FROM account.futures_realized
         WHERE account_id = ${accountId}
       `,
+      // 주식 매도 체결 + 선물 청산을 한데 모은 성과(대시보드 매매 성과 "전체" 탭)
+      this.prisma.$queryRaw<RealizedTotalsRow[]>`
+        SELECT
+          COALESCE(SUM(realized) FILTER (WHERE at >= ${dayStart}), 0) AS today,
+          COALESCE(SUM(qty) FILTER (WHERE at >= ${dayStart}), 0) AS today_qty,
+          COALESCE(SUM(realized), 0) AS total,
+          COALESCE(SUM(qty), 0) AS total_qty,
+          COUNT(*) AS fills,
+          COUNT(*) FILTER (WHERE realized > 0) AS wins,
+          COUNT(*) FILTER (WHERE realized < 0) AS losses,
+          COALESCE(SUM(realized) FILTER (WHERE realized > 0), 0) AS win_sum,
+          COALESCE(SUM(realized) FILTER (WHERE realized < 0), 0) AS loss_sum,
+          MAX(realized) AS best,
+          MIN(realized) AS worst
+        FROM (
+          SELECT traded_at AS at, qty, realized FROM account.realized_pnl WHERE account_id = ${accountId}
+          UNION ALL
+          SELECT created_at AS at, closed_qty AS qty, realized FROM account.futures_realized WHERE account_id = ${accountId}
+        ) x
+      `,
     ]);
     const row = totals[0];
     const futuresRow = futuresTotals[0];
@@ -166,6 +187,12 @@ export class AccountService {
         total: Number(futuresRow?.total ?? 0n),
         totalQty: Number(futuresRow?.total_qty ?? 0n),
         stats: realizedStats(futuresRow),
+      },
+      /** 주식 + 선물 합산 성과 */
+      combined: {
+        today: Number(combinedTotals[0]?.today ?? 0n),
+        total: Number(combinedTotals[0]?.total ?? 0n),
+        stats: realizedStats(combinedTotals[0]),
       },
       bySymbol: bySymbol.map((group) => {
         const realized = Number(group._sum.realized ?? 0n);
@@ -276,7 +303,7 @@ export class AccountService {
       SELECT
         a.id AS account_id,
         u.nickname,
-        a.balance + COALESCE(v.stock_value, 0) AS equity,
+        a.balance + COALESCE(v.stock_value, 0) + COALESCE(fv.futures_value, 0) AS equity,
         COALESCE(d.deposits, 0) AS deposits,
         COALESCE(r.realized, 0) AS realized,
         u.created_at AS joined_at,
@@ -338,12 +365,18 @@ export class AccountService {
         WHERE reason IN ('SIGNUP_BONUS', 'SEED', 'TRANSFER_IN', 'TRANSFER_OUT')
         GROUP BY account_id
       ) d ON d.account_id = a.id
+      -- 실현손익 = 주식 매도 체결 + 선물 청산(반대매매·일일 정산 포함)
       LEFT JOIN (
         SELECT account_id, SUM(realized) AS realized
-        FROM account.realized_pnl
-        WHERE traded_at >= ${since}
+        FROM (
+          SELECT account_id, realized FROM account.realized_pnl WHERE traded_at >= ${since}
+          UNION ALL
+          SELECT account_id, realized FROM account.futures_realized WHERE created_at >= ${since}
+        ) x
         GROUP BY account_id
       ) r ON r.account_id = a.id
+      -- 선물 평가손익 − 미수금 (총 자산에 포함)
+      LEFT JOIN (${futuresValueSql()}) fv ON fv.account_id = a.id
     `;
     const ranked = rows
       .map((row) => {
