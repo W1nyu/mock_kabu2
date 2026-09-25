@@ -7,6 +7,8 @@ import {
   epochAt,
   indexLevel,
   KEYS,
+  ROLLUP_CANDLE_INTERVAL,
+  ROLLUP_CANDLE_SECONDS,
   SYMBOLS,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
@@ -28,6 +30,14 @@ const LISTED_SINCE = Prisma.sql`COALESCE(s.listed_at, '-infinity'::timestamp)`;
 
 const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
 const BASE_CANDLE_SECONDS = candleIntervalSeconds(BASE_CANDLE_INTERVAL) ?? 60;
+/**
+ * 1시간 이상으로 묶는 조회는 보존 기간이 지나 1시간 봉으로 합쳐진 행도 함께 읽는다.
+ * 1시간 봉은 시 경계에 맞춰져 있어 1h·4h·1d 버킷 안에 정확히 들어간다.
+ */
+const candleSourceIntervals = (bucketSeconds: number) =>
+  bucketSeconds >= ROLLUP_CANDLE_SECONDS && bucketSeconds % ROLLUP_CANDLE_SECONDS === 0
+    ? Prisma.sql`IN (${BASE_CANDLE_INTERVAL}, ${ROLLUP_CANDLE_INTERVAL})`
+    : Prisma.sql`= ${BASE_CANDLE_INTERVAL}`;
 
 @Controller("market")
 export class MarketController {
@@ -232,7 +242,7 @@ export class MarketController {
     const prior = range === "all" ? [] : await this.prisma.$queryRaw<{ symbol: string; close: number | null }[]>`
       SELECT s.symbol, (
         SELECT c.close FROM market.candles c
-        WHERE c.symbol = s.symbol AND c.interval = ${BASE_CANDLE_INTERVAL} AND c.ts < ${since}
+        WHERE c.symbol = s.symbol AND c.interval IN (${BASE_CANDLE_INTERVAL}, ${ROLLUP_CANDLE_INTERVAL}) AND c.ts < ${since}
         ORDER BY c.ts DESC LIMIT 1
       ) AS close
       FROM market.symbols s WHERE s.symbol IN (${Prisma.join([...ACTIVE_SYMBOLS])})
@@ -246,7 +256,7 @@ export class MarketController {
           to_timestamp(floor(extract(epoch FROM ts) / ${bucketSeconds}) * ${bucketSeconds}) AS bucket,
             symbol, ts, open, close
         FROM market.candles
-        WHERE interval = ${BASE_CANDLE_INTERVAL} AND ts >= ${since}
+        WHERE interval ${candleSourceIntervals(bucketSeconds)} AND ts >= ${since}
       ) c
       ORDER BY bucket ASC, symbol ASC, ts DESC
     `;
@@ -342,7 +352,7 @@ export class MarketController {
         SELECT c."ts", c."open", c."high", c."low", c."close", c."volume"
         FROM "market"."candles" c, latest
         WHERE c."symbol" = ${symbol}
-          AND c."interval" = ${BASE_CANDLE_INTERVAL}
+          AND c."interval" ${candleSourceIntervals(seconds)}
           AND c."ts" > latest.ts - make_interval(secs => ${windowSeconds}::double precision)
       )
       SELECT

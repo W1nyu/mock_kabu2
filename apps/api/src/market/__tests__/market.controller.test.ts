@@ -128,3 +128,23 @@ describe("market-cap index across a relisting", () => {
     expect(after.value).toBeCloseTo((110 * 10 + 60 * 20) / (2100 / 1100), 2);
   });
 });
+
+describe("aggregated candles past the 1m retention window", () => {
+  const sourceIntervals = async (interval: string) => {
+    const query = vi.fn(async () => []);
+    const controller = new MarketController({ $queryRaw: query } as any, {} as any, new MemoCache());
+    await controller.candles("KABU", interval);
+    const fragments = (query.mock.calls[0] as unknown[]).slice(1).filter((value): value is { values: unknown[] } =>
+      typeof value === "object" && value !== null && "values" in value,
+    );
+    return fragments.flatMap((fragment) => fragment.values);
+  };
+
+  it("reads the 1h rollups for 1h/4h/1d buckets but not for sub-hour ones", async () => {
+    expect(await sourceIntervals("1d")).toEqual(["1m", "1h"]);
+    expect(await sourceIntervals("4h")).toEqual(["1m", "1h"]);
+    expect(await sourceIntervals("1h")).toEqual(["1m", "1h"]);
+    expect(await sourceIntervals("15m")).toEqual(["1m"]);
+    expect(await sourceIntervals("5m")).toEqual(["1m"]);
+  });
+});

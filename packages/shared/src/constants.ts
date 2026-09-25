@@ -235,6 +235,12 @@ export function candleIntervalSeconds(id: string): number | null {
 }
 
 /** 로그인 ID 겸 표시 이름. 이메일 없이 닉네임+비밀번호로 가입하므로 닉네임이 유일해야 한다. */
+/**
+ * 보존 기간(prune-history `--candles-days`, 기본 30일)이 지난 1분 봉은 1시간 봉으로 합쳐 남긴다.
+ * 1시간 이상 간격(1h·4h·1d)과 지수 "전체" 차트는 두 행을 함께 읽어 오래된 구간도 그대로 보인다.
+ */
+export const ROLLUP_CANDLE_INTERVAL = "1h";
+export const ROLLUP_CANDLE_SECONDS = 3_600;
 export const NICKNAME_MIN = 2;
 export const NICKNAME_MAX = 20;
 /** 한글·영문·숫자·`_`·`-`·`.` 만. 공백·`@`를 막아 이메일과 헷갈리지 않게 한다. */

@@ -291,7 +291,7 @@ export class AccountService {
             JOIN market.symbols s ON s.symbol = ANY(e.members)
             LEFT JOIN LATERAL (
               SELECT close FROM market.candles c
-              WHERE c.symbol = s.symbol AND c.interval = '1m'
+              WHERE c.symbol = s.symbol AND c.interval IN ('1m', '1h')
                 AND c.ts <= ${period === "all" ? Prisma.sql`u.created_at` : Prisma.sql`COALESCE(b.ts, GREATEST(u.created_at, ${since}))`}
               ORDER BY c.ts DESC LIMIT 1
             ) c ON true
