@@ -45,7 +45,7 @@ describe("OrderService.place tick-size validation", () => {
     );
 
     await expect(
-      service.place("account-1", { symbol: "TANU", side: "BUY", type: "LIMIT", price: 7_775, qty: 1 }),
+      service.place("account-1", { symbol: "GARM", side: "BUY", type: "LIMIT", price: 7_775, qty: 1 }),
     ).rejects.toThrow(/호가 단위는 10원/);
     expect(findUnique).not.toHaveBeenCalled();
   });
@@ -56,7 +56,7 @@ describe("OrderService.amend", () => {
     return {
       id: "order-1",
       accountId: "account-1",
-      symbol: "TANU",
+      symbol: "GARM",
       side: "BUY",
       type: "LIMIT",
       price: 7_000,
@@ -91,7 +91,7 @@ describe("OrderService.amend", () => {
     const result = await service.amend("account-1", "order-1", { price: 7_010, qty: 8 });
 
     // 요청은 8주지만 취소 확인 시점의 미체결은 5주뿐이다.
-    expect(place).toHaveBeenCalledWith("account-1", { symbol: "TANU", side: "BUY", type: "LIMIT", price: 7_010, qty: 5 });
+    expect(place).toHaveBeenCalledWith("account-1", { symbol: "GARM", side: "BUY", type: "LIMIT", price: 7_010, qty: 5 });
     expect(result.amended).toBe(true);
   });
 
@@ -175,7 +175,7 @@ describe("OrderService.cancel", () => {
     };
     const create = vi.fn(async () => undefined);
     const prisma = {
-      order: { findUnique: vi.fn(async () => ({ id: "o1", accountId: "a1", symbol: "TANU", status: "OPEN" })) },
+      order: { findUnique: vi.fn(async () => ({ id: "o1", accountId: "a1", symbol: "GARM", status: "OPEN" })) },
       outbox: { create },
     };
     const service = new OrderService(prisma as never, {} as never, redis as never, {} as never);

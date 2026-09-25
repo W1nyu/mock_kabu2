@@ -16,7 +16,8 @@
     "oracle:sync": "tsx scripts/oracle-sync.ts",
     "relist": "tsx scripts/relist-symbol.ts",
     "index:add-members": "tsx scripts/add-index-members.ts",
-    "test": "tsx --test scripts/__tests__/settlement-recovery-plan.node-test.ts scripts/__tests__/oracle-sync-plan.node-test.ts scripts/__tests__/relist-plan.node-test.ts"
+    "delist-symbols": "tsx scripts/delist-symbols.ts",
+    "test": "tsx --test scripts/__tests__/settlement-recovery-plan.node-test.ts scripts/__tests__/oracle-sync-plan.node-test.ts scripts/__tests__/relist-plan.node-test.ts scripts/__tests__/delist-plan.node-test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.8.0",

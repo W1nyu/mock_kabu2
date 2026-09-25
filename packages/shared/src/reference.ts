@@ -5,7 +5,7 @@
  *
  * 값은 정수로 저장·전송한다: 실제 값 × scale. 예) 원/달러 1,400.5원 → 14005 (scale 10).
  */
-export type ReferenceCode = "USDKRW" | "OIL" | "GAS" | "COPPER";
+export type ReferenceCode = "USDKRW" | "OIL" | "GAS" | "COPPER" | "GOLD" | "CORN";
 
 export interface ReferenceAssetDef {
   code: ReferenceCode;
@@ -59,6 +59,24 @@ export const REFERENCE_ASSETS: readonly ReferenceAssetDef[] = [
     anchor: 100,
     dailyVol: 0.015,
   },
+  {
+    code: "GOLD",
+    name: "금",
+    unit: "pt",
+    scale: 100,
+    decimals: 2,
+    anchor: 100,
+    dailyVol: 0.01,
+  },
+  {
+    code: "CORN",
+    name: "옥수수",
+    unit: "pt",
+    scale: 100,
+    decimals: 2,
+    anchor: 100,
+    dailyVol: 0.018,
+  },
 ];
 
 const BY_CODE = new Map(REFERENCE_ASSETS.map((asset) => [asset.code, asset]));
@@ -105,6 +123,8 @@ export function referenceNewsMove(code: ReferenceCode, weight: number, direction
  */
 export const COMMODITY_REFERENCE_WEIGHTS: Readonly<Record<string, Readonly<Partial<Record<ReferenceCode, number>>>>> = {
   구리: { COPPER: 1 },
+  금: { GOLD: 1 },
+  옥수수: { CORN: 1 },
   니켈: { COPPER: 0.5 },
   알루미늄: { COPPER: 0.5 },
   아연: { COPPER: 0.5 },

@@ -99,6 +99,33 @@ export const FUTURES: readonly FutureDef[] = [
     initialPrice: 10_000,
     unit: "pt",
   },
+  // 2026-09-26 추가 상장 — 안전자산(금)과 농산물(옥수수)
+  {
+    symbol: "GOLDF",
+    name: "금 선물",
+    underlying: "GOLD",
+    priceScale: 100,
+    decimals: 2,
+    tickUnits: 1,
+    unitValue: 500,
+    initialMarginBps: 1_000,
+    maintenanceMarginBps: 666,
+    initialPrice: 10_000,
+    unit: "pt",
+  },
+  {
+    symbol: "CORNF",
+    name: "옥수수 선물",
+    underlying: "CORN",
+    priceScale: 100,
+    decimals: 2,
+    tickUnits: 1,
+    unitValue: 500,
+    initialMarginBps: 1_500,
+    maintenanceMarginBps: 1_000,
+    initialPrice: 10_000,
+    unit: "pt",
+  },
 ];
 
 /** 선물 한 주문의 계약 수 상한 — 모의 거래에서 한 번에 과도한 레버리지를 막는다. */

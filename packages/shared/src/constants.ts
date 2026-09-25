@@ -19,18 +19,15 @@ export interface SymbolDef {
   listedShares: number;
 }
 
-/** 가상 종목 18개 */
+/** 상장 중인 가상 종목 15개 (2026-09-26 MOCK·TANU·PIXL 상장 폐지) */
 export const SYMBOLS: SymbolDef[] = [
-  { symbol: "MOCK", name: "모의전자", initialPrice: 50_000, tickSize: 50, listedShares: 24_000_000 },
   { symbol: "KABU", name: "카부증권", initialPrice: 120_000, tickSize: 100, listedShares: 10_000_000 },
-  { symbol: "TANU", name: "타누키상사", initialPrice: 8_000, tickSize: 10, listedShares: 150_000_000 },
   { symbol: "SAKU", name: "사쿠라중공업", initialPrice: 300_000, tickSize: 500, listedShares: 4_000_000 },
   { symbol: "NEKO", name: "네코물산", initialPrice: 25_000, tickSize: 50, listedShares: 48_000_000 },
   // 2026-09-24 추가 상장 — 상장 시가총액은 기존과 같은 1.2조 원
   { symbol: "BORI", name: "보리식품", initialPrice: 4_000, tickSize: 5, listedShares: 300_000_000 },
   { symbol: "BJAY", name: "블루제이항공", initialPrice: 20_000, tickSize: 50, listedShares: 60_000_000 },
   { symbol: "SKYL", name: "스카이링크", initialPrice: 40_000, tickSize: 50, listedShares: 30_000_000 },
-  { symbol: "PIXL", name: "픽셀게임즈", initialPrice: 60_000, tickSize: 100, listedShares: 20_000_000 },
   { symbol: "DAON", name: "다온반도체", initialPrice: 400_000, tickSize: 500, listedShares: 3_000_000 },
   // 2026-09-25 추가 상장 — 상장 시가총액 1.2조 원, 처음으로 1원·1,000원 호가 구간
   { symbol: "DDAM", name: "도담건설", initialPrice: 1_500, tickSize: 1, listedShares: 800_000_000 },
@@ -42,6 +39,17 @@ export const SYMBOLS: SymbolDef[] = [
   { symbol: "NRFD", name: "노스필드정유", initialPrice: 150_000, tickSize: 100, listedShares: 8_000_000 },
   { symbol: "GARM", name: "가람전력", initialPrice: 6_000, tickSize: 10, listedShares: 200_000_000 },
   { symbol: "HAVN", name: "헤이븐리츠", initialPrice: 5_000, tickSize: 10, listedShares: 240_000_000 },
+];
+
+/**
+ * 상장 폐지된 종목. 거래·뉴스·지수·목록에서 빠지지만, 과거 체결·봉·뉴스·지수 구간과 이름 표시를 위해 정의는 남긴다.
+ * 폐지 절차: packages/db/scripts/delist-symbols.ts (미체결 취소, 사용자 보유분 현금 정산, 지수 제외).
+ */
+export const DELISTED_SYMBOLS: SymbolDef[] = [
+  // 2026-09-26 상장 폐지
+  { symbol: "MOCK", name: "모의전자", initialPrice: 50_000, tickSize: 50, listedShares: 24_000_000 },
+  { symbol: "TANU", name: "타누키상사", initialPrice: 8_000, tickSize: 10, listedShares: 150_000_000 },
+  { symbol: "PIXL", name: "픽셀게임즈", initialPrice: 60_000, tickSize: 100, listedShares: 20_000_000 },
 ];
 
 /** 지수 시작 수준. 첫 구간의 제수는 상장 시가총액 합 ÷ INDEX_BASE_LEVEL이다. */
@@ -100,6 +108,25 @@ export const TRADABLE_SYMBOLS: readonly string[] = [
   ...SYMBOLS.map((definition) => definition.symbol),
   ...FUTURES.map((future) => future.symbol),
 ];
+
+/** 유동성(마켓메이커) 예약 계정 번호의 시작: bot16 */
+export const LIQUIDITY_RESERVE_START_INDEX = 16;
+/**
+ * 유동성 예약 계정 배정 순서 — 한 번 배정한 번호는 바꾸지 않는다(append-only). 종목 k번째가 bot(16+k).
+ * 예전에는 상장 목록 순서로 계산해, 종목을 폐지하면 뒤 종목의 계정이 모두 밀렸다. 폐지 종목의 자리는 비워 둔다.
+ */
+export const LIQUIDITY_RESERVE_ORDER: readonly string[] = [
+  "MOCK", "KABU", "TANU", "SAKU", "NEKO", "BORI", "BJAY", "SKYL", "PIXL", "DAON",
+  "DDAM", "SAEM", "STEL", "SLVR", "NOVA", "NRFD", "GARM", "HAVN",
+  "KABUF", "USDF", "OILF", "GASF", "CPRF",
+  "GOLDF", "CORNF",
+];
+
+/** 종목의 유동성 예약 계정 번호(bot N). 배정이 없으면 null. */
+export function liquidityReserveBotNumber(symbol: string): number | null {
+  const index = LIQUIDITY_RESERVE_ORDER.indexOf(symbol);
+  return index < 0 ? null : LIQUIDITY_RESERVE_START_INDEX + index;
+}
 
 /** 지정가가 호가 단위 격자 위에 있는지. */
 export function isOnTick(price: number, tickSize: number): boolean {

@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { BadRequestException, Inject, Injectable, Optional, UnauthorizedException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@mock-kabu/db";
 import {
+  DELISTED_SYMBOLS,
   CHANNELS,
   industryById,
   industryOf,
@@ -17,7 +18,8 @@ import { PRISMA, REDIS } from "../core/tokens";
 // talking to the local API without a user session.
 import { liquidityBootstrapToken } from "../liquidity/liquidity-reserve";
 
-const SYMBOL_NAMES = new Map(SYMBOLS.map((symbol) => [symbol.symbol, symbol.name]));
+// 상장 폐지 종목의 과거 기사에도 이름이 나오게 폐지 목록까지 담는다.
+const SYMBOL_NAMES = new Map([...SYMBOLS, ...DELISTED_SYMBOLS].map((symbol) => [symbol.symbol, symbol.name]));
 const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
 
 const MAX_LIMIT = 100;

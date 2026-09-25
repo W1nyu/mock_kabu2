@@ -130,6 +130,8 @@ export const MACRO_EXTRA_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "POSITIVE",
     macroChannel: "GLOBAL",
     macroDirection: 1,
+    // 안전자산: 위험 회피면 금이 오르고, 위험 선호면 내린다
+    referenceMoves: { GOLD: -0.4 },
     strength: { min: 0.3, max: 0.5 },
     headlines: ["나스닥 {pct} 급등… 기술주 랠리에 위험선호 회복"],
     slots: { pct: { kind: "percent", range: { min: 2, max: 4.5 } } },
@@ -141,6 +143,8 @@ export const MACRO_EXTRA_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     macroChannel: "GLOBAL",
     macroDirection: -1,
+    // 안전자산: 위험 회피면 금이 오르고, 위험 선호면 내린다
+    referenceMoves: { GOLD: -0.4 },
     strength: { min: 0.35, max: 0.55 },
     headlines: ["뉴욕증시 급락… 나스닥 {pct} 하락 마감"],
     slots: { pct: { kind: "percent", range: { min: 2.5, max: 5 } } },
@@ -152,6 +156,8 @@ export const MACRO_EXTRA_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     macroChannel: "GLOBAL",
     macroDirection: -1,
+    // 안전자산: 위험 회피면 금이 오르고, 위험 선호면 내린다
+    referenceMoves: { GOLD: -0.4 },
     strength: { min: 0.35, max: 0.58 },
     headlines: ["{region} 중소형 은행 부실 우려 확산… 금융시장 불안"],
     slots: { region: { kind: "pick", vocab: "region" } },
@@ -185,10 +191,88 @@ export const MACRO_EXTRA_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "POSITIVE",
     macroChannel: "GLOBAL",
     macroDirection: 1,
+    // 안전자산: 위험 회피면 금이 오르고, 위험 선호면 내린다
+    referenceMoves: { GOLD: -0.4 },
     strength: { min: 0.3, max: 0.52 },
     headlines: [
       "중동 분쟁 휴전 합의… 지정학 리스크 완화에 위험자산 강세",
       "동유럽 전쟁 휴전 협상 타결… 위험자산 선호 회복",
     ],
+  },
+  // ── 금·옥수수 (2026-09-26 선물 상장) ──
+  {
+    id: "macro.gold.spike",
+    category: "MACRO",
+    scope: "MACRO",
+    sentiment: "NEGATIVE",
+    macroChannel: "GLOBAL",
+    macroDirection: -1,
+    // 위험 회피(−1) × 가중치 −1 → 금 상승
+    referenceMoves: { GOLD: -1 },
+    strength: { min: 0.3, max: 0.55 },
+    headlines: [
+      "안전자산 쏠림에 금값 {pct} 급등… {duration} 만의 최고",
+      "{region} 불안에 금 매수세 몰려… 국제 금 시세 {pct} 상승",
+    ],
+    slots: {
+      pct: { kind: "percent", range: { min: 1, max: 3 }, reference: true },
+      duration: { kind: "duration", range: { min: 2, max: 18 }, unit: "개월" },
+      region: { kind: "pick", vocab: "region" },
+    },
+  },
+  {
+    id: "macro.gold.drop",
+    category: "MACRO",
+    scope: "MACRO",
+    sentiment: "POSITIVE",
+    macroChannel: "GLOBAL",
+    macroDirection: 1,
+    // 위험 선호(+1) × 가중치 −1 → 금 하락
+    referenceMoves: { GOLD: -1 },
+    strength: { min: 0.25, max: 0.5 },
+    headlines: [
+      "위험자산 선호 회복에 금값 {pct} 하락",
+      "안전자산 수요 둔화… 국제 금 시세 {duration} 만의 최저",
+    ],
+    slots: {
+      pct: { kind: "percent", range: { min: 1, max: 3 }, reference: true },
+      duration: { kind: "duration", range: { min: 2, max: 12 }, unit: "개월" },
+    },
+  },
+  {
+    id: "macro.corn.spike",
+    category: "MACRO",
+    scope: "MACRO",
+    sentiment: "NEGATIVE",
+    macroChannel: "COMMODITY",
+    macroDirection: 1,
+    referenceMoves: { CORN: 1 },
+    strength: { min: 0.22, max: 0.45 },
+    headlines: [
+      "미 중서부 가뭄에 옥수수 가격 {pct} 급등… 곡물가 비상",
+      "옥수수 작황 부진 전망… 국제 곡물가 {duration} 만의 최고",
+    ],
+    slots: {
+      pct: { kind: "percent", range: { min: 2, max: 5 }, reference: true },
+      duration: { kind: "duration", range: { min: 3, max: 24 }, unit: "개월" },
+    },
+  },
+  {
+    id: "macro.corn.drop",
+    category: "MACRO",
+    scope: "MACRO",
+    sentiment: "POSITIVE",
+    macroChannel: "COMMODITY",
+    macroDirection: -1,
+    referenceMoves: { CORN: 1 },
+    strength: { min: 0.2, max: 0.42 },
+    headlines: [
+      "남미 수확 호조에 옥수수 가격 {pct} 급락",
+      "옥수수 풍작 전망… 국제 곡물가 {duration} 만의 최저",
+    ],
+    slots: {
+      pct: { kind: "percent", range: { min: 2, max: 5 }, reference: true },
+      duration: { kind: "duration", range: { min: 3, max: 18 }, unit: "개월" },
+    },
   },
 ];

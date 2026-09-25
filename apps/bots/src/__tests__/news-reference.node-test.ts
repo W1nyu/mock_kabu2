@@ -17,7 +17,7 @@ function seededRandom(seed: number): RandomSource {
   };
 }
 
-const NOW: Record<ReferenceCode, number> = { USDKRW: 1_403.2, OIL: 100.4, GAS: 98.7, COPPER: 101.1 };
+const NOW: Record<ReferenceCode, number> = { USDKRW: 1_403.2, OIL: 100.4, GAS: 98.7, COPPER: 101.1, GOLD: 100.2, CORN: 99.6 };
 
 function context(seed: number): GeneratorContext {
   const model = new MarketModel(SYMBOLS, { random: seededRandom(seed), eventSpawnChance: 0 });

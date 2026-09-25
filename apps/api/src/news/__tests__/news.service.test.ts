@@ -67,7 +67,7 @@ describe("NewsService.list", () => {
     await service.list(undefined, 10, null);
 
     expect(prisma.newsItem.findMany.mock.calls[0][0].where).toEqual({
-      OR: [{ symbol: { in: ["MOCK", "DAON"] } }, { industry: "tech" }],
+      OR: [{ symbol: { in: ["DAON"] } }, { industry: "tech" }],
     });
     expect(prisma.newsItem.findMany.mock.calls[1][0].where).toEqual({ symbol: null, industry: null });
   });
@@ -119,10 +119,11 @@ describe("NewsService.publish", () => {
     });
 
     const channels = redis.publish.mock.calls.map(([channel]) => String(channel));
-    expect(channels.some((channel) => channel.endsWith("MOCK"))).toBe(true);
+    // IT·반도체는 상장 폐지된 MOCK이 빠져 DAON만 남는다 → DAON 채널 + 전체 피드
+    expect(channels.some((channel) => channel.endsWith("MOCK"))).toBe(false);
     expect(channels.some((channel) => channel.endsWith("DAON"))).toBe(true);
     expect(channels.some((channel) => channel.endsWith("KABU"))).toBe(false);
-    expect(channels).toHaveLength(3);
+    expect(channels).toHaveLength(2);
   });
 
   it("rejects an unknown industry, or an industry on a company story", async () => {

@@ -79,16 +79,14 @@ function makeService() {
 describe("LiquidityService.ensureReserves", () => {
   it("assigns configured listings to deterministic reserves", () => {
     expect(liquidityReserves().map((reserve) => [reserve.symbol.symbol, reserve.email])).toEqual([
-      ["MOCK", "bot16@bots.local"],
+      // 2026-09-26 MOCK(bot16)·TANU(bot18)·PIXL(bot24) 상장 폐지 — 번호는 비워 두고 나머지는 그대로다.
       ["KABU", "bot17@bots.local"],
-      ["TANU", "bot18@bots.local"],
       ["SAKU", "bot19@bots.local"],
       ["NEKO", "bot20@bots.local"],
       // 2026-09-24 추가 상장 — 기존 예약 계정 번호는 그대로, 뒤에 이어 붙는다.
       ["BORI", "bot21@bots.local"],
       ["BJAY", "bot22@bots.local"],
       ["SKYL", "bot23@bots.local"],
-      ["PIXL", "bot24@bots.local"],
       ["DAON", "bot25@bots.local"],
       // 2026-09-25 추가 상장
       ["DDAM", "bot26@bots.local"],
@@ -102,13 +100,16 @@ describe("LiquidityService.ensureReserves", () => {
     ]);
   });
 
-  it("gives the futures makers the numbers right after the stock reserves (cash only)", () => {
+  it("keeps the futures makers on fixed numbers — stock delistings do not shift them (cash only)", () => {
     expect(futuresLiquidityReserves().map((reserve) => [reserve.symbol, reserve.email])).toEqual([
       ["KABUF", "bot34@bots.local"],
       ["USDF", "bot35@bots.local"],
       ["OILF", "bot36@bots.local"],
       ["GASF", "bot37@bots.local"],
       ["CPRF", "bot38@bots.local"],
+      // 2026-09-26 추가 상장
+      ["GOLDF", "bot39@bots.local"],
+      ["CORNF", "bot40@bots.local"],
     ]);
   });
 

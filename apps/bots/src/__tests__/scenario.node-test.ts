@@ -28,7 +28,7 @@ function seededRandom(seed: number): RandomSource {
 function scenario(overrides: Partial<PressureScenario> = {}): PressureScenario {
   return {
     id: "s1",
-    symbols: ["TANU"],
+    symbols: ["GARM"],
     direction: "DOWN",
     intensity: 3,
     startsAtMs: 0,
@@ -39,29 +39,29 @@ function scenario(overrides: Partial<PressureScenario> = {}): PressureScenario {
 
 test("pressure is zero outside the window and on other symbols", () => {
   const list = [scenario({ startsAtMs: HOUR, endsAtMs: 4 * HOUR })];
-  assert.equal(scenarioPressure(list, "TANU", HOUR - 1), 0);
-  assert.equal(scenarioPressure(list, "TANU", 4 * HOUR), 0);
+  assert.equal(scenarioPressure(list, "GARM", HOUR - 1), 0);
+  assert.equal(scenarioPressure(list, "GARM", 4 * HOUR), 0);
   assert.equal(scenarioPressure(list, "KABU", 2 * HOUR), 0);
-  assert.equal(scenarioPressure(list, "TANU", 2 * HOUR), -1);
+  assert.equal(scenarioPressure(list, "GARM", 2 * HOUR), -1);
 });
 
 test("pressure ramps in and out over ten minutes instead of switching", () => {
   const list = [scenario()];
-  assert.ok(Math.abs(scenarioPressure(list, "TANU", 5 * MINUTE) + 0.5) < 1e-9);
-  assert.equal(scenarioPressure(list, "TANU", 10 * MINUTE), -1);
-  assert.ok(Math.abs(scenarioPressure(list, "TANU", 3 * HOUR - 5 * MINUTE) + 0.5) < 1e-9);
+  assert.ok(Math.abs(scenarioPressure(list, "GARM", 5 * MINUTE) + 0.5) < 1e-9);
+  assert.equal(scenarioPressure(list, "GARM", 10 * MINUTE), -1);
+  assert.ok(Math.abs(scenarioPressure(list, "GARM", 3 * HOUR - 5 * MINUTE) + 0.5) < 1e-9);
 });
 
 test("intensity scales pressure, direction signs it, and overlaps clamp", () => {
   const at = HOUR;
-  assert.equal(scenarioPressure([scenario({ intensity: 1, direction: "UP" })], "TANU", at), 0.4);
-  assert.equal(scenarioPressure([scenario({ intensity: 2 })], "TANU", at), -0.7);
+  assert.equal(scenarioPressure([scenario({ intensity: 1, direction: "UP" })], "GARM", at), 0.4);
+  assert.equal(scenarioPressure([scenario({ intensity: 2 })], "GARM", at), -0.7);
   assert.equal(
-    scenarioPressure([scenario({ id: "a" }), scenario({ id: "b", intensity: 2 })], "TANU", at),
+    scenarioPressure([scenario({ id: "a" }), scenario({ id: "b", intensity: 2 })], "GARM", at),
     -1,
   );
   assert.equal(
-    scenarioPressure([scenario({ id: "a", direction: "UP" }), scenario({ id: "b" })], "TANU", at),
+    scenarioPressure([scenario({ id: "a", direction: "UP" }), scenario({ id: "b" })], "GARM", at),
     0,
   );
 });
@@ -85,9 +85,9 @@ test("full downward pressure makes most, but not all, stories bad", () => {
 test("scenario pressure leans ordinary flow only on its symbols", () => {
   const model = new MarketModel(SYMBOLS, {
     eventSpawnChance: 0,
-    scenarioPressure: (symbol) => (symbol === "TANU" ? -1 : 0),
+    scenarioPressure: (symbol) => (symbol === "GARM" ? -1 : 0),
   });
-  assert.ok(model.flowBias("TANU") < -0.2);
+  assert.ok(model.flowBias("GARM") < -0.2);
   assert.equal(model.flowBias("KABU"), 0);
 });
 
@@ -112,20 +112,20 @@ test("with no scenario the news stream is identical to the unpressured scheduler
   assert.deepEqual(zero, plain);
 });
 
-test("a strong three-hour DOWN scenario brings TANU more, and mostly bad, news", () => {
+test("a strong three-hour DOWN scenario brings GARM more, and mostly bad, news", () => {
   const list = [scenario()];
   let baselineTanu = 0;
   let pressuredTanu = 0;
   let pressuredNegative = 0;
   for (const seed of [1, 2, 3, 4, 5, 6]) {
-    const tanuStories = (items: NewsItem[]) =>
-      items.filter((item) => item.scope === "SYMBOL" && item.symbol === "TANU" && !item.parentItemId);
-    baselineTanu += tanuStories(simulate(seed)).length;
-    const pressured = tanuStories(simulate(seed, (symbol, nowMs) => scenarioPressure(list, symbol, nowMs)));
+    const garmStories = (items: NewsItem[]) =>
+      items.filter((item) => item.scope === "SYMBOL" && item.symbol === "GARM" && !item.parentItemId);
+    baselineTanu += garmStories(simulate(seed)).length;
+    const pressured = garmStories(simulate(seed, (symbol, nowMs) => scenarioPressure(list, symbol, nowMs)));
     pressuredTanu += pressured.length;
     pressuredNegative += pressured.filter((item) => item.impact[0].sentiment === "NEGATIVE").length;
   }
-  assert.ok(pressuredTanu >= baselineTanu * 3, `TANU stories ${baselineTanu} → ${pressuredTanu}`);
+  assert.ok(pressuredTanu >= baselineTanu * 3, `GARM stories ${baselineTanu} → ${pressuredTanu}`);
   assert.ok(
     pressuredNegative / pressuredTanu > 0.65,
     `negative share ${pressuredNegative}/${pressuredTanu}`,

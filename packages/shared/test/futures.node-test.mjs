@@ -7,6 +7,7 @@ import {
   futureDef,
   futureMaintenanceMargin,
   futureMarginBps,
+  liquidityReserveBotNumber,
   isValidLeverage,
   futureMarginPerContract,
   futurePositionMargin,
@@ -21,7 +22,9 @@ const USDF = futureDef("USDF");
 test("contract specs: tick, unit value and the 2/3 maintenance rule", () => {
   assert.equal(tickSizeOf("KABUF"), 5);
   assert.equal(tickSizeOf("USDF"), 1);
-  assert.ok(TRADABLE_SYMBOLS.includes("OILF") && TRADABLE_SYMBOLS.includes("MOCK"));
+  assert.ok(TRADABLE_SYMBOLS.includes("OILF") && TRADABLE_SYMBOLS.includes("KABU") && TRADABLE_SYMBOLS.includes("GOLDF"));
+  // 상장 폐지 종목은 거래 대상이 아니다
+  assert.ok(!TRADABLE_SYMBOLS.includes("MOCK"));
   // KABUF 880.00pt, 1계약 = 880 × 10,000원 = 880만 원 → 위탁 21.75% = 1,914,000원
   assert.equal(futureMarginPerContract(KABUF, 88_000), 1_914_000n);
   // USDF 1,400.0원, 1계약 = 1만 달러 = 1,400만 원 → 5% = 700,000원
@@ -140,4 +143,16 @@ test("leverage sets the margin rate: 1/L initial, 2/3 of that maintenance; null 
   assert.equal(isValidLeverage(0), false);
   assert.equal(isValidLeverage(2.5), false);
   assert.equal(isValidLeverage(null), true);
+});
+
+test("liquidity reserve numbers are fixed per symbol — delistings leave gaps instead of shifting others", () => {
+  assert.equal(liquidityReserveBotNumber("KABU"), 17);
+  assert.equal(liquidityReserveBotNumber("HAVN"), 33);
+  assert.equal(liquidityReserveBotNumber("KABUF"), 34);
+  assert.equal(liquidityReserveBotNumber("CORNF"), 40);
+  assert.equal(liquidityReserveBotNumber("NOPE"), null);
+  // 모든 거래 종목에 번호가 있고 겹치지 않는다
+  const numbers = TRADABLE_SYMBOLS.map((symbol) => liquidityReserveBotNumber(symbol));
+  assert.ok(numbers.every((n) => n != null));
+  assert.equal(new Set(numbers).size, numbers.length);
 });

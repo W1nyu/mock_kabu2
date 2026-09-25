@@ -28,7 +28,7 @@ describe("RealtimeGateway room authorization", () => {
 
     gateway.join(client as never, [
       "trades:KABU",
-      "orderbook:MOCK",
+      "orderbook:KABU",
       "trades:UNKNOWN",
       "orderbook:KABU:extra",
       "account:account-1",
@@ -38,7 +38,7 @@ describe("RealtimeGateway room authorization", () => {
 
     expect(client.join).toHaveBeenCalledTimes(3);
     expect(client.join).toHaveBeenCalledWith("trades:KABU");
-    expect(client.join).toHaveBeenCalledWith("orderbook:MOCK");
+    expect(client.join).toHaveBeenCalledWith("orderbook:KABU");
     expect(client.join).toHaveBeenCalledWith("account:account-1");
     expect(sub.subscribe).toHaveBeenCalledWith(CHANNELS.account("account-1"));
   });

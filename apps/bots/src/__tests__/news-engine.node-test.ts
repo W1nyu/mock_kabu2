@@ -75,7 +75,7 @@ test("an FX spike splits the market along the sign of each beta", () => {
 
   // Exporters gain on a weak won; the brokerage loses on foreign outflow.
   assert.equal(sentimentFor("SAKU"), "POSITIVE");
-  assert.equal(sentimentFor("MOCK"), "POSITIVE");
+  assert.equal(sentimentFor("DAON"), "POSITIVE");
   assert.equal(sentimentFor("KABU"), "NEGATIVE");
 });
 

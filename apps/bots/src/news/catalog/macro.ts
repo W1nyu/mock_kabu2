@@ -145,6 +145,8 @@ export const MACRO_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "POSITIVE",
     macroChannel: "GLOBAL",
     macroDirection: 1,
+    // 안전자산: 위험 회피면 금이 오르고, 위험 선호면 내린다
+    referenceMoves: { GOLD: -0.4 },
     strength: { min: 0.28, max: 0.45 },
     headlines: [
       "뉴욕증시 기술주 급등 마감… 위험자산 선호 회복",
@@ -158,6 +160,8 @@ export const MACRO_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     macroChannel: "GLOBAL",
     macroDirection: -1,
+    // 안전자산: 위험 회피면 금이 오르고, 위험 선호면 내린다
+    referenceMoves: { GOLD: -0.4 },
     strength: { min: 0.32, max: 0.52 },
     headlines: [
       "간밤 뉴욕증시 급락… 글로벌 위험회피 확산",
@@ -186,6 +190,8 @@ export const MACRO_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     macroChannel: "GLOBAL",
     macroDirection: -1,
+    // 안전자산: 위험 회피면 금이 오르고, 위험 선호면 내린다
+    referenceMoves: { GOLD: -0.4 },
     strength: { min: 0.35, max: 0.55 },
     headlines: ["{country} 지정학 리스크 고조… 아시아 증시 일제히 약세"],
     slots: { country: { kind: "pick", vocab: "country" } },
@@ -353,7 +359,7 @@ export const MACRO_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     macroChannel: "OIL",
     macroDirection: 1,
-    referenceMoves: { OIL: 1, GAS: 0.3 },
+    referenceMoves: { OIL: 1, GAS: 0.3, GOLD: 0.3 },
     strength: { min: 0.32, max: 0.52 },
     headlines: ["중동 긴장 고조에 유가 {pct} 급등… 공급 차질 우려", "호르무즈 해협 긴장… 국제유가 {level} 근접"],
     slots: { pct: { kind: "percent", range: { min: 3, max: 8 }, reference: true }, level: { kind: "level", range: { min: 92, max: 110 }, unit: "달러", reference: true } },
@@ -525,6 +531,8 @@ export const MACRO_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     macroChannel: "GLOBAL",
     macroDirection: -1,
+    // 안전자산: 위험 회피면 금이 오르고, 위험 선호면 내린다
+    referenceMoves: { GOLD: -0.4 },
     strength: { min: 0.3, max: 0.5 },
     headlines: ["공포지수 {level} 급등… 글로벌 증시 투매", "{region} 은행 위기설에 안전자산 쏠림"],
     slots: { level: { kind: "level", range: { min: 24, max: 38 }, unit: "" }, region: { kind: "pick", vocab: "region" } },
@@ -536,6 +544,8 @@ export const MACRO_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     macroChannel: "GLOBAL",
     macroDirection: -1,
+    // 안전자산: 위험 회피면 금이 오르고, 위험 선호면 내린다
+    referenceMoves: { GOLD: -0.4 },
     strength: { min: 0.28, max: 0.48 },
     headlines: ["{region} 경기침체 공포 확산… 제조업 지표 {duration} 연속 부진", "장단기 금리 역전 심화… 'R의 공포' 재점화"],
     slots: { region: { kind: "pick", vocab: "region" }, duration: { kind: "duration", range: { min: 3, max: 9 }, unit: "개월" } },

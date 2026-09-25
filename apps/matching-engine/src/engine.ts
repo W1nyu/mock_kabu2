@@ -4,6 +4,7 @@ import {
   CHANNELS,
   KEYS,
   TRADABLE_SYMBOLS,
+  liquidityReserveBotNumber,
   STREAMS,
   type OrderClosedEvent,
   type OrderStreamEvent,
@@ -29,10 +30,13 @@ const DEPTH = 10;
 // bot16+ as the clean, symbol-scoped liquidity reserve generation.
 // Keep this matching-side identity check deliberately exact so ordinary bot
 // or user accounts can never gain bootstrap priority.
-const LIQUIDITY_RESERVE_START_INDEX = 16;
-// 현물 뒤에 선물이 이어진다(bot16~33 현물, bot34~38 선물) — API의 liquidityReserves()와 같은 순서.
-const reserveSymbolByEmail = new Map(
-  TRADABLE_SYMBOLS.map((symbol, index) => [`bot${LIQUIDITY_RESERVE_START_INDEX + index}@bots.local`, symbol]),
+// 종목별 예약 계정 번호는 shared LIQUIDITY_RESERVE_ORDER로 고정 — API의 liquidityReserves()·봇과 같은 표.
+// 상장 폐지 종목은 번호만 비워 두므로 뒤 종목의 계정이 밀리지 않는다.
+const reserveSymbolByEmail = new Map<string, string>(
+  TRADABLE_SYMBOLS.flatMap((symbol): [string, string][] => {
+    const number = liquidityReserveBotNumber(symbol);
+    return number == null ? [] : [[`bot${number}@bots.local`, symbol]];
+  }),
 );
 
 type PlacedOrderEvent = Extract<OrderStreamEvent, { topic: "order.placed" }>;

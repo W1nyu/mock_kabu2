@@ -231,7 +231,8 @@ export class MarketController {
     return this.cache.getOrCompute("index:meta", INDEX_META_TTL_MS, async () => {
       const [epoch, symbols] = await Promise.all([
         this.prisma.indexEpoch.findFirst({ orderBy: { startsAt: "desc" } }),
-        this.prisma.marketSymbol.findMany({ where: { symbol: { in: [...ACTIVE_SYMBOLS] } } }),
+        // 지금 구간의 편입 종목 — 상장 폐지 종목은 구간에서 빠지므로 발행주식수만 전 종목에서 찾는다.
+        this.prisma.marketSymbol.findMany({ where: { kind: "STOCK" } }),
       ]);
       if (!epoch) throw new NotFoundException("지수 구간이 없습니다");
       const shares = new Map(symbols.map((row) => [row.symbol, Number(row.listedShares)]));
@@ -247,8 +248,9 @@ export class MarketController {
     const bucketSeconds = range === "all" ? 3_600 : range === "1w" ? 600 : 60;
     const rangeMs = range === "all" ? null : range === "1w" ? 7 * 24 * 3_600_000 : 24 * 3_600_000;
     const since = rangeMs == null ? new Date(0) : new Date(Date.now() - rangeMs);
+    // 과거 구간에는 상장 폐지 종목도 편입돼 있다 — 지수 이력을 다시 그리려면 폐지 종목의 봉·주식수도 읽는다.
     const [symbols, epochRows] = await Promise.all([
-      this.prisma.marketSymbol.findMany({ where: { symbol: { in: [...ACTIVE_SYMBOLS] } } }),
+      this.prisma.marketSymbol.findMany({ where: { kind: "STOCK" } }),
       this.prisma.indexEpoch.findMany({ orderBy: { startsAt: "asc" } }),
     ]);
     const epochs = epochRows.map((row) => ({ startsAt: row.startsAt.getTime(), divisor: row.divisor, members: row.members }));
@@ -259,7 +261,7 @@ export class MarketController {
         WHERE c.symbol = s.symbol AND c.interval IN (${BASE_CANDLE_INTERVAL}, ${ROLLUP_CANDLE_INTERVAL}) AND c.ts < ${since}
         ORDER BY c.ts DESC LIMIT 1
       ) AS close
-      FROM market.symbols s WHERE s.symbol IN (${Prisma.join([...ACTIVE_SYMBOLS])})
+      FROM market.symbols s WHERE s.kind = 'STOCK'
     `;
     const rows = await this.prisma.$queryRaw<{ bucket: Date; symbol: string; open: number; close: number }[]>`
       SELECT DISTINCT ON (bucket, symbol) bucket, symbol,

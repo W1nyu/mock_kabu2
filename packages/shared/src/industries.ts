@@ -11,11 +11,11 @@ export interface IndustryDef {
 }
 
 export const INDUSTRIES: readonly IndustryDef[] = [
-  { id: "tech", label: "IT·반도체", symbols: ["MOCK", "DAON"] },
+  { id: "tech", label: "IT·반도체", symbols: ["DAON"] },
   { id: "battery", label: "2차전지·소재", symbols: ["NOVA", "NEKO"] },
-  { id: "industrial", label: "산업재", symbols: ["SAKU", "DDAM", "TANU"] },
+  { id: "industrial", label: "산업재", symbols: ["SAKU", "DDAM"] },
   { id: "mobility", label: "모빌리티", symbols: ["SLVR", "BJAY"] },
-  { id: "media", label: "미디어·통신", symbols: ["PIXL", "STEL", "SKYL"] },
+  { id: "media", label: "미디어·통신", symbols: ["STEL", "SKYL"] },
   { id: "health", label: "헬스케어", symbols: ["SAEM"] },
   { id: "energy", label: "에너지·유틸리티", symbols: ["NRFD", "GARM"] },
   { id: "consumer", label: "소비재", symbols: ["BORI"] },

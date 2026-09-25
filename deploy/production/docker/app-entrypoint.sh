@@ -48,6 +48,10 @@ case "$command_name" in
     shift
     exec packages/db/node_modules/.bin/tsx packages/db/scripts/add-index-members.ts "$@"
     ;;
+  delist-symbols)
+    shift
+    exec packages/db/node_modules/.bin/tsx packages/db/scripts/delist-symbols.ts "$@"
+    ;;
   recover-settlement)
     shift
     exec packages/db/node_modules/.bin/tsx packages/db/scripts/recover-unsettled-trades.ts "$@"

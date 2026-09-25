@@ -1,8 +1,12 @@
 import {
+  FUTURES,
   LIQUIDITY_RESERVE_OVERLAP_MULTIPLIER,
+  LIQUIDITY_RESERVE_START_INDEX,
   SYMBOLS,
+  liquidityReserveBotNumber,
   liquidityTotalQtyForPrice,
-  type SymbolDef, FUTURES } from "@mock-kabu/shared";
+  type SymbolDef,
+} from "@mock-kabu/shared";
 
 /**
  * Dedicated accounts are deliberately outside the original bot1..bot10 pool.
@@ -10,7 +14,7 @@ import {
  * already contain unmatched legacy events in an existing local database, and
  * must stay forensic/read-only instead of being silently reused or repaired.
  */
-export const LIQUIDITY_RESERVE_START_INDEX = 16;
+export { LIQUIDITY_RESERVE_START_INDEX };
 export const LIQUIDITY_BOT_PASSWORD = process.env.LIQUIDITY_BOT_PASSWORD ?? "botpassword";
 
 /** The amount available after reservations, not the account's raw balance. */
@@ -37,7 +41,7 @@ export interface LiquidityReserve {
   nickname: string;
 }
 
-/** 선물 마켓메이커 예약 계정 — 현물 예약 뒤 번호(bot34~)를 이어 쓴다. 매칭엔진의 매핑과 같은 순서. */
+/** 선물 마켓메이커 예약 계정 — 번호는 shared LIQUIDITY_RESERVE_ORDER로 고정(매칭엔진·봇과 같은 표). */
 export interface FuturesLiquidityReserve {
   symbol: string;
   email: string;
@@ -48,21 +52,28 @@ export interface FuturesLiquidityReserve {
 export const FUTURES_LIQUIDITY_MIN_AVAILABLE_CASH = 500_000_000n;
 
 export function futuresLiquidityReserves(): FuturesLiquidityReserve[] {
-  return FUTURES.map((future, index) => {
-    const botNumber = LIQUIDITY_RESERVE_START_INDEX + SYMBOLS.length + index;
+  return FUTURES.map((future) => {
+    const botNumber = reserveBotNumber(future.symbol);
     return { symbol: future.symbol, email: `bot${botNumber}@bots.local`, nickname: `Liquidity ${future.symbol}` };
   });
 }
 
 export function liquidityReserves(): LiquidityReserve[] {
-  return SYMBOLS.map((symbol, index) => {
-    const botNumber = LIQUIDITY_RESERVE_START_INDEX + index;
+  return SYMBOLS.map((symbol) => {
+    const botNumber = reserveBotNumber(symbol.symbol);
     return {
       symbol,
       email: `bot${botNumber}@bots.local`,
       nickname: `Liquidity ${symbol.symbol}`,
     };
   });
+}
+
+/** 배정표에 없는 종목은 계정을 만들 수 없다 — 새 종목은 LIQUIDITY_RESERVE_ORDER 끝에 먼저 추가할 것. */
+function reserveBotNumber(symbol: string): number {
+  const number = liquidityReserveBotNumber(symbol);
+  if (number == null) throw new Error(`no liquidity reserve slot for ${symbol}; append it to LIQUIDITY_RESERVE_ORDER`);
+  return number;
 }
 
 /**

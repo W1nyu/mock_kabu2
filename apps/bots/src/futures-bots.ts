@@ -49,6 +49,8 @@ export const MOMENTUM_THRESHOLD_BPS: Record<string, number> = {
   OIL: 25,
   GAS: 45,
   COPPER: 18,
+  GOLD: 12,
+  CORN: 22,
 };
 
 /** 창 안 변화율(bps)이 문턱을 넘으면 그 방향, 아니면 null. */

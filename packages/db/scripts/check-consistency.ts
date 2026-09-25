@@ -161,7 +161,7 @@ async function main() {
   const badRealized = await prisma.$queryRaw<{ trade_id: string; reason: string }[]>`
     SELECT r.trade_id,
       CASE
-        WHEN t.id IS NULL THEN 'trade missing'
+        WHEN t.id IS NULL AND r.trade_id NOT LIKE 'delist:%' THEN 'trade missing'
         WHEN t.seller_account_id <> r.account_id THEN 'seller mismatch'
         WHEN t.symbol <> r.symbol OR t.qty <> r.qty OR t.price <> r.price THEN 'fill mismatch'
         WHEN r.realized <> (r.price::bigint * r.qty) - r.cost_basis THEN 'arithmetic mismatch'
@@ -170,7 +170,8 @@ async function main() {
       END AS reason
     FROM account.realized_pnl r
     LEFT JOIN matching.trades t ON t.id = r.trade_id
-    WHERE t.id IS NULL
+    -- 상장 폐지 정산(trade_id 'delist:…')은 체결이 없다 — 체결 대조는 빼고 금액 식만 본다.
+    WHERE (t.id IS NULL AND r.trade_id NOT LIKE 'delist:%')
       OR t.seller_account_id <> r.account_id
       OR t.symbol <> r.symbol OR t.qty <> r.qty OR t.price <> r.price
       OR r.realized <> (r.price::bigint * r.qty) - r.cost_basis

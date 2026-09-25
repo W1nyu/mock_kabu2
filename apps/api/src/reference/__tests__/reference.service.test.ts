@@ -34,7 +34,7 @@ describe("ReferenceService.publish", () => {
     const { service, prisma } = serviceWith();
     const now = Date.now();
     await expect(service.publish("nope", { ts: now, prices: { OIL: 1 } })).rejects.toThrow(/token/);
-    await expect(service.publish(token(), { ts: now, prices: { GOLD: 1 } })).rejects.toThrow(/unknown/);
+    await expect(service.publish(token(), { ts: now, prices: { SILVER: 1 } })).rejects.toThrow(/unknown/);
     await expect(service.publish(token(), { ts: now, prices: { OIL: 10.5 } })).rejects.toThrow(/invalid/);
     await expect(service.publish(token(), { ts: now, prices: { OIL: -1 } })).rejects.toThrow(/invalid/);
     await expect(service.publish(token(), { ts: now - 5 * 60_000, prices: { OIL: 1 } })).rejects.toThrow(/ts/);
@@ -45,7 +45,7 @@ describe("ReferenceService.publish", () => {
 describe("ReferenceService.candles", () => {
   it("refuses unknown assets and intervals", async () => {
     const { service } = serviceWith();
-    await expect(service.candles("GOLD", "1m", 10)).rejects.toThrow(/기초자산/);
+    await expect(service.candles("SILVER", "1m", 10)).rejects.toThrow(/기초자산/);
     await expect(service.candles("OIL", "7m", 10)).rejects.toThrow(/봉 간격/);
   });
 });

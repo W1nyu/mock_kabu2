@@ -25,7 +25,7 @@ pnpm smoke                # 기동 중인 스택 E2E 스모크 (임시 계정, s
 cd apps/web && npx tsc --noEmit   # 웹 타입체크
 ```
 
-검증(런타임 관찰) 레시피: `.claude/skills/verify/SKILL.md`. 봇 계정 웹 로그인 닉네임 `봇#1` / `botpassword` (API는 `bot1@bots.local`도 가능; 일반 가입은 닉네임+비밀번호만), 종목 KABU·MOCK·NEKO·SAKU·TANU.
+검증(런타임 관찰) 레시피: `.claude/skills/verify/SKILL.md`. 봇 계정 웹 로그인 닉네임 `봇#1` / `botpassword` (API는 `bot1@bots.local`도 가능; 일반 가입은 닉네임+비밀번호만), 현물 15종목(예: KABU·SAKU·NEKO·DAON, 전체는 `packages/shared/src/constants.ts` `SYMBOLS`; MOCK·TANU·PIXL은 2026-09-26 상장 폐지 → `DELISTED_SYMBOLS`), 선물 7종(KABUF·USDF·OILF·GASF·CPRF·GOLDF·CORNF). 봇 유동성 계정 번호는 `LIQUIDITY_RESERVE_ORDER`(append-only)로 고정 — 새 종목은 그 끝에 추가.
 
 ## 반드시 지킬 규칙
 

@@ -1,5 +1,5 @@
 import { requiredRuntimeEnv } from "./env";
-import { SYMBOLS, type OrderSide, type SymbolDef, FUTURES } from "@mock-kabu/shared";
+import { FUTURES, liquidityReserveBotNumber, SYMBOLS, type OrderSide, type SymbolDef } from "@mock-kabu/shared";
 import { ApiClient, isRejection } from "./client";
 import { MarketMakerStartupBlockedError, runMarketMaker } from "./market-maker";
 import { MarketModel, referencePriceFromHistory } from "./market-model";
@@ -21,8 +21,7 @@ const BOT_PASSWORD = requiredRuntimeEnv("BOT_PASSWORD", "botpassword");
 const LIQUIDITY_BOT_PASSWORD = requiredRuntimeEnv("LIQUIDITY_BOT_PASSWORD", BOT_PASSWORD);
 // Generation 1 (bot11..bot15) can be polluted in an existing local DB before
 // the current matching recovery code is running. Keep it untouched and use a
-// clean dedicated generation rather than mutating historical orders.
-const LIQUIDITY_BOT_START_INDEX = 16;
+// clean dedicated generation (bot16+, numbered by shared LIQUIDITY_RESERVE_ORDER).
 const FLOW_BOT_COUNT = 5;
 const LIQUIDITY_REBALANCE_MS = 30_000;
 /** Passive additions stay useful without consuming a bot's whole balance. */
@@ -595,10 +594,13 @@ async function main() {
     clients.push(client);
   }
 
+  // 종목별 예약 계정(shared LIQUIDITY_RESERVE_ORDER로 고정된 번호) — API·매칭엔진과 같은 표.
+  const liquiditySymbols = [...SYMBOLS.map((def) => def.symbol), ...FUTURES.map((def) => def.symbol)];
   const liquidityClients: ApiClient[] = [];
-  // 현물 예약(bot16~33) 뒤에 선물 예약(bot34~38)이 이어진다 — API·매칭엔진과 같은 번호.
-  for (let index = 0; index < SYMBOLS.length + FUTURES.length; index++) {
-    const client = new ApiClient(`bot${LIQUIDITY_BOT_START_INDEX + index}@bots.local`);
+  for (const symbol of liquiditySymbols) {
+    const botNumber = liquidityReserveBotNumber(symbol);
+    if (botNumber == null) throw new Error(`no liquidity reserve slot for ${symbol}`);
+    const client = new ApiClient(`bot${botNumber}@bots.local`);
     for (let attempt = 1; ; attempt++) {
       try {
         await client.login(LIQUIDITY_BOT_PASSWORD);

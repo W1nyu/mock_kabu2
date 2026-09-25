@@ -50,9 +50,9 @@ test("target prices land on round numbers that are legal ticks", () => {
   assert.equal(roundNicePrice(345_000), 350_000);
   assert.equal(snapToTick(roundNicePrice(345_000), saku.tickSize), 350_000);
 
-  const tanu = symbolFor("TANU");
-  const target = snapToTick(roundNicePrice(8_000 * 1.15), tanu.tickSize);
-  assert.equal(target % tanu.tickSize, 0);
+  const garm = symbolFor("GARM");
+  const target = snapToTick(roundNicePrice(8_000 * 1.15), garm.tickSize);
+  assert.equal(target % garm.tickSize, 0);
 });
 
 test("quarterLabel offsets whole quarters and wraps the year boundary", () => {
@@ -88,7 +88,7 @@ test("money slots scale with the company, not the share price alone", () => {
   // Same template, same RNG draw — only the company differs.
   const draw = () => sequenceRandom([0.5]);
   const saku = bindSlots(ORDER_TEMPLATE, contextFor("SAKU", draw()));
-  const tanu = bindSlots(ORDER_TEMPLATE, contextFor("TANU", draw()));
+  const garm = bindSlots(ORDER_TEMPLATE, contextFor("GARM", draw()));
 
   const toEok = (text: string) => {
     const jo = /(\d+)조/.exec(text);
@@ -97,8 +97,8 @@ test("money slots scale with the company, not the share price alone", () => {
   };
 
   assert.ok(
-    toEok(saku.money) > toEok(tanu.money),
-    `expected SAKU(${saku.money}) > TANU(${tanu.money})`,
+    toEok(saku.money) > toEok(garm.money),
+    `expected SAKU(${saku.money}) > GARM(${garm.money})`,
   );
 });
 

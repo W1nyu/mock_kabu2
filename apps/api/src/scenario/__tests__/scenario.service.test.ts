@@ -6,7 +6,7 @@ const HOUR = 60 * 60_000;
 
 function valid(overrides: Record<string, unknown> = {}) {
   return {
-    symbols: ["TANU"],
+    symbols: ["GARM"],
     direction: "DOWN",
     intensity: 2,
     startsAt: new Date(NOW + HOUR).toISOString(),
@@ -46,10 +46,10 @@ describe("market scenarios", () => {
 
   it("stores a multi-symbol scenario for the admin with duplicates removed", async () => {
     const { service, prisma } = setup(true);
-    const created = await service.create("admin-id", "admin", valid({ symbols: ["TANU", "NEKO", "TANU"] }), NOW);
-    expect(created.symbols).toEqual(["TANU", "NEKO"]);
+    const created = await service.create("admin-id", "admin", valid({ symbols: ["GARM", "NEKO", "GARM"] }), NOW);
+    expect(created.symbols).toEqual(["GARM", "NEKO"]);
     expect(prisma.marketScenario.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ symbols: ["TANU", "NEKO"], direction: "DOWN", intensity: 2, createdBy: "admin" }),
+      data: expect.objectContaining({ symbols: ["GARM", "NEKO"], direction: "DOWN", intensity: 2, createdBy: "admin" }),
     });
   });
 
@@ -98,7 +98,7 @@ describe("market scenarios", () => {
     expect(created.requestedStartsAt).toBe(at(NOW + HOUR + 30 * 60_000).toISOString());
     expect(prisma.$executeRaw).toHaveBeenCalled();
     expect(prisma.marketScenario.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ canceledAt: null, symbols: { hasSome: ["TANU"] } }),
+      where: expect.objectContaining({ canceledAt: null, symbols: { hasSome: ["GARM"] } }),
     }));
   });
 

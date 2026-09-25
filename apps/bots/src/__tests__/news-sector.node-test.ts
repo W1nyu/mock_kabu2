@@ -45,10 +45,9 @@ test("sector templates declare exposure, name no company, and only they carry ex
     }
     const exposure = Object.entries(template.sectorExposure ?? {});
     assert.ok(exposure.length > 0, `${template.id}: SECTOR scope needs sectorExposure`);
-    assert.ok(
-      exposure.some(([sector, weight]) => (weight ?? 0) === 1 && LISTED_SECTORS.has(sector as never)),
-      `${template.id}: needs a listed sector at weight 1`,
-    );
+    // 상장 폐지로 주 대상 업종에 종목이 없어진 기사는 템플릿으로 남되 뽑히지 않는다(SECTOR_POOL에서 빠진다).
+    const listed = exposure.some(([sector, weight]) => (weight ?? 0) === 1 && LISTED_SECTORS.has(sector as never));
+    assert.equal(SECTOR_POOL.includes(template), listed, `${template.id}: pool membership follows listed sectors`);
     for (const [, weight] of exposure) assert.ok(Math.abs(weight ?? 0) <= 1, `${template.id}: weight out of range`);
     for (const pattern of [...template.headlines, ...(template.body ?? [])]) {
       assert.ok(

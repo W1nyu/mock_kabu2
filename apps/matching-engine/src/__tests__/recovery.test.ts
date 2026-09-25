@@ -157,12 +157,12 @@ describe("matching engine restart recovery", () => {
     // is strictly in-memory, not an implicit DB cleanup.
   });
 
-  test("bootstrap gives a complete bot18 TANU reserve ladder priority over an older crossed legacy ask", async () => {
+  test("bootstrap gives a complete bot32 GARM reserve ladder priority over an older crossed legacy ask", async () => {
     const createdAt = new Date("2026-01-01T00:00:00.000Z");
     const reserveBids = [8670, 8660, 8650, 8640, 8630, 8620, 8610, 8600].map((price, index) => ({
       id: `reserve-bid-${index}`,
       accountId: "reserve-account",
-      symbol: "TANU",
+      symbol: "GARM",
       side: "BUY",
       type: "LIMIT",
       price,
@@ -173,7 +173,7 @@ describe("matching engine restart recovery", () => {
     const reserveAsks = [8690, 8700, 8710, 8720, 8730, 8740, 8750, 8760].map((price, index) => ({
       id: `reserve-ask-${index}`,
       accountId: "reserve-account",
-      symbol: "TANU",
+      symbol: "GARM",
       side: "SELL",
       type: "LIMIT",
       price,
@@ -183,11 +183,11 @@ describe("matching engine restart recovery", () => {
     }));
     const prisma = {
       marketSymbol: {
-        findMany: async () => [{ symbol: "TANU", lastPrice: 8700 }],
+        findMany: async () => [{ symbol: "GARM", lastPrice: 8700 }],
         update: async () => undefined,
       },
       user: {
-        findMany: async () => [{ id: "reserve-user", email: "bot18@bots.local" }],
+        findMany: async () => [{ id: "reserve-user", email: "bot32@bots.local" }],
       },
       account: {
         findMany: async () => [{ id: "reserve-account", userId: "reserve-user" }],
@@ -197,7 +197,7 @@ describe("matching engine restart recovery", () => {
           {
             id: "older-legacy-ask",
             accountId: "legacy-seller",
-            symbol: "TANU",
+            symbol: "GARM",
             side: "SELL",
             type: "LIMIT",
             price: 8580,
@@ -218,7 +218,7 @@ describe("matching engine restart recovery", () => {
 
     await engine.bootstrap();
 
-    const book = (engine as any).books.get("TANU");
+    const book = (engine as any).books.get("GARM");
     expect(book.bids).toHaveLength(8);
     expect(book.asks).toHaveLength(8);
     expect(book.asks.some((order: { orderId: string }) => order.orderId === "older-legacy-ask")).toBe(false);

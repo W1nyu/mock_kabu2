@@ -103,6 +103,8 @@ const LEVEL_STEPS: Readonly<Record<ReferenceCode, readonly number[]>> = {
   OIL: [1, 0.5, 0.1],
   GAS: [1, 0.5, 0.1],
   COPPER: [1, 0.5, 0.1],
+  GOLD: [1, 0.5, 0.1],
+  CORN: [1, 0.5, 0.1],
 };
 
 function formatLevel(value: number, decimals: number, unit: string): string {
