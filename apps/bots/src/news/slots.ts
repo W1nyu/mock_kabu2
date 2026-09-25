@@ -1,4 +1,4 @@
-import type { SymbolDef } from "@mock-kabu/shared";
+import type { ReferenceCode, SymbolDef } from "@mock-kabu/shared";
 import type { RandomSource } from "../market-model";
 import type { CompanyProfile } from "./company-profiles";
 import { isParticleKey, resolveParticle } from "./particles";
@@ -81,6 +81,64 @@ export interface SlotContext {
   readonly memory: VocabMemory;
   /** A sequel reuses its parent's bindings so it reads as the same story. */
   readonly inherited?: Readonly<Record<string, string>>;
+  /**
+   * reference 슬롯용: 다른 슬롯을 다 채운 뒤(예: {commodity}) 이 기사가 움직일 대표 기초자산을 알려 준다.
+   * 없거나 null이면 reference 슬롯은 range에서 무작위로 뽑는다.
+   */
+  readonly referencePlan?: (bound: Readonly<Record<string, string>>) => ReferenceSlotPlan | null;
+}
+
+/** 기사 속 가격·%를 실제 기초자산에 맞추기 위한 값 */
+export interface ReferenceSlotPlan {
+  readonly code: ReferenceCode;
+  /** 지금 실제 값 */
+  readonly current: number;
+  /** 이 기사가 줄 로그 수익률 */
+  readonly move: number;
+}
+
+/** "돌파/하락" 수준으로 쓸 눈금 — 큰 눈금부터, 지금 값과 도착 값 사이에 들어오는 첫 눈금을 쓴다. */
+const LEVEL_STEPS: Readonly<Record<ReferenceCode, readonly number[]>> = {
+  USDKRW: [10, 5, 1],
+  OIL: [1, 0.5, 0.1],
+  GAS: [1, 0.5, 0.1],
+  COPPER: [1, 0.5, 0.1],
+};
+
+function formatLevel(value: number, decimals: number, unit: string): string {
+  const rounded = Number(value.toFixed(decimals));
+  const text =
+    decimals === 0
+      ? group(rounded)
+      : `${group(Math.trunc(rounded))}.${Math.abs(rounded % 1)
+          .toFixed(decimals)
+          .slice(2)}`;
+  return `${text}${unit}`;
+}
+
+/** 오르는 기사는 지금 값 위·도착 값 이하의 눈금, 내리는 기사는 지금 값 아래·도착 값 이상의 눈금 */
+export function referenceLevel(plan: ReferenceSlotPlan): number {
+  const target = plan.current * Math.exp(plan.move);
+  const up = plan.move > 0;
+  for (const step of LEVEL_STEPS[plan.code]) {
+    const level = up ? Math.floor(target / step) * step : Math.ceil(target / step) * step;
+    if (up ? level > plan.current : level < plan.current) return level;
+  }
+  return target;
+}
+
+function sampleReferenceSlot(spec: SlotSpec, plan: ReferenceSlotPlan): string | null {
+  if (spec.kind === "percent") {
+    const pct = Math.max(0.1, Math.abs(Math.exp(plan.move) - 1) * 100);
+    return `${pct.toFixed(spec.decimals ?? 1)}%`;
+  }
+  if (spec.kind === "level") {
+    const level = referenceLevel(plan);
+    // 눈금이 정수면 정수로, 0.5·0.1 눈금이면 소수 한 자리로 쓴다.
+    const decimals = Number.isInteger(Number(level.toFixed(6))) ? 0 : 1;
+    return formatLevel(level, decimals, spec.unit);
+  }
+  return null;
 }
 
 /** A recently-used vocab entry is suppressed this hard, never to zero. */
@@ -124,18 +182,8 @@ function sampleSlot(spec: SlotSpec, ctx: SlotContext): string {
       );
       return `${group(target)}원`;
     }
-    case "level": {
-      const value = uniform(ctx.random, spec.range);
-      const decimals = spec.decimals ?? 0;
-      const rounded = Number(value.toFixed(decimals));
-      const text =
-        decimals === 0
-          ? group(rounded)
-          : `${group(Math.trunc(rounded))}.${Math.abs(rounded % 1)
-              .toFixed(decimals)
-              .slice(2)}`;
-      return `${text}${spec.unit}`;
-    }
+    case "level":
+      return formatLevel(uniform(ctx.random, spec.range), spec.decimals ?? 0, spec.unit);
     case "multiple":
       return uniform(ctx.random, spec.range).toFixed(spec.decimals ?? 0);
     case "count":
@@ -171,11 +219,21 @@ const INHERITABLE_SLOTS = new Set(["money", "country", "counterparty", "product"
 
 export function bindSlots(template: NewsTemplate, ctx: SlotContext): Record<string, string> {
   const values: Record<string, string> = autoBoundSlots(ctx);
+  const deferred: [string, SlotSpec][] = [];
   for (const [key, spec] of Object.entries(template.slots ?? {})) {
+    // reference 슬롯은 {commodity} 같은 다른 슬롯이 정해진 뒤에 채운다.
+    if ((spec.kind === "percent" || spec.kind === "level") && spec.reference) {
+      deferred.push([key, spec]);
+      continue;
+    }
     // A sequel keeps the parent's identifying figures, so "3,200억 수주"
     // becomes "3,200억 본계약" rather than an unrelated new number.
     const inherited = INHERITABLE_SLOTS.has(key) ? ctx.inherited?.[key] : undefined;
     values[key] = inherited ?? sampleSlot(spec, ctx);
+  }
+  if (deferred.length > 0) {
+    const plan = ctx.referencePlan?.(values) ?? null;
+    for (const [key, spec] of deferred) values[key] = (plan && sampleReferenceSlot(spec, plan)) ?? sampleSlot(spec, ctx);
   }
   return values;
 }

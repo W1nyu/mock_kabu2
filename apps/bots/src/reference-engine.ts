@@ -1,27 +1,16 @@
 import { REFERENCE_ASSETS, fromReferenceUnits, type ReferenceCode } from "@mock-kabu/shared";
 import type { ApiClient } from "./client";
-import { templateById } from "./news/catalog";
 import type { NewsItem, NewsSink } from "./news/types";
 import { ReferencePriceModel } from "./reference-model";
 
 const TICK_MS = 1_000;
 
-/** 시장 전체 기사를 기초자산 충격으로 옮기는 뉴스 전송 대상. */
+/** 기사에 붙은 기초자산 충격(뉴스 생성기가 기사 숫자와 같은 식으로 계산)을 가격 모델에 옮기는 전송 대상. */
 export class ReferenceNewsSink implements NewsSink {
-  constructor(private readonly model: ReferencePriceModel) {}
+  constructor(private readonly model: Pick<ReferencePriceModel, "applyMove">) {}
 
   publish(item: NewsItem): void {
-    if (item.scope !== "MACRO") return;
-    const template = templateById(item.templateId);
-    if (!template?.macroChannel || !template.macroDirection) return;
-    // 종목별 충격은 베타가 곱해진 값이라, 평균을 기사 자체의 강도로 쓴다.
-    const strength = item.impact.reduce((sum, impact) => sum + impact.strength, 0) / Math.max(1, item.impact.length);
-    this.model.applyNews({
-      channel: template.macroChannel,
-      direction: template.macroDirection,
-      strength,
-      commodity: item.slotValues.commodity ?? null,
-    });
+    for (const move of item.referenceMoves ?? []) this.model.applyMove(move.code, move.move);
   }
 }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { REFERENCE_ASSETS, referenceAsset } from "@mock-kabu/shared";
+import { COMMODITY_REFERENCE_WEIGHTS, REFERENCE_ASSETS, referenceNewsMove } from "@mock-kabu/shared";
 import type { RandomSource } from "../market-model";
 import { ReferenceNewsSink } from "../reference-engine";
 import { ReferencePriceModel } from "../reference-model";
@@ -70,38 +70,29 @@ test("mean reversion pulls a displaced price back toward the anchor", () => {
   assert.ok(oil < 120 && oil > 60, `oil after 30 days: ${oil}`);
 });
 
-test("an OPEC-style oil story moves oil fully, gas partly, and leaves copper and FX alone", () => {
-  const effect = newsEffect((model) => model.applyNews({ channel: "OIL", direction: 1, strength: 1 }));
-  const oil = referenceAsset("OIL")!;
-  // 3시간이면 시간상수 4분 충격이 거의 전부 반영된다.
-  assert.ok(Math.abs(effect.OIL - oil.dailyVol * 1.2) < 0.002, `oil ${effect.OIL}`);
-  assert.ok(Math.abs(effect.GAS - 0.6 * referenceAsset("GAS")!.dailyVol * 1.2) < 0.003, `gas ${effect.GAS}`);
-  assert.ok(Math.abs(effect.COPPER) < 1e-9 && Math.abs(effect.USDKRW) < 1e-9);
+test("a news move lands half at once and the rest over minutes, ending at the full move", () => {
+  const move = referenceNewsMove("OIL", 1, 1, 1);
+  const instant = newsEffect((model) => model.applyMove("OIL", move), 1);
+  const late = newsEffect((model) => model.applyMove("OIL", move), 3 * 3_600);
+  assert.ok(Math.abs(instant.OIL - move / 2) < move * 0.05, `instant ${instant.OIL} vs ${move / 2}`);
+  assert.ok(Math.abs(late.OIL - move) < 0.002, `late ${late.OIL} vs ${move}`);
+  assert.ok(Math.abs(late.COPPER) < 1e-9 && Math.abs(late.USDKRW) < 1e-9, "other assets untouched");
 });
 
-test("the impulse seeps in over minutes rather than jumping", () => {
-  const early = newsEffect((model) => model.applyNews({ channel: "FX", direction: -1, strength: 1 }), 60);
-  const late = newsEffect((model) => model.applyNews({ channel: "FX", direction: -1, strength: 1 }), 3_600);
-  assert.ok(early.USDKRW < 0 && late.USDKRW < early.USDKRW, `early ${early.USDKRW}, late ${late.USDKRW}`);
-  assert.ok(Math.abs(early.USDKRW) < Math.abs(late.USDKRW) * 0.4);
+test("commodity stories move only the asset they name (or a related metal, partly)", () => {
+  assert.deepEqual(COMMODITY_REFERENCE_WEIGHTS["구리"], { COPPER: 1 });
+  assert.equal(COMMODITY_REFERENCE_WEIGHTS["니켈"].COPPER, 0.5);
+  assert.equal(COMMODITY_REFERENCE_WEIGHTS["천연가스"].GAS, 1);
+  assert.equal(COMMODITY_REFERENCE_WEIGHTS["천연가스"].COPPER, undefined);
+  assert.deepEqual(COMMODITY_REFERENCE_WEIGHTS["리튬"], {});
 });
 
-test("a story naming a commodity hits that commodity on top of its channel", () => {
-  const copper = newsEffect((model) => model.applyNews({ channel: "COMMODITY", direction: 1, strength: 1, commodity: "구리" }));
-  const nickel = newsEffect((model) => model.applyNews({ channel: "COMMODITY", direction: 1, strength: 1, commodity: "니켈" }));
-  assert.ok(copper.COPPER > nickel.COPPER * 1.8, `named ${copper.COPPER} vs channel only ${nickel.COPPER}`);
-  const gas = newsEffect((model) => model.applyNews({ channel: "COMMODITY", direction: -1, strength: 1, commodity: "천연가스" }));
-  assert.ok(gas.GAS < 0, "a named gas story moves gas even on the metals channel");
-});
-
-test("only market-wide stories reach the reference prices", () => {
-  const calls: unknown[] = [];
-  const sink = new ReferenceNewsSink({ applyNews: (signal: unknown) => calls.push(signal) } as never);
-  const base = { id: "1", headline: "", body: null, publishedAtMs: 0, parentItemId: null, industry: null, symbol: null };
-  sink.publish({ ...base, templateId: "macro.opec.cut", scope: "MACRO", category: "MACRO", slotValues: {},
-    impact: [{ symbol: "NRFD", sentiment: "POSITIVE", strength: 0.5 }] } as NewsItem);
-  sink.publish({ ...base, templateId: "biz.order", scope: "SYMBOL", category: "BUSINESS", slotValues: {},
-    impact: [{ symbol: "MOCK", sentiment: "POSITIVE", strength: 0.5 }] } as NewsItem);
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], { channel: "OIL", direction: 1, strength: 0.5, commodity: null });
+test("the sink applies exactly the moves the generator attached to the story", () => {
+  const calls: [string, number][] = [];
+  const sink = new ReferenceNewsSink({ applyMove: (code: string, move: number) => calls.push([code, move]) } as never);
+  const base = { id: "1", headline: "", body: null, publishedAtMs: 0, parentItemId: null, industry: null, symbol: null, slotValues: {}, impact: [] };
+  sink.publish({ ...base, templateId: "macro.opec.cut", scope: "MACRO", category: "MACRO",
+    referenceMoves: [{ code: "OIL", move: 0.02 }, { code: "GAS", move: 0.01 }] } as unknown as NewsItem);
+  sink.publish({ ...base, templateId: "biz.order", scope: "SYMBOL", category: "BUSINESS" } as unknown as NewsItem);
+  assert.deepEqual(calls, [["OIL", 0.02], ["GAS", 0.01]]);
 });

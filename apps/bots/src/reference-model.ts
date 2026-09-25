@@ -3,7 +3,6 @@ import {
   toReferenceUnits,
   type ReferenceAssetDef,
   type ReferenceCode,
-  type ReferenceMacroChannel,
 } from "@mock-kabu/shared";
 import type { RandomSource } from "./market-model";
 
@@ -12,21 +11,8 @@ const SECONDS_PER_DAY = 86_400;
 const MEAN_REVERSION_HALF_LIFE_S = 4 * SECONDS_PER_DAY;
 /** 뉴스 충격은 한 번에 튀지 않고 이 시간 상수로 몇 분에 걸쳐 가격에 스며든다. */
 const IMPULSE_TIME_CONSTANT_S = 240;
-/** 강도 1인 뉴스가 민감도 1인 자산을 움직이는 크기 = 하루 변동성 × 이 값 */
-const IMPULSE_DAILY_VOL_MULTIPLE = 1.2;
-/** 그 품목을 직접 언급한 기사는 채널 민감도와 별개로 이만큼 더 반영한다. */
-const DIRECT_MENTION_WEIGHT = 1;
-
-/** 뉴스 엔진이 넘기는 시장 전체 기사의 요약 — 봇 뉴스 타입에 의존하지 않게 필요한 것만 받는다. */
-export interface ReferenceNewsSignal {
-  channel: ReferenceMacroChannel | string | null | undefined;
-  /** +1 오름, -1 내림 */
-  direction: 1 | -1 | null | undefined;
-  /** 0.2~1 */
-  strength: number;
-  /** 기사 슬롯의 {commodity} 값 (예: "구리") */
-  commodity?: string | null;
-}
+/** 뉴스 충격 중 기사가 나오는 순간 바로 반영하는 몫 — 기사 속 숫자와 화면 가격이 어긋나 보이지 않게. 나머지는 몇 분에 걸쳐 스며든다. */
+const IMMEDIATE_SHARE = 0.5;
 
 interface AssetState {
   def: ReferenceAssetDef;
@@ -95,18 +81,13 @@ export class ReferencePriceModel {
   }
 
   /**
-   * 시장 전체 기사 하나를 반영한다. 채널 민감도 × 방향 × 강도, 그리고 기사가 품목을 직접 언급했으면
-   * 그 품목에 한 번 더. 충격은 바로 반영되지 않고 몇 분에 걸쳐 스며든다.
+   * 뉴스 한 건의 충격(로그 수익률)을 반영한다. 절반은 즉시, 나머지는 시간 상수에 걸쳐.
+   * 크기는 뉴스 생성기가 기사 속 숫자를 만들 때 쓴 값(`referenceNewsMove`)과 같다.
    */
-  applyNews(signal: ReferenceNewsSignal): void {
-    if (!signal.direction || !(signal.strength > 0)) return;
-    for (const state of this.states.values()) {
-      const channelWeight = signal.channel ? (state.def.macro[signal.channel as ReferenceMacroChannel] ?? 0) : 0;
-      const mentioned = signal.commodity && state.def.commodityWords.includes(signal.commodity) ? DIRECT_MENTION_WEIGHT : 0;
-      const weight = channelWeight + mentioned;
-      if (weight === 0) continue;
-      state.pendingImpulse +=
-        signal.direction * weight * signal.strength * state.def.dailyVol * IMPULSE_DAILY_VOL_MULTIPLE;
-    }
+  applyMove(code: ReferenceCode, logMove: number): void {
+    const state = this.states.get(code);
+    if (!state || !Number.isFinite(logMove) || logMove === 0) return;
+    state.logPrice += logMove * IMMEDIATE_SHARE;
+    state.pendingImpulse += logMove * (1 - IMMEDIATE_SHARE);
   }
 }

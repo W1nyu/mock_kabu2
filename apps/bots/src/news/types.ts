@@ -1,3 +1,4 @@
+import type { ReferenceCode } from "@mock-kabu/shared";
 import type { MarketEventSentiment } from "../market-model";
 import type { Range } from "./random";
 
@@ -69,11 +70,13 @@ export type SlotSpec =
   | { kind: "money"; capFraction: Range; minEok?: number }
   /** Money for macro stories, which have no company to scale against. */
   | { kind: "macroMoney"; eok: Range }
-  | { kind: "percent"; range: Range; decimals?: 0 | 1 }
+  /** reference: 기사가 움직일 기초자산의 실제 등락률(%)로 채운다 — range는 기초자산 값이 없을 때만 쓴다. */
+  | { kind: "percent"; range: Range; decimals?: 0 | 1; reference?: true }
   /** Derived from the symbol's live price, then snapped to its tick size. */
   | { kind: "targetPrice"; ratio: Range }
   /** An absolute index/FX/oil level. */
-  | { kind: "level"; range: Range; unit: string; decimals?: 0 | 1 }
+  /** reference: 기초자산의 지금 값과 이 기사가 만들 움직임으로 "돌파/하락" 수준을 정한다 — range는 값이 없을 때만. */
+  | { kind: "level"; range: Range; unit: string; decimals?: 0 | 1; reference?: true }
   | { kind: "multiple"; range: Range; decimals?: 0 | 1 }
   | { kind: "count"; range: Range; unit: string }
   | { kind: "duration"; range: Range; unit: "일" | "거래일" | "개월" | "년" | "분기" }
@@ -136,6 +139,12 @@ export interface NewsTemplate {
    * the same news hurts (cheap crude lifts airlines and squeezes refiners).
    */
   readonly sectorExposure?: Readonly<Partial<Record<SectorTag, number>>>;
+  /**
+   * 이 기사가 움직일 선물 기초자산(원/달러·원유·천연가스·구리)과 가중치. 방향은 macroDirection, 크기는 기사 강도.
+   * "commodity"면 {commodity} 품목으로 정한다(shared COMMODITY_REFERENCE_WEIGHTS). 없으면 기초자산을 움직이지 않는다.
+   * 기사 속 reference 슬롯(가격·%)도 같은 움직임으로 채워 헤드라인과 실제 가격이 맞게 한다.
+   */
+  readonly referenceMoves?: Readonly<Partial<Record<ReferenceCode, number>>> | "commodity";
 }
 
 /** One symbol's share of a published story's price effect. */
@@ -168,6 +177,8 @@ export interface NewsItem {
   readonly slotValues: Readonly<Record<string, string>>;
   readonly parentItemId: string | null;
   readonly impact: readonly NewsImpact[];
+  /** 기초자산 충격(로그 수익률) — 기사 속 숫자를 만든 값과 같다 */
+  readonly referenceMoves?: readonly { readonly code: ReferenceCode; readonly move: number }[];
 }
 
 export interface NewsSink {

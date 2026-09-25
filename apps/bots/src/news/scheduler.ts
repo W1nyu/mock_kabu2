@@ -1,4 +1,4 @@
-import type { SymbolDef } from "@mock-kabu/shared";
+import type { ReferenceCode, SymbolDef } from "@mock-kabu/shared";
 import type { MarketModel, RandomSource } from "../market-model";
 import { templateById } from "./catalog";
 import {
@@ -44,6 +44,8 @@ export interface NewsSchedulerOptions {
   readonly macroMuteMs?: number;
   /** Signed admin-scenario pressure per symbol at a given time. Defaults to none. */
   readonly pressure?: (symbol: string, nowMs: number) => number;
+  /** 선물 기초자산의 지금 값 — 환율·유가 기사 숫자를 실제 가격에 맞춘다 */
+  readonly referenceValue?: (code: ReferenceCode) => number | null;
 }
 
 interface PendingFollowUp {
@@ -81,6 +83,7 @@ export class NewsScheduler {
   private nextScenarioDueMs: number | null = null;
   private lastPublishedAtMs = Number.NEGATIVE_INFINITY;
   private lastMacroAtMs = Number.NEGATIVE_INFINITY;
+  private readonly referenceValue?: (code: ReferenceCode) => number | null;
 
   constructor(
     private readonly model: MarketModel,
@@ -96,6 +99,7 @@ export class NewsScheduler {
     this.symbolCooldownMs = options.symbolCooldownMs ?? DEFAULT_SYMBOL_COOLDOWN_MS;
     this.macroMuteMs = options.macroMuteMs ?? DEFAULT_MACRO_MUTE_MS;
     this.pressure = options.pressure ?? (() => 0);
+    this.referenceValue = options.referenceValue;
   }
 
   pendingFollowUpCount(): number {
@@ -144,6 +148,7 @@ export class NewsScheduler {
       memory: this.memory,
       nextSequence: () => ++this.sequence,
       pressure: (symbol) => this.pressure(symbol, nowMs),
+      referenceValue: this.referenceValue,
     };
   }
 

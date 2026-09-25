@@ -1,4 +1,10 @@
-import { industryOf, type SymbolDef } from "@mock-kabu/shared";
+import {
+  COMMODITY_REFERENCE_WEIGHTS,
+  industryOf,
+  referenceNewsMove,
+  type ReferenceCode,
+  type SymbolDef,
+} from "@mock-kabu/shared";
 import {
   MAX_EVENT_STRENGTH,
   MIN_EVENT_STRENGTH,
@@ -39,6 +45,19 @@ export interface GeneratorContext {
   readonly nextSequence: () => number;
   /** Signed admin-scenario pressure per symbol. Absent or 0 leaves every draw unchanged. */
   readonly pressure?: (symbol: string) => number;
+  /** 선물 기초자산의 지금 실제 값 — 기사 속 환율·유가 숫자를 실제 가격에 맞춘다. 없으면 템플릿 범위에서 뽑는다. */
+  readonly referenceValue?: (code: ReferenceCode) => number | null;
+}
+
+/** 템플릿·{commodity}로 이 기사가 움직일 기초자산 가중치 */
+export function referenceWeights(
+  template: NewsTemplate,
+  slotValues: Readonly<Record<string, string>>,
+): [ReferenceCode, number][] {
+  const spec = template.referenceMoves;
+  if (!spec) return [];
+  const weights = spec === "commodity" ? (COMMODITY_REFERENCE_WEIGHTS[slotValues.commodity ?? ""] ?? {}) : spec;
+  return (Object.entries(weights) as [ReferenceCode, number][]).filter(([, weight]) => weight !== 0);
 }
 
 function flip(sentiment: MarketEventSentiment): MarketEventSentiment {
@@ -213,6 +232,7 @@ export function generateMacroNews(ctx: GeneratorContext): NewsItem | null {
   if (!template) return null;
 
   const macroStrength = sampleStrength(template, ctx.random);
+  const direction = template.macroDirection ?? 1;
   const slotContext: SlotContext = {
     random: ctx.random,
     nowMs: ctx.nowMs,
@@ -220,11 +240,23 @@ export function generateMacroNews(ctx: GeneratorContext): NewsItem | null {
     profile: null,
     price: null,
     memory: ctx.memory,
+    // 기사 속 환율·유가·등락률을 대표 기초자산의 실제 값과 이 기사가 만들 움직임으로 채운다.
+    referencePlan: (bound) => {
+      // 기사가 직접 말하는 자산(가중치 1)만 숫자에 쓴다 — "니켈 급등" 기사에 구리 등락률이 찍히지 않게.
+      const [primary] = referenceWeights(template, bound).filter(([, weight]) => Math.abs(weight) >= 1);
+      if (!primary) return null;
+      const current = ctx.referenceValue?.(primary[0]) ?? null;
+      if (current == null || !(current > 0)) return null;
+      return { code: primary[0], current, move: referenceNewsMove(primary[0], primary[1], direction, macroStrength) };
+    },
   };
   const { headline, body, slotValues } = renderWithSlots(template, ctx, slotContext);
+  const referenceMoves = referenceWeights(template, slotValues).map(([code, weight]) => ({
+    code,
+    move: referenceNewsMove(code, weight, direction, macroStrength),
+  }));
 
   const channel = template.macroChannel;
-  const direction = template.macroDirection ?? 1;
   const impact: NewsImpact[] = [];
   if (channel) {
     for (const symbol of ctx.symbols) {
@@ -264,6 +296,7 @@ export function generateMacroNews(ctx: GeneratorContext): NewsItem | null {
     slotValues,
     parentItemId: null,
     impact,
+    ...(referenceMoves.length > 0 ? { referenceMoves } : {}),
   };
 }
 

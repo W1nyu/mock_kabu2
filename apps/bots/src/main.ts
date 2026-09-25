@@ -659,7 +659,11 @@ async function main() {
     ref,
     SYMBOLS,
     new CompositeNewsSink([new ConsoleNewsSink(), new ApiNewsSink(clients[0]), new ReferenceNewsSink(reference.model)]),
-    { pressure: (symbol, nowMs) => scenarios.pressure(symbol, nowMs) },
+    {
+      pressure: (symbol, nowMs) => scenarios.pressure(symbol, nowMs),
+      // 환율·유가 기사 속 숫자를 지금 기초자산 값에 맞춘다.
+      referenceValue: (code) => reference.model.value(code),
+    },
   );
 
   // Preserve bot1..bot5 as the flow pool. A flow bot can run two independent

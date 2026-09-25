@@ -7,9 +7,6 @@
  */
 export type ReferenceCode = "USDKRW" | "OIL" | "GAS" | "COPPER";
 
-/** 뉴스 매크로 채널 — 봇 뉴스 엔진의 MacroChannel 중 기초자산에 연결되는 것 */
-export type ReferenceMacroChannel = "FX" | "OIL" | "COMMODITY";
-
 export interface ReferenceAssetDef {
   code: ReferenceCode;
   name: string;
@@ -23,10 +20,6 @@ export interface ReferenceAssetDef {
   anchor: number;
   /** 하루 변동성(로그수익률 표준편차) 가정 */
   dailyVol: number;
-  /** 시장 전체 뉴스 채널별 민감도 (방향 × 강도 × 이 값) */
-  macro: Readonly<Partial<Record<ReferenceMacroChannel, number>>>;
-  /** 뉴스의 {commodity} 어휘가 이 단어면 해당 품목에 직접 충격을 준다 */
-  commodityWords: readonly string[];
 }
 
 export const REFERENCE_ASSETS: readonly ReferenceAssetDef[] = [
@@ -38,8 +31,6 @@ export const REFERENCE_ASSETS: readonly ReferenceAssetDef[] = [
     decimals: 1,
     anchor: 1_400,
     dailyVol: 0.005,
-    macro: { FX: 1 },
-    commodityWords: [],
   },
   {
     code: "OIL",
@@ -49,8 +40,6 @@ export const REFERENCE_ASSETS: readonly ReferenceAssetDef[] = [
     decimals: 2,
     anchor: 100,
     dailyVol: 0.02,
-    macro: { OIL: 1 },
-    commodityWords: [],
   },
   {
     code: "GAS",
@@ -60,8 +49,6 @@ export const REFERENCE_ASSETS: readonly ReferenceAssetDef[] = [
     decimals: 2,
     anchor: 100,
     dailyVol: 0.035,
-    macro: { OIL: 0.6 },
-    commodityWords: ["천연가스"],
   },
   {
     code: "COPPER",
@@ -71,8 +58,6 @@ export const REFERENCE_ASSETS: readonly ReferenceAssetDef[] = [
     decimals: 2,
     anchor: 100,
     dailyVol: 0.015,
-    macro: { COMMODITY: 1 },
-    commodityWords: ["구리"],
   },
 ];
 
@@ -100,3 +85,31 @@ export interface ReferenceTick {
   /** epoch ms */
   ts: number;
 }
+
+/**
+ * 뉴스 강도 1·가중치 1인 기사가 기초자산을 움직이는 크기 = 하루 변동성 × 이 값.
+ * 기사가 "급등/급락"이라 할 만큼(원/달러 약 3~14원, 유가 약 1~4%) 움직이게 2로 둔다.
+ */
+export const REFERENCE_NEWS_MOVE_MULTIPLE = 2;
+
+/** 뉴스 한 건이 기초자산에 줄 로그 수익률. 기사 속 숫자(가격·%)와 실제 가격 충격이 같은 식을 쓴다. */
+export function referenceNewsMove(code: ReferenceCode, weight: number, direction: 1 | -1, strength: number): number {
+  const def = referenceAsset(code);
+  if (!def || !(strength > 0) || weight === 0) return 0;
+  return direction * weight * strength * def.dailyVol * REFERENCE_NEWS_MOVE_MULTIPLE;
+}
+
+/**
+ * 원자재 기사의 {commodity} 품목 → 움직일 기초자산과 가중치. 직접 추적하는 품목은 1, 같은 계열 금속은
+ * 구리에 일부, 추적하지 않는 품목(리튬 등)은 아무것도 움직이지 않는다 — "니켈 급등" 기사가 구리를 크게 흔들지 않게.
+ */
+export const COMMODITY_REFERENCE_WEIGHTS: Readonly<Record<string, Readonly<Partial<Record<ReferenceCode, number>>>>> = {
+  구리: { COPPER: 1 },
+  니켈: { COPPER: 0.5 },
+  알루미늄: { COPPER: 0.5 },
+  아연: { COPPER: 0.5 },
+  철광석: { COPPER: 0.3 },
+  천연가스: { GAS: 1, OIL: 0.2 },
+  석탄: { GAS: 0.3 },
+  리튬: {},
+};

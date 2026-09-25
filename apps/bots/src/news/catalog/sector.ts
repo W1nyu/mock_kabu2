@@ -480,7 +480,7 @@ export const SECTOR_TEMPLATES: readonly NewsTemplate[] = [
     scope: "SECTOR",
     sentiment: "NEGATIVE",
     strength: { min: 0.35, max: 0.58 },
-    headlines: ["정제마진 배럴당 {level}로 추락… 정유사 적자 우려"],
+    headlines: ["정제마진 배럴당 {level}{로} 추락… 정유사 적자 우려"],
     sectorExposure: { ENERGY: 1, MATERIALS: 0.25 },
     slots: { level: { kind: "level", range: { min: 1, max: 4 }, unit: "달러", decimals: 1 } },
   },
