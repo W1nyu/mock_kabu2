@@ -9,12 +9,15 @@ test("a holder in profit is paid at the last price", () => {
   assert.deepEqual(p, { payout: 560_000n, price: 56_000, realized: 60_000n, rule: "LAST_PRICE" });
 });
 
-test("a holder at a loss is paid back at the average cost (sub-won truncated)", () => {
-  // 3주 원가 100,000(평단 33,333.3) → 현재가 30,000: 평단 33,333 × 3 = 99,999
+test("a holder at a loss is paid back at the average cost, sub-won rounded up so no one gets less than cost", () => {
+  // 3주 원가 100,000(평단 33,333.3) → 현재가 30,000: 평단 33,334 × 3 = 100,002
   const p = delistPayout({ qty: 3, costBasis: 100_000n, lastPrice: 30_000 });
-  assert.deepEqual(p, { payout: 99_999n, price: 33_333, realized: -1n, rule: "AVG_COST" });
+  assert.deepEqual(p, { payout: 100_002n, price: 33_334, realized: 2n, rule: "AVG_COST" });
+  // 운영 사례: 1,472주 원가 9,994,640(평단 6,789.8) → 6,790 × 1,472 = 9,994,880
+  assert.equal(delistPayout({ qty: 1_472, costBasis: 9_994_640n, lastPrice: 6_740 }).payout, 9_994_880n);
   // price × qty − costBasis = realized (정합성 검사의 식)
   assert.equal(BigInt(p.price) * 3n - 100_000n, p.realized);
+  assert.ok(p.payout >= 100_000n);
 });
 
 test("break-even counts as profit (last price)", () => {

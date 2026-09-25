@@ -17,8 +17,8 @@ export interface DelistPayout {
 /**
  * 사용자 보유분 현금 정산 규칙(2026-09-26 운영자 결정):
  *  - 현재가 평가액이 매입원가 이상(수익)이면 현재가로 정산
- *  - 손실이면 평단가로 정산(원금 보전). 평단가는 원 미만을 내린다 — 실현손익 기록이 price × qty − costBasis를
- *    정확히 지키게 하려는 것으로, 차이는 주당 1원 미만이다.
+ *  - 손실이면 평단가로 정산(원금 보전). 평단가는 원 미만을 올린다 — 사용자가 원금보다 적게 받지 않게 하면서
+ *    실현손익 기록이 price × qty − costBasis를 정확히 지키게 하려는 것으로, 차이는 주당 1원 미만(사용자 유리)이다.
  */
 export function delistPayout(input: { qty: number; costBasis: bigint; lastPrice: number }): DelistPayout {
   const { qty, costBasis, lastPrice } = input;
@@ -27,9 +27,9 @@ export function delistPayout(input: { qty: number; costBasis: bigint; lastPrice:
   if (atMarket >= costBasis) {
     return { payout: atMarket, price: lastPrice, realized: atMarket - costBasis, rule: "LAST_PRICE" };
   }
-  const avgFloor = costBasis / BigInt(qty);
-  const payout = avgFloor * BigInt(qty);
-  return { payout, price: Number(avgFloor), realized: payout - costBasis, rule: "AVG_COST" };
+  const avgCeil = (costBasis + BigInt(qty) - 1n) / BigInt(qty);
+  const payout = avgCeil * BigInt(qty);
+  return { payout, price: Number(avgCeil), realized: payout - costBasis, rule: "AVG_COST" };
 }
 
 /** 지수에서 종목을 뺀 새 구간 — 빼는 순간의 지수 수준이 그대로 이어지도록 제수를 다시 정한다. */
