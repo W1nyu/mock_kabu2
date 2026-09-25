@@ -17,6 +17,8 @@ import { PRISMA } from "../core/tokens";
 import { FuturesService } from "./futures.service";
 
 const OVERVIEW_TTL_MS = 2_000;
+/** 행사가가 비어 있을 때 다시 깔아 보는 최소 간격 */
+const ENSURE_RETRY_MS = 30_000;
 const DAY_MS = 86_400_000;
 
 export interface OptionRow {
@@ -53,6 +55,7 @@ export function daysToExpiry(now: number): number {
  */
 @Injectable()
 export class OptionsService implements OnModuleInit {
+  private lastEnsureAt = 0;
   constructor(
     @Inject(PRISMA) private prisma: PrismaClient,
     private futures: FuturesService,
@@ -125,6 +128,11 @@ export class OptionsService implements OnModuleInit {
         this.prisma.marketSymbol.findMany({ where: { kind: "OPTION" }, select: { symbol: true, lastPrice: true } }),
         this.futures.underlyingUnits(),
       ]);
+      // 기동 때 행사가 깔기가 실패했으면(종목 seed 전 기동·기초자산 값 없음) 조회 쪽에서 가끔 다시 시도한다.
+      if (series.length < OPTIONS.length && now - this.lastEnsureAt > ENSURE_RETRY_MS) {
+        this.lastEnsureAt = now;
+        void this.ensureSeries(now).catch((error) => console.warn("[options] ensure series retry failed", error));
+      }
       const strikeBySymbol = new Map(series.map((row) => [row.symbol, row.strike]));
       const lastBySymbol = new Map(symbols.map((row) => [row.symbol, row.lastPrice]));
       const days = daysToExpiry(now);
