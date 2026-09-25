@@ -36,6 +36,10 @@
   ```powershell
   Get-Content step1.sh -Raw | ssh mock-kabu "sed '1s/^\xEF\xBB\xBF//' | tr -d '\r' | bash -s"
   ```
+  - ⚠️ `bash -s`로 실행하면 스크립트 안의 `docker exec`·`docker compose exec/run`이 **남은 스크립트를 입력으로 먹어** 뒤 명령이 실행되지 않는다(2026-09-26, 백업 뒤 단계가 조용히 빠졌다). 스크립트는 서버 파일로 저장해 실행한다:
+    ```powershell
+    Get-Content step1.sh -Raw | ssh mock-kabu "sed '1s/^ï»¿//' | tr -d '' > /tmp/step1.sh && bash /tmp/step1.sh"
+    ```
   - ⚠️ PowerShell 파이프는 맨 앞에 BOM을 붙인다. `sed`가 지우지 않으면 첫 명령이 `﻿sudo: command not found`로 실패한다(2026-09-26 확인).
 - ⚠️ **셸 변수는 SSH 세션마다 사라진다.** 새로 접속했으면 먼저 아래 두 줄을 입력한다. 아래 모든 단계가 `$C`를 쓴다.
   ```bash

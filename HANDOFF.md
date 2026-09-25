@@ -1,6 +1,13 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
-## 2026-09-26 — 이체 제거·랭킹 메뉴, 선물 레버리지·청산·손절익절, 선물 거래 활성화 (로컬, 운영 미배포)
+## 2026-09-26 04:21 KST — 이체 제거·레버리지·선물 활성화 운영 적용 (e29d86e)
+
+- Claude가 직접 배포(04:11 정산 직후). 임시 점검(수동 maintenance) → 봇 정지 → pgBackRest diff `20260925-183002F_20260925-192146D` → migrate(`20260926030000_futures_leverage`) → api·web·엔진·정산 교체 → 점검 해제 → 봇 시작. 이어서 선물 거래 봇 bot6→bot9 교체로 봇만 재배포.
+- 롤백 태그 `mock-kabu2-app:pre-leverage-20260926`(+서비스별), 원본 `/tmp/src-before-pre-leverage-20260926.tgz`.
+- 확인: 정합성 전부 통과, 현물 10단·선물 5종 5단, `/account/transfer` 404, 엔진 lag 0, 선물 체결 3분 149건, load 2.5.
+- ⚠️ `bash -s`로 보낸 스크립트 안의 `docker exec`/`compose exec`/`run`은 **남은 스크립트를 stdin으로 먹는다** — 백업 뒤 단계가 조용히 사라졌다. 스크립트는 파일로 올려 `bash /tmp/x.sh`로 돌리거나 명령마다 `< /dev/null`.
+
+## 2026-09-26 — 이체 제거·랭킹 메뉴, 선물 레버리지·청산·손절익절, 선물 거래 활성화 (→ 04:21 운영 적용)
 
 - **이체 제거**: `/account/transfer`·`transfer-all`·`recipients` API와 화면 삭제. `/transfer`는 `/ranking`으로 보낸다. 랭킹은 대시보드에서 빼 `/ranking`(상위 50, 내 순위 포함)으로 옮김. 비밀번호 변경의 요청 제한 가드는 `PasswordRecheckRateLimitGuard`로 이름만 바꿔 유지. 과거 이체 원장(TRANSFER_IN/OUT)은 수익률 계산에 그대로 쓰인다.
 - **메뉴**: PC 상단에 "증권" 추가(종목·선물 거래 화면에서도 활성), "이체" → "랭킹"(폰 하단 탭도). 폰 하단 탭은 선물 거래 화면에서 숨김(매수/매도 바와 겹침).
