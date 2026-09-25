@@ -16,6 +16,7 @@ import { formatKstHm, formatKstMonthDay, formatKstTime, kstSessionStartMs, onKst
 import { indexSessionBase, type IndexPoint } from "@/lib/index-session";
 import { liveIndexLevel, type IndexMeta } from "@/lib/index-meta";
 import { chartTheme, useTheme } from "@/lib/theme";
+import { everyVisible } from "@/lib/visible-interval";
 
 interface SymbolRow {
   symbol: string;
@@ -105,11 +106,11 @@ export default function MarketIndexPanel() {
         .catch(() => {});
     };
     load();
-    const t = window.setInterval(load, REFRESH_MS);
+    const t = everyVisible(load, REFRESH_MS);
     const stopSessionRefresh = onKstSessionOpen(load);
     return () => {
       active = false;
-      window.clearInterval(t);
+      t();
       stopSessionRefresh();
     };
   }, [range]);

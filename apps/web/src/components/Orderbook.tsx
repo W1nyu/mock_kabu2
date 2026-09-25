@@ -5,6 +5,7 @@ import { api, fmt, getToken, getUser } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
+import { everyVisible } from "@/lib/visible-interval";
 
 interface Level {
   price: number;
@@ -78,12 +79,12 @@ function useMyDepth(symbol: string): MyDepth {
     const user = getUser();
     const loadSoon = debounce(load, ACCOUNT_REFRESH_DEBOUNCE_MS);
     const unsub = user ? subscribe([`account:${user.accountId}`], () => loadSoon()) : () => {};
-    const t = window.setInterval(load, 15_000);
+    const t = everyVisible(load, 15_000);
     return () => {
       active = false;
       unsub();
       loadSoon.cancel();
-      window.clearInterval(t);
+      t();
     };
   }, [symbol]);
   return depth;
@@ -192,7 +193,7 @@ export default function Orderbook({
     };
 
     loadSummary();
-    const refreshTimer = window.setInterval(loadSummary, 30_000);
+    const refreshTimer = everyVisible(loadSummary, 30_000);
     const stopSessionRefresh = onKstSessionOpen(loadSummary);
     const flushOrderbook = () => {
       orderbookFlushTimerRef.current = null;
@@ -241,7 +242,7 @@ export default function Orderbook({
     });
     return () => {
       disposed = true;
-      window.clearInterval(refreshTimer);
+      refreshTimer();
       stopSessionRefresh();
       unsubscribe();
       if (flashTimerRef.current != null) window.clearTimeout(flashTimerRef.current);

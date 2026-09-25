@@ -1,42 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { useMaintenance } from "@/lib/maintenance";
 import { formatKstHm } from "@/lib/time";
-
-interface MaintenanceStatus {
-  active: boolean;
-  startAt: string;
-  endAt: string;
-  manual?: boolean;
-  message?: string | null;
-  upcoming?: { startAt: string; endAt: string; message: string } | null;
-}
-
-const POLL_MS = 15_000;
 
 /**
  * 모든 화면 위에 뜨는 점검 안내. 운영자가 건 임시 점검은 시작 전부터 예고하고, 점검 중에는
  * 주문이 막힌다는 것을 알린다. 매일 04:10~04:20 점검은 진행 중일 때만 보인다.
  */
 export default function MaintenanceBanner() {
-  const [status, setStatus] = useState<MaintenanceStatus | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    const load = () =>
-      api<MaintenanceStatus>("/health/maintenance", { auth: false })
-        .then((data) => {
-          if (active) setStatus(data);
-        })
-        .catch(() => {});
-    load();
-    const timer = window.setInterval(load, POLL_MS);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, []);
+  const status = useMaintenance();
 
   if (!status) return null;
   let text: string | null = null;

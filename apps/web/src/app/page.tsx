@@ -15,9 +15,11 @@ import Sparkline from "@/components/Sparkline";
 import ChipTabs from "@/components/ChipTabs";
 import { ALL_INDUSTRIES, INDUSTRY_STORAGE_KEY, industryChipItems } from "@/lib/industry-chips";
 import { mergeNews, parseNewsItem } from "@/lib/news";
+import { cleanSparks } from "@/lib/sparks";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
+import { everyVisible } from "@/lib/visible-interval";
 
 // lightweight-charts는 브라우저 전용이고 번들이 크다. 첫 화면(자산·시세 표)을 먼저 그리고 차트는 뒤에 싣는다.
 const EquityChart = dynamic(() => import("@/components/EquityChart"), {
@@ -68,8 +70,6 @@ interface CandleDto {
 }
 
 /** 종목 표 미니 추세선: 5분봉 종가 최근 6시간(72개). 실시간 가격은 마지막 점을 대신한다. */
-const SPARK_INTERVAL = "5m";
-const SPARK_POINTS = 72;
 const SPARK_REFRESH_MS = 5 * 60 * 1000;
 
 type SortKey = "symbol" | "price" | "change" | "turnover";
@@ -213,13 +213,13 @@ export default function DashboardPage() {
       ? subscribe([`account:${user.accountId}`], () => refreshAccountSoon())
       : () => {};
     // WebSocket push가 주 경로이며, 재연결 사이에 놓친 이벤트는 느린 폴백으로 보정한다.
-    const fallback = window.setInterval(() => {
+    const fallback = everyVisible(() => {
       refreshAccount();
       refreshSymbols();
     }, 15_000);
     const stopSessionRefresh = onKstSessionOpen(refreshSymbols);
     return () => {
-      window.clearInterval(fallback);
+      fallback();
       stopSessionRefresh();
       refreshAccountSoon.cancel();
       unsub();
@@ -249,24 +249,19 @@ export default function DashboardPage() {
   useEffect(() => {
     if (symbols.length === 0) return;
     let active = true;
+    // 전 종목을 한 요청으로 받는다(서버가 1분 공유 캐시).
     const load = () => {
-      Promise.all(
-        symbols.map(async ({ symbol }) => {
-          const rows = await api<CandleDto[]>(
-            `/market/candles/${symbol}?interval=${SPARK_INTERVAL}&limit=${SPARK_POINTS}`,
-            { auth: false },
-          ).catch(() => [] as CandleDto[]);
-          return [symbol, rows.map((c) => c.close).filter((v) => Number.isFinite(v))] as const;
-        }),
-      ).then((entries) => {
-        if (active) setSparks(Object.fromEntries(entries));
-      });
+      api<Record<string, number[]>>("/market/sparks", { auth: false })
+        .then((data) => {
+          if (active) setSparks(cleanSparks(data));
+        })
+        .catch(() => {});
     };
     load();
-    const t = window.setInterval(load, SPARK_REFRESH_MS);
+    const t = everyVisible(load, SPARK_REFRESH_MS);
     return () => {
       active = false;
-      window.clearInterval(t);
+      t();
     };
   }, [symbols]);
 

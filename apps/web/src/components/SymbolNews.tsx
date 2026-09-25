@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { mergeNews, parseNewsItem } from "@/lib/news";
 import { subscribe } from "@/lib/socket";
+import { everyVisible } from "@/lib/visible-interval";
 import { NewsList } from "./NewsFeed";
 
 /**
@@ -35,7 +36,7 @@ export default function SymbolNews({ symbol }: { symbol: string }) {
       if (item) setItems((previous) => mergeNews([item], previous));
     });
 
-    const fallback = window.setInterval(() => {
+    const fallback = everyVisible(() => {
       api<NewsItemDto[]>(`/market/news?symbol=${symbol}&limit=30`, { auth: false })
         .then((rows) => setItems((previous) => mergeNews(previous, rows)))
         .catch(() => {});
@@ -44,7 +45,7 @@ export default function SymbolNews({ symbol }: { symbol: string }) {
     return () => {
       active = false;
       unsubscribe();
-      window.clearInterval(fallback);
+      fallback();
     };
   }, [symbol]);
 

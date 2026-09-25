@@ -7,11 +7,13 @@ import ChipTabs from "@/components/ChipTabs";
 import Sparkline from "@/components/Sparkline";
 import { api, fmt } from "@/lib/api";
 import { indexSessionBase, type IndexPoint } from "@/lib/index-session";
+import { cleanSparks } from "@/lib/sparks";
 import { ALL_INDUSTRIES, INDUSTRY_STORAGE_KEY, industryChipItems } from "@/lib/industry-chips";
 import { liveIndexLevel, type IndexMeta } from "@/lib/index-meta";
 import { subscribe } from "@/lib/socket";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { readQueryParam, writeQueryParams } from "@/lib/url-query";
+import { everyVisible } from "@/lib/visible-interval";
 
 /**
  * 증권 탭 — 폰 하단 탭의 두 번째 칸. 지수 요약 카드(누르면 `/market-index`)와 전 종목 목록을
@@ -114,10 +116,10 @@ export default function MarketPage() {
 
   useEffect(() => {
     load();
-    const t = window.setInterval(load, 15_000);
+    const t = everyVisible(load, 15_000);
     const stopSessionRefresh = onKstSessionOpen(load);
     return () => {
-      window.clearInterval(t);
+      t();
       stopSessionRefresh();
     };
   }, [load]);
@@ -141,23 +143,19 @@ export default function MarketPage() {
   useEffect(() => {
     if (!symbolKey) return;
     let active = true;
+    // 전 종목을 한 요청으로 받는다(서버가 1분 공유 캐시).
     const loadSparks = () => {
-      Promise.all(
-        symbolKey.split(",").map(async (symbol) => {
-          const candles = await api<CandleDto[]>(`/market/candles/${symbol}?interval=5m&limit=72`, {
-            auth: false,
-          }).catch(() => [] as CandleDto[]);
-          return [symbol, candles.map((c) => c.close).filter((v) => Number.isFinite(v))] as const;
-        }),
-      ).then((entries) => {
-        if (active) setSparks(Object.fromEntries(entries));
-      });
+      api<Record<string, number[]>>("/market/sparks", { auth: false })
+        .then((data) => {
+          if (active) setSparks(cleanSparks(data));
+        })
+        .catch(() => {});
     };
     loadSparks();
-    const t = window.setInterval(loadSparks, 5 * 60 * 1000);
+    const t = everyVisible(loadSparks, 5 * 60 * 1000);
     return () => {
       active = false;
-      window.clearInterval(t);
+      t();
     };
   }, [symbolKey]);
 

@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
-import { BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
-import type { PrismaClient } from "@mock-kabu/db";
+import { BadRequestException, Inject, Injectable, Optional, UnauthorizedException } from "@nestjs/common";
+import type { Prisma, PrismaClient } from "@mock-kabu/db";
 import {
   CHANNELS,
   industryById,
@@ -11,6 +11,7 @@ import {
   type NewsItemDto,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
+import { MemoCache } from "../core/memo-cache";
 import { PRISMA, REDIS } from "../core/tokens";
 // Same trust boundary as the liquidity endpoint: the local bots process
 // talking to the local API without a user session.
@@ -21,6 +22,12 @@ const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 40;
+/**
+ * 공개 뉴스 목록은 모든 접속자가 같은 질의를 반복한다. 2초 공유하고, 새 기사가 발행되면 바로 비운다.
+ * 실시간 새 기사는 소켓으로 가므로 목록 캐시는 첫 화면·재연결 보조용이다.
+ */
+const LIST_TTL_MS = 2_000;
+const LIST_CACHE_PREFIX = "news:list:";
 
 export interface PublishNewsDto {
   externalId?: unknown;
@@ -49,6 +56,7 @@ export class NewsService {
   constructor(
     @Inject(PRISMA) private prisma: PrismaClient,
     @Inject(REDIS) private redis: Redis,
+    @Optional() private cache: MemoCache = new MemoCache(),
   ) {}
 
   /**
@@ -93,6 +101,11 @@ export class NewsService {
               { OR: [{ symbol }, marketWide, ...(own ? [{ industry: own.id }] : [])] }
             : {};
 
+    const key = `${LIST_CACHE_PREFIX}${symbol ?? ""}:${industry === null ? "market" : (industry?.id ?? "")}:${take}`;
+    return this.cache.getOrCompute(key, LIST_TTL_MS, () => this.query(where, take));
+  }
+
+  private async query(where: Prisma.NewsItemWhereInput, take: number): Promise<NewsItemDto[]> {
     const rows = await this.prisma.newsItem.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -171,6 +184,7 @@ export class NewsService {
       },
     });
 
+    this.cache.invalidate(LIST_CACHE_PREFIX);
     await this.broadcast(this.toPublicDto(row));
     return { id: row.id };
   }

@@ -12,6 +12,7 @@ import {
 import { api, getToken, won } from "@/lib/api";
 import { formatKstHm, formatKstMonthDay, formatKstTime } from "@/lib/time";
 import { chartTheme, useTheme } from "@/lib/theme";
+import { everyVisible } from "@/lib/visible-interval";
 
 interface EquityPoint {
   ts: number;
@@ -79,10 +80,10 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
         .catch(() => {});
     };
     load();
-    const t = window.setInterval(load, REFRESH_MS);
+    const t = everyVisible(load, REFRESH_MS);
     return () => {
       active = false;
-      window.clearInterval(t);
+      t();
     };
   }, [range, refreshKey]);
 

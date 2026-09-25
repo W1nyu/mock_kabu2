@@ -54,6 +54,14 @@ export class ApiError extends Error {
   }
 }
 
+const LOGIN_ONLY_PREFIXES = ["/account", "/orders"];
+
+/** 서버에서 로그인 없이는 항상 401인 경로 (공개 시세·뉴스·지수는 해당 없음). */
+export function requiresLogin(path: string): boolean {
+  const pathname = path.split("?")[0];
+  return LOGIN_ONLY_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
 export async function api<T = unknown>(
   path: string,
   options: { method?: string; body?: unknown; auth?: boolean; headers?: Record<string, string> } = {},
@@ -63,6 +71,9 @@ export async function api<T = unknown>(
   if (options.auth !== false) {
     token = getToken();
     if (token) headers.authorization = `Bearer ${token}`;
+    // 로그인 전용 경로는 토큰이 없으면 서버가 어차피 401을 준다. 비로그인 방문자가 종목 화면을
+    // 열어 둘 때마다 실패할 요청을 주기적으로 보내지 않도록 여기서 같은 결과로 끝낸다.
+    else if (requiresLogin(path)) throw new ApiError(401, "로그인이 필요합니다");
   }
   const res = await fetch(`${API_URL}${path}`, {
     method: options.method ?? "GET",

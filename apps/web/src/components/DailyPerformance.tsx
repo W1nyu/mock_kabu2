@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, fmt, getToken, won } from "@/lib/api";
+import { everyVisible } from "@/lib/visible-interval";
 
 interface DailyRow {
   date: string;
@@ -43,10 +44,10 @@ export default function DailyPerformance({ refreshKey }: { refreshKey?: number }
         .catch(() => {});
     };
     load();
-    const t = window.setInterval(load, REFRESH_MS);
+    const t = everyVisible(load, REFRESH_MS);
     return () => {
       active = false;
-      window.clearInterval(t);
+      t();
     };
   }, [refreshKey]);
 

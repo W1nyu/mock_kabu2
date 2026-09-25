@@ -23,6 +23,12 @@ import { PRISMA, REDIS } from "../core/tokens";
  */
 const SUMMARY_TTL_MS = 2_000;
 const AGGREGATE_CANDLE_TTL_MS = 5_000;
+/** 1분 봉·최근 체결 목록: 실시간 갱신은 소켓이 하므로 첫 화면용 REST는 1초만 공유해도 된다. */
+const LIVE_REST_TTL_MS = 1_000;
+/** 전 종목 미니 추세선(5분봉 종가). 화면은 5분마다 다시 읽으므로 1분 재사용이면 충분하다. */
+const SPARK_TTL_MS = 60_000;
+const SPARK_INTERVAL_SECONDS = 300;
+const SPARK_POINTS = 72;
 const INDEX_TTL_MS = { "1d": 15_000, "1w": 60_000, all: 120_000 } as const;
 const INDEX_META_TTL_MS = 10_000;
 /** 재상장 전 체결은 시세에서 뺀다 (listed_at이 없으면 전체). */
@@ -322,12 +328,14 @@ export class MarketController {
 
     const take = Math.min(Math.max(1, Number(limit) || 180), 1000);
     if (seconds === BASE_CANDLE_SECONDS) {
-      const rows = await this.prisma.candle.findMany({
-        where: { symbol, interval: BASE_CANDLE_INTERVAL },
-        orderBy: { ts: "desc" },
-        take,
+      return this.cache.getOrCompute(`candles:${symbol}:1m:${take}`, LIVE_REST_TTL_MS, async () => {
+        const rows = await this.prisma.candle.findMany({
+          where: { symbol, interval: BASE_CANDLE_INTERVAL },
+          orderBy: { ts: "desc" },
+          take,
+        });
+        return rows.reverse();
       });
-      return rows.reverse();
     }
     // 집계 봉은 1분 봉을 매번 다시 묶는 무거운 쿼리라 몇 초 재사용한다.
     return this.cache.getOrCompute(`candles:${symbol}:${interval}:${take}`, AGGREGATE_CANDLE_TTL_MS, () =>
@@ -371,14 +379,34 @@ export class MarketController {
     return rows.reverse();
   }
 
+  /**
+   * 전 종목 추세선을 한 번에. 예전에는 화면마다 종목 수만큼 봉 요청을 보냈다(18종목 → 18회).
+   * 응답은 `{ 종목: [종가…] }`이고 결과를 1분 공유하므로 접속자 수와 무관하게 DB 조회가 일정하다.
+   */
+  @Get("sparks")
+  async sparks() {
+    return this.cache.getOrCompute("sparks:5m", SPARK_TTL_MS, async () => {
+      const entries = await Promise.all(
+        [...ACTIVE_SYMBOLS].map(async (symbol) => {
+          const rows = await this.aggregateCandles(symbol, SPARK_INTERVAL_SECONDS, SPARK_POINTS);
+          return [symbol, rows.map((row) => row.close)] as const;
+        }),
+      );
+      return Object.fromEntries(entries);
+    });
+  }
+
   @Get("trades/:symbol")
   async trades(@Param("symbol") symbol: string, @Query("limit") limit = "50") {
     this.assertActiveSymbol(symbol);
-    const listed = await this.prisma.marketSymbol.findUnique({ where: { symbol }, select: { listedAt: true } });
-    return this.prisma.trade.findMany({
-      where: { symbol, ...(listed?.listedAt ? { createdAt: { gte: listed.listedAt } } : {}) },
-      orderBy: { createdAt: "desc" },
-      take: Math.min(Number(limit) || 50, 200),
+    const take = Math.min(Number(limit) || 50, 200);
+    return this.cache.getOrCompute(`trades:${symbol}:${take}`, LIVE_REST_TTL_MS, async () => {
+      const listed = await this.prisma.marketSymbol.findUnique({ where: { symbol }, select: { listedAt: true } });
+      return this.prisma.trade.findMany({
+        where: { symbol, ...(listed?.listedAt ? { createdAt: { gte: listed.listedAt } } : {}) },
+        orderBy: { createdAt: "desc" },
+        take,
+      });
     });
   }
 

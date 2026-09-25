@@ -180,7 +180,7 @@ export const FLOW_TEMPLATES: readonly NewsTemplate[] = [
     scope: "SYMBOL",
     sentiment: "POSITIVE",
     strength: { min: 0.3, max: 0.5 },
-    headlines: ["{name}, {product} 테마 부각에 거래량 {multiple} 폭증", "{product} 관련주 급등… {name} 수혜 기대"],
+    headlines: ["{name}, {product} 테마 부각에 거래량 {multiple}배 폭증", "{product} 관련주 급등… {name} 수혜 기대"],
     persistence: { min: 0.9, max: 0.93 },
     volumeMultiplier: { min: 1.5, max: 2 },
     slots: {

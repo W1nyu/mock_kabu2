@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api, getToken, getUser } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
+import { everyVisible } from "@/lib/visible-interval";
 
 export interface PositionLine {
   id: string;
@@ -133,12 +134,12 @@ export function usePositionLines(symbol: string): PositionLine[] {
     const user = getUser();
     const loadSoon = debounce(load, ACCOUNT_REFRESH_DEBOUNCE_MS);
     const unsub = user ? subscribe([`account:${user.accountId}`], () => loadSoon()) : () => {};
-    const t = window.setInterval(load, 15_000);
+    const t = everyVisible(load, 15_000);
     return () => {
       active = false;
       unsub();
       loadSoon.cancel();
-      window.clearInterval(t);
+      t();
     };
   }, [symbol]);
 

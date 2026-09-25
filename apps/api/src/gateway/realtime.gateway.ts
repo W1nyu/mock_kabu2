@@ -25,6 +25,11 @@ import { readApiRuntimeConfig } from "../core/runtime-config";
 const WEB_ORIGINS = readApiRuntimeConfig().webOrigins;
 const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
 const MAX_CHANNELS_PER_MESSAGE = 32;
+/**
+ * 호가는 매번 전체 스냅샷이라 사이 값을 버려도 정보가 줄지 않는다. 마켓메이커가 여러 단을 연달아
+ * 고칠 때 몰려오는 스냅샷을 이 간격 안에서는 최신 1건으로 합쳐 보낸다(첫 건은 즉시).
+ */
+export const ORDERBOOK_COALESCE_MS = 150;
 
 /**
  * 실시간 채널 중계:
@@ -41,6 +46,8 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   private readonly accountChannelBySocket = new Map<string, string>();
   private readonly activeAccountSubscriptions = new Set<string>();
   private readonly pendingAccountSubscriptions = new Set<string>();
+  /** 호가 채널별: 합치는 중이면 타이머, 그 사이 도착한 최신 스냅샷 */
+  private readonly orderbookThrottle = new Map<string, { timer: ReturnType<typeof setTimeout>; latest: string | null }>();
 
   constructor(
     @Inject(REDIS_SUB) private sub: Redis,
@@ -132,10 +139,47 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     try {
       const socketChannel = toSocketChannel(channel);
       if (!socketChannel) return;
-      this.server.to(socketChannel).emit("message", { channel: socketChannel, data: JSON.parse(message) });
+      // 호가·체결은 종목마다 초당 여러 건이 오지만 대부분의 종목 방은 비어 있다. 이 프로세스에
+      // 구독자가 없으면 JSON 해석부터 건너뛴다(각 API 프로세스가 Redis를 직접 구독하므로 안전).
+      if (!this.server.sockets.adapter.rooms.get(socketChannel)?.size) return;
+      if (socketChannel.startsWith("orderbook:")) {
+        this.relayCoalesced(socketChannel, message);
+        return;
+      }
+      this.emitRaw(socketChannel, message);
     } catch (error) {
       console.error("[gateway] relay failed", error);
     }
+  }
+
+  private emitRaw(socketChannel: string, message: string): void {
+    this.server.to(socketChannel).emit("message", { channel: socketChannel, data: JSON.parse(message) });
+  }
+
+  /** 첫 스냅샷은 바로, 이후 ORDERBOOK_COALESCE_MS 안에 온 것은 마지막 것만 창이 끝날 때 보낸다. */
+  private relayCoalesced(socketChannel: string, message: string): void {
+    const pending = this.orderbookThrottle.get(socketChannel);
+    if (pending) {
+      pending.latest = message;
+      return;
+    }
+    this.emitRaw(socketChannel, message);
+    const flush = () => {
+      const state = this.orderbookThrottle.get(socketChannel);
+      if (!state?.latest) {
+        this.orderbookThrottle.delete(socketChannel);
+        return;
+      }
+      const latest = state.latest;
+      state.latest = null;
+      state.timer = setTimeout(flush, ORDERBOOK_COALESCE_MS);
+      try {
+        this.emitRaw(socketChannel, latest);
+      } catch (error) {
+        console.error("[gateway] relay failed", error);
+      }
+    };
+    this.orderbookThrottle.set(socketChannel, { timer: setTimeout(flush, ORDERBOOK_COALESCE_MS), latest: null });
   }
 
   private retainAccountChannel(socket: Socket, channel: string): void {

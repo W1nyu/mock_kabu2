@@ -10,6 +10,7 @@ import { api, fmt, getUser } from "@/lib/api";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { formatKstTime } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
+import { everyVisible } from "@/lib/visible-interval";
 
 const STATUS_LABEL: Record<ConditionalOrderDto["status"], string> = {
   WAITING: "대기",
@@ -92,11 +93,11 @@ export default function MyConditionalOrders({
           refreshSoon();
         })
       : () => {};
-    const t = setInterval(refresh, 15_000);
+    const t = everyVisible(refresh, 15_000);
     return () => {
       unsub();
       refreshSoon.cancel();
-      clearInterval(t);
+      t();
     };
   }, [refresh, symbol]);
 

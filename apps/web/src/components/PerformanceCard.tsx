@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, fmt, getToken, won } from "@/lib/api";
 import { drawdownOf, type Drawdown } from "@/lib/drawdown";
+import { everyVisible } from "@/lib/visible-interval";
 
 export interface RealizedStats {
   fills: number;
@@ -37,10 +38,10 @@ export default function PerformanceCard({ stats }: { stats: RealizedStats | null
         .catch(() => {});
     };
     load();
-    const t = window.setInterval(load, 60_000);
+    const t = everyVisible(load, 60_000);
     return () => {
       active = false;
-      window.clearInterval(t);
+      t();
     };
   }, [stats?.fills]);
   return (

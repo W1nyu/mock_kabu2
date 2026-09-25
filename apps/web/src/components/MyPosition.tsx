@@ -6,6 +6,7 @@ import { api, fmt, getUser, won } from "@/lib/api";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { guardSummary } from "@/lib/guards";
 import { subscribe } from "@/lib/socket";
+import { everyVisible } from "@/lib/visible-interval";
 
 interface HoldingRow {
   symbol: string;
@@ -76,7 +77,8 @@ export default function MyPosition({
     setProtectError(null);
     setGuards([]);
     refresh();
-    const t = setInterval(refresh, 5000);
+    // 체결·주문 변경은 계좌 채널 알림으로 바로 반영된다 — 주기 조회는 알림을 놓친 경우의 보조.
+    const t = everyVisible(refresh, 30_000);
     const user = getUser();
     const refreshSoon = debounce(refresh, ACCOUNT_REFRESH_DEBOUNCE_MS);
     const unsubAccount = user
@@ -86,7 +88,7 @@ export default function MyPosition({
       if (Number.isFinite(data?.price)) setLivePrice(data.price);
     });
     return () => {
-      clearInterval(t);
+      t();
       unsubAccount();
       unsubTrades();
       if (confirmTimer.current) clearTimeout(confirmTimer.current);

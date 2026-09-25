@@ -9,9 +9,34 @@ x-app-build: &app-build
     NEXT_PUBLIC_API_URL: ${APP_ORIGIN:?APP_ORIGIN is required}
 
 services:
+  # e2-standard-4 (vCPU 4, 16GB) 기준 한도. 기본 compose는 4GB OCI 서버와 같이 쓰므로
+  # 동시 접속자 대비 여유는 이 GCP 오버레이에서만 늘린다.
   postgres:
     environment:
       PGBACKREST_PG1_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+    # command 목록은 병합되지 않고 통째로 바뀐다 — 기본 파일의 인자를 모두 옮기고 메모리만 늘렸다.
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=mock-kabu archive-push %p
+      - -c
+      - archive_timeout=900
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - max_connections=80
+      - -c
+      - wal_compression=on
+    shm_size: 512mb
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: 1536M
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - pgbackrest-data:/var/lib/pgbackrest
@@ -27,6 +52,13 @@ services:
     build: *app-build
     environment:
       WEB_ORIGIN: ${APP_ORIGIN:?APP_ORIGIN is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?connection_limit=12
+      NODE_OPTIONS: --max-old-space-size=512
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 768M
 
   matching-engine:
     build: *app-build
@@ -41,6 +73,11 @@ services:
     build: *app-build
     environment:
       NEXT_PUBLIC_API_URL: ${APP_ORIGIN:?APP_ORIGIN is required}
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 512M
 
   caddy:
     volumes:

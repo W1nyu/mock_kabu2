@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, fmt, getUser } from "@/lib/api";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { subscribe } from "@/lib/socket";
+import { everyVisible } from "@/lib/visible-interval";
 
 interface OrderRow {
   id: string;
@@ -57,11 +58,11 @@ export default function MyOpenOrders({
     const unsub = user ? subscribe([`account:${user.accountId}`], () => refreshSoon()) : () => {};
     // Account pushes and the order form's direct refresh are the normal path.
     // Keep a light fallback for a reconnect that missed both.
-    const t = setInterval(refresh, 15_000);
+    const t = everyVisible(refresh, 15_000);
     return () => {
       unsub();
       refreshSoon.cancel();
-      clearInterval(t);
+      t();
     };
   }, [refresh]);
 

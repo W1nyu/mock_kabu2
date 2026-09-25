@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, fmt } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
+import { everyVisible } from "@/lib/visible-interval";
 
 interface SessionStats {
   high: number;
@@ -130,7 +131,7 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
     };
 
     loadSummary();
-    const refreshTimer = window.setInterval(loadSummary, 30_000);
+    const refreshTimer = everyVisible(loadSummary, 30_000);
     const stopSessionRefresh = onKstSessionOpen(loadSummary);
     const unsubscribe = subscribe([`trades:${symbol}`], ({ data }) => {
       const tick = parseTick(data);
@@ -145,7 +146,7 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
 
     return () => {
       disposed = true;
-      window.clearInterval(refreshTimer);
+      refreshTimer();
       stopSessionRefresh();
       unsubscribe();
     };

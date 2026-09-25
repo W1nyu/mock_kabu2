@@ -9,6 +9,7 @@ import { mergeNews, parseNewsItem } from "@/lib/news";
 import { MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 import { readQueryParam, writeQueryParams } from "@/lib/url-query";
+import { everyVisible } from "@/lib/visible-interval";
 
 /**
  * 뉴스 — 종목이 15개로 늘어 종목 칩 한 줄이 길어졌으므로 산업군으로 먼저 고르고, 고른 산업군
@@ -81,12 +82,12 @@ export default function NewsPage() {
     });
 
     // WebSocket push is the main path; this backstops a missed reconnect.
-    const fallback = window.setInterval(load, 15_000);
+    const fallback = everyVisible(load, 15_000);
 
     return () => {
       active = false;
       unsubscribe();
-      window.clearInterval(fallback);
+      fallback();
     };
   }, [scope]);
 

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api, fmt } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
+import { everyVisible } from "@/lib/visible-interval";
 
 interface SymbolRow {
   symbol: string;
@@ -32,11 +33,11 @@ export default function SymbolStrip({ current }: { current: string }) {
         .catch(() => {});
     };
     load();
-    const refreshTimer = window.setInterval(load, 30_000);
+    const refreshTimer = everyVisible(load, 30_000);
     const stopSessionRefresh = onKstSessionOpen(load);
     return () => {
       active = false;
-      window.clearInterval(refreshTimer);
+      refreshTimer();
       stopSessionRefresh();
     };
   }, []);

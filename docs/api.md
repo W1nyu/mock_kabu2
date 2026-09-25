@@ -31,7 +31,8 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/market/trades/:symbol?limit=` | 최근 체결 |
 | GET | `/market/index?range=1d|1w|all` | 모의 시장 지수 `[{ts, value}]` — 시가총액 가중: Σ(종가 × 발행주식수) ÷ 제수. 발행주식수는 상장 시가총액이 종목마다 1.2조 원(상장 시 각 20%)이 되도록 정했다(`SYMBOLS.listedShares`). 편입 종목·제수는 `market.index_epochs` 구간이 정하며 첫 구간은 상장 시 1,000, 재상장 등 편입 변경 시에는 지수 수준이 이어지도록 새 구간의 제수를 정한다. KST 09:00 점은 해당 1분봉 시가(체결이 없는 종목은 직전가, 거래 전 종목은 상장가)를 사용하고 기간 조회 시작 전 가격도 이어받는다. |
 | GET | `/market/index/meta` | 현재 지수 구간 `{startsAt, divisor, members: [{symbol, listedShares}]}` — 웹이 실시간 체결가로 현재 지수를 같은 식으로 계산할 때 쓴다 (10초 캐시) |
-| GET | `/market/news?symbol=&industry=&limit=` | 가상 뉴스(호재/악재·강도는 응답에서 제외). `symbol`은 그 종목+시장 전반 기사, `industry=<산업군 id>`는 그 산업군 종목 기사만(`INDUSTRIES`: tech·battery·industrial·mobility·media·health·consumer·finance), `industry=market`은 시장 전반 기사만 |
+| GET | `/market/news?symbol=&industry=&limit=` | 가상 뉴스(호재/악재·강도는 응답에서 제외). `symbol`은 그 종목·시장 전반·소속 산업군 기사, `industry=<산업군 id>`는 그 산업군 종목 기사와 산업군 기사(`INDUSTRIES`: tech·battery·industrial·mobility·media·health·energy·consumer·finance), `industry=market`은 시장 전반 기사만 |
+| GET | `/market/sparks` | 전 종목 미니 추세선 `{ 종목: [5분봉 종가…] }` (최근 72개). 1분 공유 캐시 — 화면마다 종목 수만큼 봉을 요청하지 않게 한 묶음 API |
 
 ## 주문 `/orders` (인증)
 

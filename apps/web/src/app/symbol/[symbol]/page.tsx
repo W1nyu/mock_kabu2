@@ -17,6 +17,7 @@ import TradesFeed from "@/components/TradesFeed";
 import { api, getToken } from "@/lib/api";
 import { COMPACT_TRADE_QUERY, useMediaQuery } from "@/lib/media";
 import { subscribe } from "@/lib/socket";
+import { useMaintenance } from "@/lib/maintenance";
 import { formatKstHm } from "@/lib/time";
 
 // 캔들차트(lightweight-charts)는 클라이언트에서만 렌더하고 코드도 따로 싣는다.
@@ -32,14 +33,6 @@ interface SymbolInfo {
   lastPrice: number;
 }
 
-interface MaintenanceStatus {
-  active: boolean;
-  startAt: string;
-  endAt: string;
-  timezone: string;
-  manual?: boolean;
-  message?: string | null;
-}
 
 type MobileTab = "orders" | "trades" | "news";
 const MOBILE_TABS: { id: MobileTab; label: string }[] = [
@@ -56,24 +49,14 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
   const [priceHint, setPriceHint] = useState<{ symbol: string; price: number; seq: number } | null>(null);
   const [livePrice, setLivePrice] = useState<{ symbol: string; price: number } | null>(null);
   const [orderRefreshKey, setOrderRefreshKey] = useState(0);
-  const [maintenance, setMaintenance] = useState<MaintenanceStatus | null>(null);
+  // 배너와 같은 조회를 나눠 쓴다 — 점검 시작·종료 시각에 맞춰 다시 읽어 제때 화면을 바꾼다.
+  const maintenance = useMaintenance();
   // 폰(lg 미만)에서는 차트 위주로 보여 주고, 호가·주문은 하단 매수/매도 버튼이 여는 시트에 둔다.
   const compact = useMediaQuery(COMPACT_TRADE_QUERY);
   const [sheet, setSheet] = useState<{ symbol: string; side: "BUY" | "SELL"; seq: number } | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("orders");
   const closeSheet = useCallback(() => setSheet(null), []);
 
-  useEffect(() => {
-    let active = true;
-    const refresh = () => {
-      api<MaintenanceStatus>("/health/maintenance", { auth: false })
-        .then((status) => { if (active) setMaintenance(status); })
-        .catch(() => {});
-    };
-    refresh();
-    const timer = setInterval(refresh, 5_000);
-    return () => { active = false; clearInterval(timer); };
-  }, []);
 
   useEffect(() => {
     let active = true;
