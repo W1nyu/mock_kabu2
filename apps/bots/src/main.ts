@@ -127,24 +127,26 @@ async function observeLatestMarketTrades(
   ref: MarketModel,
   observedTradeIds: Map<string, string>,
 ) {
-  await Promise.all(
-    SYMBOLS.map(async (symbol) => {
-      try {
-        const newestFirst = await client.recentTrades(symbol.symbol, MARKET_OBSERVATION_BATCH_SIZE);
-        if (newestFirst.length === 0) return;
-        const knownId = observedTradeIds.get(symbol.symbol);
-        const knownIndex = knownId ? newestFirst.findIndex((trade) => trade.id === knownId) : -1;
-        const unseen = knownIndex >= 0 ? newestFirst.slice(0, knownIndex) : newestFirst;
-        for (const trade of [...unseen].reverse()) {
-          if (ref.observeMarketPrice(symbol.symbol, trade.price, trade.id)) {
-            observedTradeIds.set(symbol.symbol, trade.id);
-          }
-        }
-      } catch (error) {
-        console.warn(`[bots] could not observe latest trade for ${symbol.symbol}`, error);
+  // 전 종목을 한 요청으로 읽는다(예전: 종목마다 한 번씩, 0.5초마다 18회).
+  let bySymbol: Record<string, { id: string; price: number }[]>;
+  try {
+    bySymbol = await client.latestTrades(MARKET_OBSERVATION_BATCH_SIZE);
+  } catch (error) {
+    console.warn("[bots] could not observe latest trades", error);
+    return;
+  }
+  for (const symbol of SYMBOLS) {
+    const newestFirst = bySymbol[symbol.symbol] ?? [];
+    if (newestFirst.length === 0) continue;
+    const knownId = observedTradeIds.get(symbol.symbol);
+    const knownIndex = knownId ? newestFirst.findIndex((trade) => trade.id === knownId) : -1;
+    const unseen = knownIndex >= 0 ? newestFirst.slice(0, knownIndex) : newestFirst;
+    for (const trade of [...unseen].reverse()) {
+      if (ref.observeMarketPrice(symbol.symbol, trade.price, trade.id)) {
+        observedTradeIds.set(symbol.symbol, trade.id);
       }
-    }),
-  );
+    }
+  }
 }
 
 function toTick(price: number, def: SymbolDef): number {

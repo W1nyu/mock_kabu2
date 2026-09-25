@@ -25,6 +25,11 @@ const SUMMARY_TTL_MS = 2_000;
 const AGGREGATE_CANDLE_TTL_MS = 5_000;
 /** 1분 봉·최근 체결 목록: 실시간 갱신은 소켓이 하므로 첫 화면용 REST는 1초만 공유해도 된다. */
 const LIVE_REST_TTL_MS = 1_000;
+/**
+ * 봇의 시장 관찰 루프가 0.5초마다 부르는 전 종목 최근 체결. 0.25초 공유로 봇 관찰 주기보다 짧게 둔다.
+ */
+const LATEST_TRADES_TTL_MS = 250;
+const LATEST_TRADES_MAX = 50;
 /** 전 종목 미니 추세선(5분봉 종가). 화면은 5분마다 다시 읽으므로 1분 재사용이면 충분하다. */
 const SPARK_TTL_MS = 60_000;
 const SPARK_INTERVAL_SECONDS = 300;
@@ -390,6 +395,32 @@ export class MarketController {
         [...ACTIVE_SYMBOLS].map(async (symbol) => {
           const rows = await this.aggregateCandles(symbol, SPARK_INTERVAL_SECONDS, SPARK_POINTS);
           return [symbol, rows.map((row) => row.close)] as const;
+        }),
+      );
+      return Object.fromEntries(entries);
+    });
+  }
+
+  /**
+   * 전 종목 최근 체결 `{ 종목: [최신순 체결…] }`. 봇이 종목마다 0.5초마다 따로 부르던 조회(18종목 →
+   * 초당 36회)를 한 요청으로 합친다. `trades/:symbol`보다 먼저 선언해야 "latest"가 종목으로 잡히지 않는다.
+   */
+  @Get("trades/latest")
+  async latestTrades(@Query("limit") limit = "20") {
+    const take = Math.min(Math.max(1, Number(limit) || 20), LATEST_TRADES_MAX);
+    return this.cache.getOrCompute(`trades:latest:${take}`, LATEST_TRADES_TTL_MS, async () => {
+      const listed = await this.prisma.marketSymbol.findMany({
+        where: { symbol: { in: [...ACTIVE_SYMBOLS] } },
+        select: { symbol: true, listedAt: true },
+      });
+      const entries = await Promise.all(
+        listed.map(async ({ symbol, listedAt }) => {
+          const rows = await this.prisma.trade.findMany({
+            where: { symbol, ...(listedAt ? { createdAt: { gte: listedAt } } : {}) },
+            orderBy: { createdAt: "desc" },
+            take,
+          });
+          return [symbol, rows] as const;
         }),
       );
       return Object.fromEntries(entries);

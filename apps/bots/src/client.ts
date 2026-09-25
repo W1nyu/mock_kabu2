@@ -161,6 +161,13 @@ export class ApiClient {
     return res.json() as Promise<PressureScenario[]>;
   }
 
+  /** 전 종목 최근 체결(최신순)을 한 요청으로. */
+  latestTrades(limit = 20) {
+    return this.request("GET", `/market/trades/latest?limit=${limit}`) as Promise<
+      Record<string, { id: string; price: number; createdAt: string }[]>
+    >;
+  }
+
   recentTrades(symbol: string, limit = 20) {
     return this.request("GET", `/market/trades/${symbol}?limit=${limit}`) as Promise<
       { id: string; price: number; createdAt: string }[]

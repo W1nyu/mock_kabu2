@@ -148,3 +148,23 @@ describe("aggregated candles past the 1m retention window", () => {
     expect(await sourceIntervals("5m")).toEqual(["1m"]);
   });
 });
+
+describe("latest trades for every symbol in one request", () => {
+  it("returns newest-first trades keyed by symbol, respecting relisting, and shares the result briefly", async () => {
+    const listedAt = new Date("2026-09-24T00:00:00Z");
+    const findTrades = vi.fn(async ({ where }: { where: { symbol: string } }) => [{ id: `${where.symbol}-1`, price: 100 }]);
+    const controller = new MarketController({
+      marketSymbol: {
+        findMany: vi.fn(async () => [{ symbol: "MOCK", listedAt: null }, { symbol: "KABU", listedAt }]),
+      },
+      trade: { findMany: findTrades },
+    } as any, {} as any, new MemoCache());
+
+    const first = await controller.latestTrades("5");
+    expect(first).toEqual({ MOCK: [{ id: "MOCK-1", price: 100 }], KABU: [{ id: "KABU-1", price: 100 }] });
+    expect(findTrades).toHaveBeenCalledWith(expect.objectContaining({ where: { symbol: "KABU", createdAt: { gte: listedAt } }, take: 5 }));
+
+    await controller.latestTrades("5");
+    expect(findTrades).toHaveBeenCalledTimes(2);
+  });
+});
