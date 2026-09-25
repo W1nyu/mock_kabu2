@@ -1,5 +1,13 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-25 — 신규 5종목(15종목)·산업군 필터·1분봉 30일 보존 (GCP 운영 적용)
+
+- **신규 종목**(상장 시가총액 각 1.2조): DDAM 도담건설 1,500원(8억 주, 1원 호가)·SAEM 샘물바이오 12,000원(1억)·STEL 스텔라엔터 30,000원(4,000만)·SLVR 실버모터스 80,000원(1,500만)·NOVA 노바셀배터리 600,000원(200만, 1,000원 호가). 뉴스 섹터 CONSTRUCTION/AUTO/ENTERTAINMENT/BATTERY, SAEM이 첫 BIO라 임상 뉴스 활성. MM 예약 계정 bot26~30.
+- **산업군**: `packages/shared/src/industries.ts` 8개(IT·반도체, 2차전지·소재, 산업재, 모빌리티, 미디어·통신, 헬스케어, 소비재, 금융). 새 종목은 반드시 한 산업군에 넣을 것(테스트가 검사). 뉴스 페이지 산업군→종목 2단 칩(`/market/news?industry=<id>|market`), 증권 탭·대시보드 종목표 산업군 태그(평균 등락률), 선택은 localStorage `market:industry` 공유.
+- **1분봉 보존**: `prune-history --candles-days 30`(기본) — 30일 지난 1분봉을 1시간봉('1h')으로 합친 뒤 삭제. 1h 이상 봉·지수 "전체"는 1m+1h를 함께 읽는다. 로컬 DB에서 압축 전후 일봉 동일 확인(롤백 트랜잭션).
+- **운영 적용**: 사용자가 직접 SSH로 실행(자동 모드가 운영 배포 명령을 막음). pgBackRest diff 후 seed(15 upserted)·`index-add-members --apply`·api/web/엔진/정산/봇 재생성. 15종목 양측 10단, 지수 편입 15종목, 정합성 검사 전부 통과. 롤백 이미지 `mock-kabu2-app:pre-add5b-20260925`(+`-bots/-matching-engine/-settlement`), 원본 소스 `/tmp/src-before-add5b.tgz`.
+- **주의**: `/opt/mock-kabu2`는 일반 사용자 쓰기 불가 — 파일 교체는 `sudo tar xf ... --no-same-owner`. 교체가 조용히 실패하면 빌드가 캐시로 금방 끝나고 옛 코드가 배포된다(이번에 seed가 `10 upserted`로 드러남). 빌드 전 `grep`으로 교체를 확인할 것.
+
 ## 2026-09-25 — MM 호가 산 모양 분포 (GCP 운영 적용)
 
 - `LIQUIDITY_LEVEL_WEIGHTS` [100,120,140,155,150,135,115,95,80,65,55,45](4호가 최대), 일반 1호가 최소 80주(기존 160). 인접 단 비율 ≤1.25(재사용 한도). 고가 종목(SAKU·DAON)은 `HIGH_PRICE_LEVEL_WEIGHTS`로 기존 앞쪽 집중 유지.
