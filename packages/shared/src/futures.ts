@@ -224,3 +224,28 @@ export function applyFuturesCash(state: FuturesCashState, realized: bigint): Fut
   const paid = loss < room ? loss : room > 0n ? room : 0n;
   return { balance: state.balance - paid, debt: state.debt + (loss - paid), ledgerDelta: -paid };
 }
+
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+/** 일일 정산 시각: 매일 04:11 KST — 04:10 점검으로 주문이 막히고 1분 뒤(엔진이 남은 주문을 비울 여유). */
+export const FUTURES_SETTLE_MINUTE_KST = 4 * 60 + 11;
+
+/** 정산하는 거래일 키(KST 날짜 YYYY-MM-DD). 04:11 KST에 그날 날짜를 쓴다. */
+export function futuresTradingDay(now: number): string {
+  return new Date(now + KST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/** now 이후(같으면 포함하지 않음) 다음 정산 시각(epoch ms) */
+export function nextFuturesSettlementAt(now: number): number {
+  const kst = now + KST_OFFSET_MS;
+  const dayStart = Math.floor(kst / 86_400_000) * 86_400_000;
+  let at = dayStart + FUTURES_SETTLE_MINUTE_KST * 60_000;
+  if (at <= kst) at += 86_400_000;
+  return at - KST_OFFSET_MS;
+}
+
+/** 오늘 정산 시각이 이미 지났는지 — 재기동 때 놓친 정산을 따라잡는 데 쓴다. */
+export function futuresSettlementDue(now: number): boolean {
+  const kst = now + KST_OFFSET_MS;
+  const dayStart = Math.floor(kst / 86_400_000) * 86_400_000;
+  return kst >= dayStart + FUTURES_SETTLE_MINUTE_KST * 60_000;
+}

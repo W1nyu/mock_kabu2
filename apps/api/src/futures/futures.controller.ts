@@ -1,4 +1,8 @@
-import { Controller, Get, UseGuards } from "@nestjs/common";
+import { timingSafeEqual } from "node:crypto";
+import { Controller, Get, Headers, Post, UnauthorizedException, UseGuards } from "@nestjs/common";
+import { futuresTradingDay } from "@mock-kabu/shared";
+import { liquidityBootstrapToken } from "../liquidity/liquidity-reserve";
+import { FuturesSettlementService } from "./futures-settlement.service";
 import { CurrentUser, JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { FuturesService } from "./futures.service";
 
@@ -22,5 +26,24 @@ export class AccountFuturesController {
   @Get()
   positions(@CurrentUser() user: { accountId: string }) {
     return this.futures.positions(user.accountId);
+  }
+}
+
+/**
+ * 운영자 수동 정산(오늘 거래일). 봇·운영 전용 토큰, Caddy가 /internal을 외부에서 막는다.
+ * 정산은 멱등이라 이미 끝난 거래일에 다시 불러도 아무것도 바꾸지 않는다.
+ */
+@Controller("internal/futures")
+export class InternalFuturesController {
+  constructor(private settlement: FuturesSettlementService) {}
+
+  @Post("settle")
+  async settle(@Headers("x-liquidity-bootstrap-token") token?: string) {
+    const expected = Buffer.from(liquidityBootstrapToken());
+    const presented = Buffer.from(token ?? "");
+    if (expected.length !== presented.length || !timingSafeEqual(expected, presented)) {
+      throw new UnauthorizedException("invalid liquidity bootstrap token");
+    }
+    return this.settlement.settle(futuresTradingDay(Date.now()));
   }
 }

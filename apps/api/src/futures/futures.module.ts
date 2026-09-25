@@ -1,9 +1,12 @@
 import { Module } from "@nestjs/common";
-import { AccountFuturesController, FuturesController } from "./futures.controller";
+import { OrderModule } from "../order/order.module";
+import { FuturesSettlementService } from "./futures-settlement.service";
+import { AccountFuturesController, FuturesController, InternalFuturesController } from "./futures.controller";
 import { FuturesService } from "./futures.service";
 
 @Module({
-  controllers: [FuturesController, AccountFuturesController],
-  providers: [FuturesService],
+  imports: [OrderModule],
+  controllers: [FuturesController, AccountFuturesController, InternalFuturesController],
+  providers: [FuturesService, FuturesSettlementService],
 })
 export class FuturesModule {}

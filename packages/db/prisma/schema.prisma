@@ -391,6 +391,20 @@ model FuturesPosition {
   @@schema("account")
 }
 
+/// 선물 일일 정산 기록 — 거래일(KST 날짜)·종목별 최종 결제가격
+model FuturesSettlement {
+  symbol        String
+  tradingDay    String   @map("trading_day")
+  price         Int
+  positions     Int      @default(0)
+  realizedTotal BigInt   @default(0) @map("realized_total")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@id([symbol, tradingDay])
+  @@map("futures_settlements")
+  @@schema("market")
+}
+
 /// 선물 미수금(원). 손실이 잔액을 넘은 부분 — 이후 선물 이익으로 먼저 갚는다.
 model FuturesDebt {
   accountId String   @id @map("account_id")

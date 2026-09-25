@@ -74,3 +74,17 @@ test("losses never push cash below the order holds; the rest becomes debt, repai
   // 손익 0은 아무것도 바꾸지 않는다
   assert.deepEqual(applyFuturesCash({ balance: 5n, holdAmount: 1n, debt: 2n }, 0n), { balance: 5n, debt: 2n, ledgerDelta: 0n });
 });
+
+import { futuresTradingDay, nextFuturesSettlementAt, futuresSettlementDue } from "../dist/index.js";
+
+test("daily settlement runs at 04:11 KST and is keyed by the KST date", () => {
+  // 2026-09-26 04:10:59 KST = 2026-09-25T19:10:59Z
+  const justBefore = Date.parse("2026-09-25T19:10:59Z");
+  assert.equal(new Date(nextFuturesSettlementAt(justBefore)).toISOString(), "2026-09-25T19:11:00.000Z");
+  assert.equal(futuresSettlementDue(justBefore), false);
+  const at = Date.parse("2026-09-25T19:11:00Z");
+  assert.equal(futuresTradingDay(at), "2026-09-26");
+  assert.equal(futuresSettlementDue(at), true);
+  // 정산 시각 뒤에는 다음 날 04:11
+  assert.equal(new Date(nextFuturesSettlementAt(at)).toISOString(), "2026-09-26T19:11:00.000Z");
+});

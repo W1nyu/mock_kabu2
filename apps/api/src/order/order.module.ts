@@ -11,5 +11,6 @@ import { OutboxRelayer } from "./outbox.relayer";
   imports: [GatewayModule],
   controllers: [OrderController, ConditionalOrderController],
   providers: [OrderService, OutboxRelayer, ConditionalOrderService, BracketService],
+  exports: [OutboxRelayer],
 })
 export class OrderModule {}
