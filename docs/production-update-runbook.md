@@ -225,6 +225,51 @@ $C up -d --no-deps api web        # API 조회 변경 포함
 - bots만 바뀐 경우도 `$C up -d --no-deps bots`로 교체한다(재시작 직후 옛 주문을 채택해 호가가 점차 정리된다).
 - `packages/shared`가 바뀌면 모든 서비스가 영향을 받을 수 있으니 전체 절차를 따른다.
 
+### 예시: 웹 화면 한 파일 수정 (2026-09-25, 폰 증권 탭 거래대금 숨김, `7f8214a`)
+
+**로컬** — 바뀐 코드가 웹 파일 하나인지 먼저 확인하고 묶는다.
+
+```bash
+# Git Bash, 저장소 루트. 1b8aabd = 서버에 올라가 있던 커밋
+git diff --name-only 1b8aabd HEAD -- apps packages deploy     # → apps/web/src/app/market/page.tsx 하나
+git -c core.autocrlf=false archive -o tmp/deploy/release.tar HEAD apps/web/src/app/market/page.tsx
+git rev-parse --short HEAD > tmp/deploy/commit.txt
+```
+
+```powershell
+# PowerShell
+cd C:\Users\Winyu\Documents\Project\mock_kabu2
+scp tmp\deploy\release.tar tmp\deploy\commit.txt mock-kabu:/tmp/
+ssh mock-kabu
+```
+
+**서버** — 백업 → 교체 → grep 확인 → 빌드 → 웹만 교체. 점검·봇 정지·DB 백업은 하지 않는다.
+
+```bash
+cd /opt/mock-kabu2
+C="sudo docker compose --env-file deploy/production/.env.production -f deploy/production/compose.production.yml -f deploy/gcp/compose.gcp.yml"
+TAG=pre-phoneturnover-20260925
+sudo docker tag mock-kabu2-app:gcp mock-kabu2-app:$TAG
+sudo tar czf /tmp/src-before-$TAG.tgz apps/web/src/app/market/page.tsx
+sudo tar xf /tmp/release.tar -C /opt/mock-kabu2 --no-same-owner
+grep -c "폰은 폭이 좁아 거래대금을" apps/web/src/app/market/page.tsx    # 1이어야 한다. 0이면 멈춘다
+
+$C build api                        # 5~10분, 끊지 않는다
+$C up -d --no-deps web
+sudo docker ps --format '{{.Names}}\t{{.Status}}' | grep web       # Up ... (healthy)
+sudo cp /tmp/commit.txt /opt/mock-kabu2/DEPLOYED_COMMIT
+```
+
+- grep 할 문자열은 이번 수정에만 있는 줄(여기서는 새로 넣은 주석)을 고른다. 이미 있던 코드를 고르면 교체 실패를 못 잡는다.
+- 웹 교체 중 몇 초간 페이지가 안 열릴 수 있다. 주문·봇·체결에는 영향이 없다.
+- 확인: 폰으로 증권 탭을 새로고침해 종목 이름 아래에 코드만 보이는지, PC에서는 거래대금이 그대로 보이는지.
+- 롤백:
+  ```bash
+  sudo tar xzf /tmp/src-before-$TAG.tgz -C /opt/mock-kabu2 --no-same-owner
+  sudo docker tag mock-kabu2-app:$TAG mock-kabu2-app:gcp
+  $C up -d --no-deps web
+  ```
+
 ## 문제 해결 요약
 
 | 증상 | 원인 | 해결 |
