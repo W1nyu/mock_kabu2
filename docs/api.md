@@ -90,6 +90,7 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/admin/lock-info` | 락 전략·충돌/재시도 카운터 |
 | GET | `/internal/operations` | API 컨테이너 loopback 전용 소켓 동접·프로세스 메모리 (공개 프록시에서 404) |
 | POST | `/internal/liquidity/ensure`, `/internal/news/publish` | 봇 프로세스 전용(부트스트랩 토큰) |
+| POST | `/internal/news/force` | 운영자 도구(내부 토큰) `{templateId: "macro.oil.spike"}` — 봇이 5초 안에 그 시장 기사를 평소 경로로 발행(주가 영향·기초자산 반응 포함). 봇은 `/internal/news/force/take`로 꺼내 간다 |
 | GET | `/replay/datasets`, `/replay/datasets/:id/candles` | 실전 리플레이(레거시 메뉴) |
 
 ## 계정 채널 push 페이로드 (`account:{accountId}`)
