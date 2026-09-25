@@ -35,7 +35,7 @@ export interface FutureDef {
 export const FUTURES: readonly FutureDef[] = [
   {
     symbol: "KABUF",
-    name: "KABU 지수 선물",
+    name: "주가 지수 선물",
     underlying: "KABU_INDEX",
     priceScale: 100,
     decimals: 2,
@@ -372,4 +372,26 @@ export function marginCallLiquidationQty(qty: number, shortfall: bigint, initial
   if (initial <= 0n || shortfall >= initial) return size;
   const n = (BigInt(size) * shortfall + initial - 1n) / initial;
   return Math.max(1, Math.min(size, Number(n)));
+}
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * 반대매매·추가증거금 평가가격(정수 단위). 최근 체결가 하나로 평가하면 작은 거래 한 건이 가격을 순간적으로
+ * 흔들어 억울한 청산이 날 수 있어, 세 값의 중앙값을 쓴다:
+ *  기초자산 가격 · 최근 체결 여러 건(최근 5분·최대 10건)의 중앙값 · 최근 체결가.
+ * 튀는 체결 하나는 나머지 두 값이 누른다. 기초자산이 없으면 최근 체결 중앙값, 체결도 없으면 최근가.
+ */
+export function futureMarkPrice(input: { underlying: number | null; recent: readonly number[]; last: number }): number {
+  const recent = input.recent.filter((price) => Number.isFinite(price) && price > 0);
+  const recentMedian = recent.length > 0 ? median(recent) : null;
+  const underlying = input.underlying != null && input.underlying > 0 ? input.underlying : null;
+  if (underlying != null && recentMedian != null) return Math.round(median([underlying, recentMedian, input.last]));
+  if (recentMedian != null) return Math.round(recentMedian);
+  if (underlying != null) return Math.round(median([underlying, input.last]));
+  return input.last;
 }

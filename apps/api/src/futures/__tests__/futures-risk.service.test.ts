@@ -33,7 +33,6 @@ function harness(options: { balance?: bigint; mark?: number } = {}) {
         for (const c of state.calls) if (c.id === where.id && c.resolvedAt == null) Object.assign(c, data);
       },
     },
-    marketSymbol: { findMany: async () => [{ symbol: "USDF", lastPrice: state.mark }] },
     account: { findMany: async () => [{ id: "a", balance: state.balance }] },
     futuresDebt: { findMany: async () => [] },
     futuresLiquidation: {
@@ -59,7 +58,9 @@ function harness(options: { balance?: bigint; mark?: number } = {}) {
   };
   db.$transaction = async (fn: (tx: any) => Promise<unknown>) => fn(db);
   const redis = { publish: vi.fn(async () => 1) };
-  const service = new FuturesRiskService(db as never, redis as never);
+  // 평가가격은 FuturesService.marks()가 준다 — 여기서는 시나리오의 mark를 그대로
+  const futures = { marks: async () => new Map([["USDF", state.mark]]) };
+  const service = new FuturesRiskService(db as never, redis as never, futures as never);
   const placed = () => state.outbox.filter((o) => o.topic === "order.placed").map((o) => o.payload);
   return { service, state, redis, placed };
 }

@@ -146,6 +146,10 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
             <dd className="text-right">{leverageLabel(symbol, position.leverage)}</dd>
             <dt className="text-ink-muted">평균가</dt>
             <dd className="text-right">{fmtFuture(symbol, Math.round(position.avgPrice))}</dd>
+            <dt className="text-ink-muted" title="기초자산·최근 체결 중앙값·최근가의 중앙값 — 튀는 체결 한 건으로 반대매매되지 않게">
+              평가가격
+            </dt>
+            <dd className="text-right">{fmtFuture(symbol, position.markPrice)}</dd>
             <dt className="text-ink-muted">평가손익</dt>
             <dd className={`text-right font-semibold ${tone(position.unrealized)}`}>
               {position.unrealized > 0 ? "+" : ""}

@@ -203,15 +203,6 @@ export default function MarketIndexPanel() {
     area.setData(
       [...byTime.entries()].sort((a, b) => a[0] - b[0]).map(([time, p]) => ({ time: time as UTCTimestamp, value: p.value })),
     );
-    const todayBase = indexSessionBase(series, Date.now());
-    if (todayBase != null) area.createPriceLine({
-      price: todayBase,
-      color: colors.text,
-      lineWidth: 1,
-      lineStyle: 2,
-      axisLabelVisible: true,
-      title: "09:00 기준",
-    });
     chart.timeScale().fitContent();
 
     const onMove = (param: MouseEventParams) => {

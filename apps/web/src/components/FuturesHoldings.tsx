@@ -9,7 +9,7 @@ function tone(n: number): string {
   return n > 0 ? "text-up" : n < 0 ? "text-down" : "text-ink-muted";
 }
 
-/** 대시보드 보유 자산의 선물 탭 — 포지션별 방향·수량·레버리지·평균가·현재가·평가손익·증거금. 폰은 한 줄 목록. */
+/** 대시보드 보유 자산의 선물 탭 — 포지션별 방향·수량·레버리지·평균가·평가가격·평가손익·증거금. 폰은 한 줄 목록. */
 export default function FuturesHoldings({ account }: { account: FuturesAccount | null }) {
   const positions = account?.positions ?? [];
   if (positions.length === 0) {
@@ -61,7 +61,9 @@ export default function FuturesHoldings({ account }: { account: FuturesAccount |
               <th className="text-right">포지션</th>
               <th className="text-right">레버리지</th>
               <th className="text-right">평균가</th>
-              <th className="text-right">현재가</th>
+              <th className="text-right" title="기초자산·최근 체결 중앙값·최근가의 중앙값 — 평가손익과 반대매매 판단에 쓴다">
+                평가가격
+              </th>
               <th className="text-right">증거금</th>
               <th className="text-right">평가손익</th>
             </tr>

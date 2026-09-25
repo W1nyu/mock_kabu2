@@ -1,9 +1,10 @@
 import { BadRequestException, Inject, Injectable, NotFoundException, Optional, UnprocessableEntityException } from "@nestjs/common";
 import type { BalanceMutator } from "@mock-kabu/concurrency";
-import type { PrismaClient } from "@mock-kabu/db";
+import { Prisma, type PrismaClient } from "@mock-kabu/db";
 import {
   FUTURES,
   futureDef,
+  futureMarkPrice,
   futureMaintenanceMargin,
   isValidLeverage,
   MAX_FUTURES_LEVERAGE,
@@ -22,6 +23,11 @@ import { BALANCE_MUTATOR, PRISMA, REDIS } from "../core/tokens";
 import { futuresEncumbrance } from "../order/futures-margin";
 
 const OVERVIEW_TTL_MS = 2_000;
+/** 평가가격은 반대매매 감시(5초)와 포지션 조회가 같이 쓴다 — 2초 공유 */
+const MARK_TTL_MS = 2_000;
+/** 평가가격에 넣는 최근 체결 범위 */
+const MARK_RECENT_WINDOW = "5 minutes";
+const MARK_RECENT_TRADES = 10;
 
 export interface FutureOverviewRow {
   symbol: string;
@@ -93,6 +99,43 @@ export class FuturesService {
     });
   }
 
+  /**
+   * 반대매매·추가증거금 평가가격(정수 단위) — futureMarkPrice(기초자산 · 최근 체결 중앙값 · 최근가의 중앙값).
+   * 작은 거래 한 건이 최근가를 튀게 해도 평가가격은 흔들리지 않는다.
+   */
+  async marks(): Promise<Map<string, number>> {
+    return this.cache.getOrCompute("futures:marks", MARK_TTL_MS, async () => {
+      const symbols = FUTURES.map((future) => future.symbol);
+      const [rows, recent, underlying] = await Promise.all([
+        this.prisma.marketSymbol.findMany({ where: { kind: "FUTURE" }, select: { symbol: true, lastPrice: true } }),
+        this.prisma.$queryRaw<{ symbol: string; price: number }[]>`
+          SELECT symbol, price FROM (
+            SELECT symbol, price, row_number() OVER (PARTITION BY symbol ORDER BY created_at DESC, id DESC) AS rn
+            FROM matching.trades
+            WHERE symbol IN (${Prisma.join(symbols)}) AND created_at > now() - ${MARK_RECENT_WINDOW}::interval
+          ) t WHERE rn <= ${MARK_RECENT_TRADES}
+        `,
+        this.underlyingUnits(),
+      ]);
+      const recentBySymbol = new Map<string, number[]>();
+      for (const row of recent) recentBySymbol.set(row.symbol, [...(recentBySymbol.get(row.symbol) ?? []), Number(row.price)]);
+      const lastBySymbol = new Map(rows.map((row) => [row.symbol, row.lastPrice]));
+      const out = new Map<string, number>();
+      for (const future of FUTURES) {
+        const last = lastBySymbol.get(future.symbol) ?? future.initialPrice;
+        out.set(
+          future.symbol,
+          futureMarkPrice({
+            underlying: underlying.get(future.symbol) ?? null,
+            recent: recentBySymbol.get(future.symbol) ?? [],
+            last,
+          }),
+        );
+      }
+      return out;
+    });
+  }
+
   /** 기초자산 현재값을 선물과 같은 정수 단위로. KABU 지수는 현물 최근가와 지수 구간으로 계산한다. */
   async underlyingUnits(): Promise<Map<string, number>> {
     const result = new Map<string, number>();
@@ -127,15 +170,16 @@ export class FuturesService {
 
   /** 내 선물 포지션: 평균가·평가손익·증거금, 계좌 전체의 유지증거금 대비 여유. */
   async positions(accountId: string) {
-    const [positionRows, overview, encumbrance, account, marginCall, liquidations] = await Promise.all([
+    const [positionRows, marks, encumbrance, account, marginCall, liquidations] = await Promise.all([
       this.prisma.futuresPosition.findMany({ where: { accountId } }),
-      this.overview(),
+      this.marks(),
       futuresEncumbrance(this.prisma, accountId),
       this.prisma.account.findUnique({ where: { id: accountId }, select: { balance: true, holdAmount: true } }),
       this.prisma.futuresMarginCall.findFirst({ where: { accountId, resolvedAt: null } }),
       this.prisma.futuresLiquidation.findMany({ where: { accountId }, orderBy: { createdAt: "desc" }, take: 10 }),
     ]);
-    const markBySymbol = new Map(overview.map((row) => [row.symbol, row.lastPrice]));
+    // 평가손익·유지증거금은 반대매매 감시와 같은 평가가격으로(최근가 한 건이 아니라)
+    const markBySymbol = marks;
     const positions = positionRows.filter((row) => row.qty !== 0);
     // 종목별 레버리지 설정(포지션이 없어도 설정 행이 있을 수 있다). null = 거래소 기준 증거금.
     const leverage: Record<string, number | null> = Object.fromEntries(FUTURES.map((future) => [future.symbol, null]));

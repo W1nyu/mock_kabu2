@@ -3,6 +3,7 @@
 import { referenceAsset } from "@mock-kabu/shared";
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
+import AssetNews from "@/components/AssetNews";
 import ReferenceChart from "@/components/ReferenceChart";
 import { api } from "@/lib/api";
 import { formatReference, parseReferenceTick, referenceChange, type ReferenceRow } from "@/lib/reference";
@@ -83,6 +84,7 @@ export default function ReferencePage({ params }: { params: Promise<{ code: stri
       <section className="glass p-3 sm:p-4">
         <ReferenceChart code={def.code} scale={def.scale} decimals={def.decimals} />
       </section>
+      <AssetNews reference={def.code} />
 
       <p className="px-1 text-[13px] leading-6 text-ink-muted">
         {DRIVERS[def.code]} 이 가격은 모의 시장이 만드는 가상 지수이며, 곧 추가될 선물의 정산 기준이 됩니다.

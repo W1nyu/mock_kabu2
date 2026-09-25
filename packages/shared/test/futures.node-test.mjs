@@ -7,6 +7,7 @@ import {
   futureDef,
   futureMaintenanceMargin,
   futureMarginBps,
+  futureMarkPrice,
   liquidityReserveBotNumber,
   isValidLeverage,
   futureMarginPerContract,
@@ -155,4 +156,15 @@ test("liquidity reserve numbers are fixed per symbol — delistings leave gaps i
   const numbers = TRADABLE_SYMBOLS.map((symbol) => liquidityReserveBotNumber(symbol));
   assert.ok(numbers.every((n) => n != null));
   assert.equal(new Set(numbers).size, numbers.length);
+});
+
+test("mark price is the median of underlying, recent trades and last — one stray fill cannot move it", () => {
+  const recent = [14_000, 14_001, 13_999, 14_000, 14_002];
+  // 마지막 체결 하나가 13,500으로 튀어도 평가가격은 14,000 근처
+  assert.equal(futureMarkPrice({ underlying: 14_001, recent: [...recent, 13_500], last: 13_500 }), 14_000);
+  // 진짜 움직임(기초자산·체결이 함께 이동)은 따라간다
+  assert.equal(futureMarkPrice({ underlying: 13_800, recent: [13_810, 13_805, 13_800], last: 13_790 }), 13_800);
+  // 기초자산이 없으면 최근 체결 중앙값, 체결도 없으면 최근가
+  assert.equal(futureMarkPrice({ underlying: null, recent: [100, 300, 200], last: 900 }), 200);
+  assert.equal(futureMarkPrice({ underlying: null, recent: [], last: 900 }), 900);
 });

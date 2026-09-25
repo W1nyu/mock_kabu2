@@ -33,6 +33,8 @@ export class ApiNewsSink implements NewsSink {
         body: item.body,
         sentiment,
         impact: Math.round(meanStrength * 100),
+        // 선물·원자재 화면의 관련 뉴스 필터 — 이 기사가 움직인 기초자산
+        referenceCodes: [...new Set((item.referenceMoves ?? []).map((move) => move.code))],
       })
       .catch((error) => {
         console.error("[news] publish failed:", error instanceof Error ? error.message : error);

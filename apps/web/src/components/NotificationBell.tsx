@@ -86,7 +86,8 @@ export default function NotificationBell({ accountId }: { accountId: string }) {
 
       {open && (
         <div
-          className="glass absolute right-0 z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden shadow-2xl"
+          // 폰: 종 버튼 옆 기준으로 펼치면 화면 왼쪽이 잘린다 — 헤더 아래에 화면 폭(양옆 8px)으로 고정한다.
+          className="glass z-50 overflow-hidden shadow-2xl max-sm:fixed max-sm:inset-x-2 max-sm:top-16 sm:absolute sm:right-0 sm:mt-2 sm:w-[22rem]"
           style={{ background: "var(--color-surface)" }}
         >
           <div className="panel-head">
@@ -101,7 +102,7 @@ export default function NotificationBell({ accountId }: { accountId: string }) {
               </button>
             )}
           </div>
-          <ul className="max-h-80 overflow-y-auto text-xs">
+          <ul className="max-h-80 overflow-y-auto overscroll-contain text-xs max-sm:max-h-[min(70dvh,32rem)]">
             {items.map((item) => {
               const body = (
                 <>

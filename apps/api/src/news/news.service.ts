@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { BadRequestException, Inject, Injectable, Optional, UnauthorizedException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@mock-kabu/db";
 import {
+  referenceAsset,
   DELISTED_SYMBOLS,
   CHANNELS,
   industryById,
@@ -41,12 +42,14 @@ export interface PublishNewsDto {
   body?: unknown;
   sentiment?: unknown;
   impact?: unknown;
+  referenceCodes?: unknown;
 }
 
 interface NewsRow {
   id: string;
   symbol: string | null;
   industry: string | null;
+  referenceCodes: string[];
   category: string;
   headline: string;
   body: string | null;
@@ -74,6 +77,7 @@ export class NewsService {
       symbol: row.symbol,
       symbolName: row.symbol ? (SYMBOL_NAMES.get(row.symbol) ?? null) : null,
       industry: row.industry,
+      referenceCodes: row.referenceCodes,
       category: row.category,
       headline: row.headline,
       body: row.body,
@@ -91,12 +95,15 @@ export class NewsService {
     limit: number,
     industry?: IndustryDef | null,
     ownOnly = false,
+    reference?: string,
   ): Promise<NewsItemDto[]> {
     const take = Number.isFinite(limit) ? Math.min(Math.max(1, Math.trunc(limit)), MAX_LIMIT) : DEFAULT_LIMIT;
     const marketWide = { symbol: null, industry: null };
     const own = symbol ? industryOf(symbol) : null;
-    const where =
-      industry === null
+    const where = reference
+      ? // 선물·원자재 화면: 그 기초자산을 움직인 기사
+        { referenceCodes: { has: reference } }
+      : industry === null
         ? marketWide
         : industry
           ? { OR: [{ symbol: { in: [...industry.symbols] } }, { industry: industry.id }] }
@@ -108,7 +115,7 @@ export class NewsService {
                 { OR: [{ symbol }, marketWide, ...(own ? [{ industry: own.id }] : [])] }
               : {};
 
-    const key = `${LIST_CACHE_PREFIX}${symbol ?? ""}:${ownOnly ? "own" : ""}:${industry === null ? "market" : (industry?.id ?? "")}:${take}`;
+    const key = `${LIST_CACHE_PREFIX}${symbol ?? ""}:${ownOnly ? "own" : ""}:${reference ?? ""}:${industry === null ? "market" : (industry?.id ?? "")}:${take}`;
     return this.cache.getOrCompute(key, LIST_TTL_MS, () => this.query(where, take));
   }
 
@@ -121,6 +128,7 @@ export class NewsService {
         id: true,
         symbol: true,
         industry: true,
+        referenceCodes: true,
         category: true,
         headline: true,
         body: true,
@@ -153,6 +161,10 @@ export class NewsService {
       throw new BadRequestException(`invalid industry: ${industry}`);
     }
     const body = dto.body == null ? null : requireString(dto.body, "body");
+    const referenceCodes = dto.referenceCodes == null ? [] : dto.referenceCodes;
+    if (!Array.isArray(referenceCodes) || referenceCodes.some((code) => typeof code !== "string" || !referenceAsset(code))) {
+      throw new BadRequestException("referenceCodes must be known reference asset codes");
+    }
     const parentExternalId =
       dto.parentExternalId == null ? null : requireString(dto.parentExternalId, "parentExternalId");
 
@@ -177,6 +189,7 @@ export class NewsService {
         sentiment,
         impact: dto.impact as number,
         priceAtPublish,
+        referenceCodes: [...new Set(referenceCodes as string[])],
       },
       // A retry after a network failure must not duplicate a headline.
       update: {},
@@ -184,6 +197,7 @@ export class NewsService {
         id: true,
         symbol: true,
         industry: true,
+        referenceCodes: true,
         category: true,
         headline: true,
         body: true,

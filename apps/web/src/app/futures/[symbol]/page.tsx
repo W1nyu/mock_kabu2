@@ -3,6 +3,7 @@
 import { FUTURES, futureDef } from "@mock-kabu/shared";
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
+import AssetNews from "@/components/AssetNews";
 import FuturesBook from "@/components/FuturesBook";
 import FuturesOrderPanel from "@/components/FuturesOrderPanel";
 import FuturesOrderSheet from "@/components/FuturesOrderSheet";
@@ -154,6 +155,12 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
           </div>
         )}
       </div>
+
+      {/* 주가 지수 선물은 시장 전반 기사, 나머지는 그 기초자산을 움직인 기사 */}
+      <AssetNews
+        reference={def.underlying === "KABU_INDEX" ? "market" : def.underlying}
+        title={def.underlying === "KABU_INDEX" ? "시장 뉴스" : "관련 뉴스"}
+      />
 
       {compact && loggedIn && (
         <MobileTradeBar

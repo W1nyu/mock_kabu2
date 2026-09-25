@@ -19,6 +19,7 @@ import { maintenanceWindow } from "../common/maintenance-window";
 import { BackgroundStatusRegistry } from "../core/background-status";
 import { PRISMA, REDIS } from "../core/tokens";
 import { OutboxRelayer } from "../order/outbox.relayer";
+import { FuturesService } from "./futures.service";
 
 const TICK_MS = 5_000;
 /** 여러 API 인스턴스가 같은 틱을 두 번 돌리지 않게 — 틱 간격보다 짧게 잡는다. */
@@ -53,6 +54,7 @@ export class FuturesRiskService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(PRISMA) private prisma: PrismaClient,
     @Inject(REDIS) private redis: Redis,
+    private futures: FuturesService,
     @Optional() private outboxRelayer?: OutboxRelayer,
     @Optional() private background?: BackgroundStatusRegistry,
   ) {}
@@ -93,7 +95,8 @@ export class FuturesRiskService implements OnModuleInit, OnModuleDestroy {
     const [positions, activeCalls, marks] = await Promise.all([
       this.prisma.futuresPosition.findMany({ where: { qty: { not: 0 } } }),
       this.prisma.futuresMarginCall.findMany({ where: { resolvedAt: null } }),
-      this.prisma.marketSymbol.findMany({ where: { kind: "FUTURE" }, select: { symbol: true, lastPrice: true } }),
+      // 평가가격 = 기초자산·최근 체결 중앙값·최근가의 중앙값 — 튀는 체결 하나로 청산되지 않게
+      this.futures.marks(),
     ]);
     const accountIds = [...new Set([...positions.map((p) => p.accountId), ...activeCalls.map((c) => c.accountId)])];
     if (accountIds.length === 0) return result;
@@ -103,7 +106,7 @@ export class FuturesRiskService implements OnModuleInit, OnModuleDestroy {
       this.prisma.futuresDebt.findMany({ where: { accountId: { in: accountIds } } }),
       this.pendingLiquidationAccounts(),
     ]);
-    const markBySymbol = new Map(marks.map((m) => [m.symbol, m.lastPrice]));
+    const markBySymbol = marks;
     const balanceById = new Map(accounts.map((a) => [a.id, a.balance]));
     const debtById = new Map(debts.map((d) => [d.accountId, d.amount]));
     const callById = new Map(activeCalls.map((c) => [c.accountId, c]));

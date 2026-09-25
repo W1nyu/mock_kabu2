@@ -131,6 +131,7 @@ export class ApiClient {
     impact: number;
     parentExternalId: string | null;
     externalId: string;
+    referenceCodes?: string[];
   }) {
     const res = await fetch(`${BASE}/internal/news/publish`, {
       method: "POST",

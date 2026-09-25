@@ -368,6 +368,8 @@ model NewsItem {
   priceAtPublish Int?     @map("price_at_publish")
   /// 후속 보도인 경우 원 기사의 externalId
   parentExternalId String? @map("parent_external_id")
+  /// 이 기사가 움직인 선물 기초자산 코드(USDKRW·OIL·GAS·COPPER·GOLD·CORN) — GIN 인덱스는 마이그레이션 SQL에
+  referenceCodes String[] @default([]) @map("reference_codes")
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@index([createdAt])

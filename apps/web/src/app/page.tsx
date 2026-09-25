@@ -485,6 +485,117 @@ export default function DashboardPage() {
         />
       </div>
 
+      {/* ── Holdings ───────────────────────────────────────────── */}
+      <section className="glass overflow-hidden">
+        <div className="panel-head">
+          <span className="panel-title">보유 자산</span>
+          <div className="well flex gap-0.5 p-0.5" role="group" aria-label="주식·선물">
+            {(
+              [
+                ["stock", `주식 ${liveHoldings.length}`],
+                ["futures", `선물 ${futuresPositions}`],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={holdingsTab === id}
+                onClick={() => setHoldingsTab(id)}
+                className={`num rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                  holdingsTab === id ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35" : "text-ink-muted hover:text-ink"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {holdingsTab === "futures" ? (
+          <FuturesHoldings account={futures} />
+        ) : !hasHoldings ? (
+          <div className="px-5 py-12 text-center">
+            <p className="text-sm text-ink-muted">보유 종목이 없습니다.</p>
+            <p className="mt-1 text-xs text-ink-faint">
+              <span className="max-sm:hidden">위 목록에서 종목을 골라 첫 매수를 해보세요.</span>
+              <Link href="/market" className="text-sky sm:hidden">
+                증권 탭에서 종목을 골라 첫 매수를 해보세요 →
+              </Link>
+            </p>
+          </div>
+        ) : (
+          <>
+          {/* 폰: 한 줄에 종목·수량 / 평가금액·손익만 보여 주는 목록 */}
+          <ul className="divide-y divide-hairline-soft sm:hidden">
+            {liveHoldings.map((h) => {
+              const name = symbols.find((s) => s.symbol === h.symbol)?.name ?? h.symbol;
+              const tone = h.pnl >= 0 ? "text-up" : "text-down";
+              return (
+                <li key={h.symbol}>
+                  <Link href={`/symbol/${h.symbol}`} className="flex items-center gap-3 px-4 py-3 active:bg-surface-3/45">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-hairline-soft bg-surface-2/70 text-[12px] font-semibold text-ink-muted">
+                      {name.slice(0, 2)}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-semibold">{name}</span>
+                      <span className="num block text-xs text-ink-faint">
+                        {fmt.format(h.qty)}주 · 평단 {fmt.format(Math.round(h.avgCost))}원
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className="num block font-semibold">{won(h.value)}</span>
+                      <span className={`num block text-xs font-medium ${tone}`}>
+                        {h.pnl >= 0 ? "+" : ""}
+                        {won(h.pnl)} ({h.pnl >= 0 ? "+" : ""}
+                        {(h.pnlRate * 100).toFixed(2)}%)
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="overflow-x-auto max-sm:hidden">
+            <table className="tbl tbl-hover">
+              <thead>
+                <tr>
+                  <th>종목</th>
+                  <th className="text-right">보유 수량</th>
+                  <th className="text-right">매도 대기</th>
+                  <th className="text-right">평단가</th>
+                  <th className="text-right">현재가</th>
+                  <th className="text-right">평가금액</th>
+                  <th className="text-right">평가손익 (수익률)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {liveHoldings.map((h) => (
+                  <tr key={h.symbol}>
+                    <td className="font-semibold">
+                      <Link href={`/symbol/${h.symbol}`} className="hover:text-sky">
+                        {h.symbol}
+                      </Link>
+                    </td>
+                    <td className="num text-right">{fmt.format(h.qty)}</td>
+                    <td className="num text-right text-ink-faint">{fmt.format(h.holdQty)}</td>
+                    <td className="num text-right">{fmt.format(Math.round(h.avgCost))}</td>
+                    <td className="num text-right">{fmt.format(h.lastPrice)}</td>
+                    <td className="num text-right">{won(h.value)}</td>
+                    <td
+                      className={`num text-right font-medium ${h.pnl >= 0 ? "text-up" : "text-down"}`}
+                    >
+                      {h.pnl >= 0 ? "+" : ""}
+                      {won(h.pnl)} ({h.pnl >= 0 ? "+" : ""}
+                      {(h.pnlRate * 100).toFixed(2)}%)
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          </>
+        )}
+      </section>
+
       {/* ── Market ─────────────────────────────────────────────── */}
       <section className="glass overflow-hidden max-sm:hidden">
         <div className="panel-head">
@@ -613,116 +724,6 @@ export default function DashboardPage() {
         <DailyPerformance />
       </div>
 
-      {/* ── Holdings ───────────────────────────────────────────── */}
-      <section className="glass overflow-hidden">
-        <div className="panel-head">
-          <span className="panel-title">보유 자산</span>
-          <div className="well flex gap-0.5 p-0.5" role="group" aria-label="주식·선물">
-            {(
-              [
-                ["stock", `주식 ${liveHoldings.length}`],
-                ["futures", `선물 ${futuresPositions}`],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={holdingsTab === id}
-                onClick={() => setHoldingsTab(id)}
-                className={`num rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
-                  holdingsTab === id ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35" : "text-ink-muted hover:text-ink"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        {holdingsTab === "futures" ? (
-          <FuturesHoldings account={futures} />
-        ) : !hasHoldings ? (
-          <div className="px-5 py-12 text-center">
-            <p className="text-sm text-ink-muted">보유 종목이 없습니다.</p>
-            <p className="mt-1 text-xs text-ink-faint">
-              <span className="max-sm:hidden">위 목록에서 종목을 골라 첫 매수를 해보세요.</span>
-              <Link href="/market" className="text-sky sm:hidden">
-                증권 탭에서 종목을 골라 첫 매수를 해보세요 →
-              </Link>
-            </p>
-          </div>
-        ) : (
-          <>
-          {/* 폰: 한 줄에 종목·수량 / 평가금액·손익만 보여 주는 목록 */}
-          <ul className="divide-y divide-hairline-soft sm:hidden">
-            {liveHoldings.map((h) => {
-              const name = symbols.find((s) => s.symbol === h.symbol)?.name ?? h.symbol;
-              const tone = h.pnl >= 0 ? "text-up" : "text-down";
-              return (
-                <li key={h.symbol}>
-                  <Link href={`/symbol/${h.symbol}`} className="flex items-center gap-3 px-4 py-3 active:bg-surface-3/45">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-hairline-soft bg-surface-2/70 text-[12px] font-semibold text-ink-muted">
-                      {name.slice(0, 2)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold">{name}</span>
-                      <span className="num block text-xs text-ink-faint">
-                        {fmt.format(h.qty)}주 · 평단 {fmt.format(Math.round(h.avgCost))}원
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-right">
-                      <span className="num block font-semibold">{won(h.value)}</span>
-                      <span className={`num block text-xs font-medium ${tone}`}>
-                        {h.pnl >= 0 ? "+" : ""}
-                        {won(h.pnl)} ({h.pnl >= 0 ? "+" : ""}
-                        {(h.pnlRate * 100).toFixed(2)}%)
-                      </span>
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-          <div className="overflow-x-auto max-sm:hidden">
-            <table className="tbl tbl-hover">
-              <thead>
-                <tr>
-                  <th>종목</th>
-                  <th className="text-right">보유 수량</th>
-                  <th className="text-right">매도 대기</th>
-                  <th className="text-right">평단가</th>
-                  <th className="text-right">현재가</th>
-                  <th className="text-right">평가금액</th>
-                  <th className="text-right">평가손익 (수익률)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {liveHoldings.map((h) => (
-                  <tr key={h.symbol}>
-                    <td className="font-semibold">
-                      <Link href={`/symbol/${h.symbol}`} className="hover:text-sky">
-                        {h.symbol}
-                      </Link>
-                    </td>
-                    <td className="num text-right">{fmt.format(h.qty)}</td>
-                    <td className="num text-right text-ink-faint">{fmt.format(h.holdQty)}</td>
-                    <td className="num text-right">{fmt.format(Math.round(h.avgCost))}</td>
-                    <td className="num text-right">{fmt.format(h.lastPrice)}</td>
-                    <td className="num text-right">{won(h.value)}</td>
-                    <td
-                      className={`num text-right font-medium ${h.pnl >= 0 ? "text-up" : "text-down"}`}
-                    >
-                      {h.pnl >= 0 ? "+" : ""}
-                      {won(h.pnl)} ({h.pnl >= 0 ? "+" : ""}
-                      {(h.pnlRate * 100).toFixed(2)}%)
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          </>
-        )}
-      </section>
     </div>
   );
 }

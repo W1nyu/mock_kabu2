@@ -53,6 +53,8 @@ export interface NewsItemDto {
   symbolName: string | null;
   /** Industry id (INDUSTRIES) for an industry story; null otherwise. */
   industry: string | null;
+  /** 이 기사가 움직인 선물 기초자산 코드 (없으면 빈 배열) */
+  referenceCodes: string[];
   category: string;
   headline: string;
   body: string | null;

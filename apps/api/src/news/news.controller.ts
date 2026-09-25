@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, NotFoundException, Post, Query } from "@nestjs/common";
-import { industryById, SYMBOLS } from "@mock-kabu/shared";
+import { industryById, referenceAsset, SYMBOLS } from "@mock-kabu/shared";
 import { NewsService, type PublishNewsDto } from "./news.service";
 
 const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
@@ -16,8 +16,14 @@ export class NewsController {
     @Query("limit") limit?: string,
     @Query("industry") industry?: string,
     @Query("scope") scope?: string,
+    @Query("reference") reference?: string,
   ) {
     const take = limit ? Number(limit) : 40;
+    // 선물·원자재 화면: 그 기초자산(USDKRW·OIL·GAS·COPPER·GOLD·CORN)을 움직인 기사
+    if (reference !== undefined) {
+      if (!referenceAsset(reference)) throw new NotFoundException(`없는 기초자산: ${reference}`);
+      return this.news.list(undefined, take, undefined, false, reference);
+    }
     // 산업군 피드는 소속 종목 기사와 산업군 기사 — 시장 전반 기사는 `industry=market`으로 따로 본다.
     if (industry !== undefined) {
       if (industry === MARKET_WIDE) return this.news.list(undefined, take, null);
