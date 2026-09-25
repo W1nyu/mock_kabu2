@@ -37,7 +37,7 @@ docker-compose: PostgreSQL 16 + Redis 7
 DB/Redis/API는 내부 Docker 네트워크에만 둡니다. PostgreSQL은 pgBackRest 암호화 백업과 복구
 스크립트를 포함합니다.
 
-실제 배포 전 준비, 비밀값 생성, 백업·복구 절차는 [저비용 VPS 운영 배포 가이드](docs/production-vps-deployment.md)를 따르세요.
+실제 배포 전 준비, 비밀값 생성, 백업·복구 절차는 [저비용 VPS 운영 배포 가이드](docs/production-vps-deployment.md)를 따르세요. 운영 중인 서버에 코드 변경을 반영할 때는 [운영 업데이트 배포 절차](docs/production-update-runbook.md)를 따릅니다.
 
 **Oracle Cloud Always Free**(A1 VM 4 OCPU/24GB + Object Storage + Autonomous Database)에 0원으로 올리는 절차는 [deploy/oci/README.md](deploy/oci/README.md)에 있습니다 — Terraform 한 번으로 VM을 만들고, `bootstrap.sh`가 빌드·기동·백업/정리 타이머까지 등록합니다. 무료 Oracle DB는 주 DB 대신 아카이브·분석 저장소로 붙습니다(`pnpm oracle:sync`, 드라이버 없이 ORDS REST SQL).
 
