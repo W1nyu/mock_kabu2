@@ -167,18 +167,19 @@ test("sector gating keeps impossible stories away from the wrong company", () =>
   assert.ok(reachableForKabu.includes("risk.pf"));
 });
 
-test("BIO templates stay dormant until a pharma listing exists", () => {
-  const activeSectors = new Set(
-    SYMBOLS.map((symbol) => companyProfile(symbol.symbol)?.sector).filter(Boolean),
-  );
-  assert.ok(!activeSectors.has("BIO"), "test assumes no BIO listing yet");
+test("clinical-trial stories reach only the pharma listing", () => {
+  const bioSymbols = SYMBOLS.filter((symbol) => companyProfile(symbol.symbol)?.sector === "BIO").map((s) => s.symbol);
+  assert.deepEqual(bioSymbols, ["SAEM"]);
 
-  const reachable = SYMBOL_POOL.filter(
-    (template) => !template.sectors || template.sectors.some((sector) => activeSectors.has(sector)),
-  ).map((template) => template.id);
-
-  assert.ok(!reachable.includes("bio.trial.success"));
-  assert.ok(!reachable.includes("bio.trial.fail"));
+  for (const symbol of SYMBOLS) {
+    const sector = companyProfile(symbol.symbol)!.sector;
+    const reachable = SYMBOL_POOL.filter((template) => !template.sectors || template.sectors.includes(sector)).map(
+      (template) => template.id,
+    );
+    const bio = symbol.symbol === "SAEM";
+    assert.equal(reachable.includes("bio.trial.success"), bio, symbol.symbol);
+    assert.equal(reachable.includes("bio.trial.fail"), bio, symbol.symbol);
+  }
 });
 
 test("every listed symbol has a company profile", () => {

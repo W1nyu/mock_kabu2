@@ -17,7 +17,7 @@ export interface SymbolDef {
   listedShares: number;
 }
 
-/** 가상 종목 10개 */
+/** 가상 종목 15개 */
 export const SYMBOLS: SymbolDef[] = [
   { symbol: "MOCK", name: "모의전자", initialPrice: 50_000, tickSize: 50, listedShares: 24_000_000 },
   { symbol: "KABU", name: "카부증권", initialPrice: 120_000, tickSize: 100, listedShares: 10_000_000 },
@@ -30,6 +30,12 @@ export const SYMBOLS: SymbolDef[] = [
   { symbol: "SKYL", name: "스카이링크", initialPrice: 40_000, tickSize: 50, listedShares: 30_000_000 },
   { symbol: "PIXL", name: "픽셀게임즈", initialPrice: 60_000, tickSize: 100, listedShares: 20_000_000 },
   { symbol: "DAON", name: "다온반도체", initialPrice: 400_000, tickSize: 500, listedShares: 3_000_000 },
+  // 2026-09-25 추가 상장 — 상장 시가총액 1.2조 원, 처음으로 1원·1,000원 호가 구간
+  { symbol: "DDAM", name: "도담건설", initialPrice: 1_500, tickSize: 1, listedShares: 800_000_000 },
+  { symbol: "SAEM", name: "샘물바이오", initialPrice: 12_000, tickSize: 10, listedShares: 100_000_000 },
+  { symbol: "STEL", name: "스텔라엔터", initialPrice: 30_000, tickSize: 50, listedShares: 40_000_000 },
+  { symbol: "SLVR", name: "실버모터스", initialPrice: 80_000, tickSize: 100, listedShares: 15_000_000 },
+  { symbol: "NOVA", name: "노바셀배터리", initialPrice: 600_000, tickSize: 1_000, listedShares: 2_000_000 },
 ];
 
 /** 지수 시작 수준. 첫 구간의 제수는 상장 시가총액 합 ÷ INDEX_BASE_LEVEL이다. */
@@ -229,18 +235,18 @@ export const CANDLE_INTERVALS: readonly CandleIntervalDef[] = [
 export const BASE_CANDLE_INTERVAL = "1m";
 export const DEFAULT_CANDLE_INTERVAL = "1m";
 export const DAILY_CANDLE_INTERVAL = "1d";
-
-export function candleIntervalSeconds(id: string): number | null {
-  return CANDLE_INTERVALS.find((interval) => interval.id === id)?.seconds ?? null;
-}
-
-/** 로그인 ID 겸 표시 이름. 이메일 없이 닉네임+비밀번호로 가입하므로 닉네임이 유일해야 한다. */
 /**
  * 보존 기간(prune-history `--candles-days`, 기본 30일)이 지난 1분 봉은 1시간 봉으로 합쳐 남긴다.
  * 1시간 이상 간격(1h·4h·1d)과 지수 "전체" 차트는 두 행을 함께 읽어 오래된 구간도 그대로 보인다.
  */
 export const ROLLUP_CANDLE_INTERVAL = "1h";
 export const ROLLUP_CANDLE_SECONDS = 3_600;
+
+export function candleIntervalSeconds(id: string): number | null {
+  return CANDLE_INTERVALS.find((interval) => interval.id === id)?.seconds ?? null;
+}
+
+/** 로그인 ID 겸 표시 이름. 이메일 없이 닉네임+비밀번호로 가입하므로 닉네임이 유일해야 한다. */
 export const NICKNAME_MIN = 2;
 export const NICKNAME_MAX = 20;
 /** 한글·영문·숫자·`_`·`-`·`.` 만. 공백·`@`를 막아 이메일과 헷갈리지 않게 한다. */

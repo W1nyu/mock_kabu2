@@ -139,6 +139,18 @@ export const SECTOR_VOCAB: Readonly<
   SEMICONDUCTOR: {
     product: ["3나노 파운드리 공정", "HBM 패키징", "AI 추론 칩", "차량용 반도체", "전력 반도체", "EUV 공정 라인"],
   },
+  CONSTRUCTION: {
+    product: ["모듈러 주택", "도심 재개발 사업", "GTX 역세권 단지", "해상풍력 기초 구조물", "스마트 건설 로봇", "제로에너지 아파트"],
+  },
+  AUTO: {
+    product: ["전기 SUV", "하이브리드 세단", "자율주행 레벨3 시스템", "수소 트럭", "소형 전기차 플랫폼", "차량용 OS"],
+  },
+  ENTERTAINMENT: {
+    product: ["신인 보이그룹", "월드투어", "팬 플랫폼 앱", "버추얼 아이돌", "글로벌 음원 유통 계약", "드라마 OST 제작"],
+  },
+  BATTERY: {
+    product: ["46파이 원통형 배터리", "전고체 배터리", "LFP 배터리 셀", "ESS 배터리 팩", "배터리 재활용 공정", "고니켈 파우치 셀"],
+  },
 };
 
 export function vocabList(key: VocabKey, sector: SectorTag | null): readonly string[] {

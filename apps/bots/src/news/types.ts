@@ -26,7 +26,11 @@ export type SectorTag =
   | "AIRLINE"
   | "TELECOM"
   | "GAME"
-  | "SEMICONDUCTOR";
+  | "SEMICONDUCTOR"
+  | "CONSTRUCTION"
+  | "AUTO"
+  | "ENTERTAINMENT"
+  | "BATTERY";
 
 /**
  * The macro axis a market-wide story moves along. Each symbol has a signed beta on it.

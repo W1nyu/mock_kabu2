@@ -106,6 +106,46 @@ export const COMPANY_PROFILES: readonly CompanyProfile[] = [
     macroBeta: { RATE: -0.8, FX: 1.0, OIL: -0.3, COMMODITY: -0.4, GLOBAL: 1.4 },
     plants: ["평택", "청주", "용인"],
   },
+  {
+    symbol: "DDAM",
+    sector: "CONSTRUCTION",
+    capEok: 12_000,
+    // Housing and civil works: rates drive presales, and cement/steel are input costs.
+    macroBeta: { RATE: -1.4, FX: -0.2, OIL: -0.4, COMMODITY: -0.7, GLOBAL: 0.5 },
+    plants: ["세종", "송도", "평택 고덕"],
+  },
+  {
+    symbol: "SAEM",
+    sector: "BIO",
+    capEok: 12_000,
+    // Long-duration pipeline valued on discount rates; macro cycle barely matters.
+    macroBeta: { RATE: -1.2, FX: 0.3, OIL: 0, COMMODITY: 0, GLOBAL: 0.6 },
+    plants: ["오송", "송도", "대구 첨복단지"],
+  },
+  {
+    symbol: "STEL",
+    sector: "ENTERTAINMENT",
+    capEok: 12_000,
+    // Music and touring earn overseas, so a weak won helps; a growth multiple hates rates.
+    macroBeta: { RATE: -1.0, FX: 0.7, OIL: -0.1, COMMODITY: 0, GLOBAL: 0.9 },
+    plants: ["성수", "청담", "일산"],
+  },
+  {
+    symbol: "SLVR",
+    sector: "AUTO",
+    capEok: 12_000,
+    // Big exporter with car loans at home: a weak won helps, rates and steel hurt.
+    macroBeta: { RATE: -0.8, FX: 1.2, OIL: -0.5, COMMODITY: -0.5, GLOBAL: 1.2 },
+    plants: ["아산", "광주", "울산"],
+  },
+  {
+    symbol: "NOVA",
+    sector: "BATTERY",
+    capEok: 12_000,
+    // Cell maker: lithium and nickel are the input cost, EV demand rides the global cycle.
+    macroBeta: { RATE: -1.1, FX: 0.8, OIL: 0.2, COMMODITY: -0.9, GLOBAL: 1.3 },
+    plants: ["오창", "청주", "새만금"],
+  },
 ];
 
 const PROFILES_BY_SYMBOL = new Map(COMPANY_PROFILES.map((profile) => [profile.symbol, profile]));

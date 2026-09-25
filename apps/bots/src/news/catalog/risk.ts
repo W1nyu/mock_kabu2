@@ -11,7 +11,7 @@ export const RISK_TEMPLATES: readonly NewsTemplate[] = [
     headlines: ["{name}, {product} {count} 자발적 리콜… 비용 {money} 추산"],
     // A recall counts units, so it only fits mass-produced goods. Heavy
     // industry gets the defect story below instead.
-    sectors: ["ELECTRONICS", "MATERIALS", "BIO"],
+    sectors: ["ELECTRONICS", "MATERIALS", "BIO", "AUTO", "BATTERY"],
     slots: {
       product: { kind: "pick", vocab: "product" },
       count: { kind: "count", range: { min: 5_000, max: 400_000 }, unit: "개" },

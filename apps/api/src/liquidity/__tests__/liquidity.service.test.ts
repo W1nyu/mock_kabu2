@@ -86,6 +86,12 @@ describe("LiquidityService.ensureReserves", () => {
       ["SKYL", "bot23@bots.local"],
       ["PIXL", "bot24@bots.local"],
       ["DAON", "bot25@bots.local"],
+      // 2026-09-25 추가 상장
+      ["DDAM", "bot26@bots.local"],
+      ["SAEM", "bot27@bots.local"],
+      ["STEL", "bot28@bots.local"],
+      ["SLVR", "bot29@bots.local"],
+      ["NOVA", "bot30@bots.local"],
     ]);
   });
 
