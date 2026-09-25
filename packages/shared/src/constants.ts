@@ -169,6 +169,8 @@ export const KEYS = {
   loginAttempts: (source: string) => redisKey(`ratelimit:login:${source}`),
   /** 주문 멱등 키 → 주문 ID (24시간 TTL) */
   orderIdempotency: (accountId: string, key: string) => redisKey(`idempotency:order:${accountId}:${key}`),
+  /** 주문 취소 요청 표시 — 같은 주문의 취소가 잠깐 사이에 outbox에 여러 번 쌓이지 않게 한다 */
+  cancelRequested: (orderId: string) => redisKey(`cancel-requested:${orderId}`),
   /** 운영자가 거는 임시 점검 JSON `{startAt, endAt, message}` — 주문 차단·화면 배너 */
   manualMaintenance: () => redisKey("maintenance:manual"),
 } as const;

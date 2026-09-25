@@ -92,16 +92,17 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
 
   /** 한 거래일을 정산한다. 여러 번 불러도 결과가 같다(이미 정산한 계좌·종목은 건너뛴다). */
   async settle(tradingDay: string): Promise<FuturesSettlementResult> {
-    const canceledOrders = await this.cancelOpenFuturesOrders();
-    const prices = await this.settlementPrices();
+    // 이 거래일에 이미 정산을 마친 종목은 건너뛴다. 정산 뒤(04:20~) 새로 연 포지션·주문은 다음 거래일 몫이라,
+    // 낮에 API가 재시작돼 따라잡기가 다시 돌아도 그 포지션을 닫거나 미체결을 취소하면 안 된다.
+    const doneRows = await this.prisma.futuresSettlement.findMany({ where: { tradingDay } });
+    const doneBySymbol = new Map(doneRows.map((row) => [row.symbol, row]));
+    const pending = FUTURES.filter((def) => !doneBySymbol.has(def.symbol)).map((def) => def.symbol);
+    const canceledOrders = pending.length > 0 ? await this.cancelOpenFuturesOrders(pending) : 0;
+    const prices = pending.length > 0 ? await this.settlementPrices() : new Map<string, number>();
     const symbols: FuturesSettlementResult["symbols"] = [];
 
     for (const def of FUTURES) {
-      // 이 거래일에 이미 정산을 마친 종목은 건너뛴다. 정산 뒤(04:20~) 새로 연 포지션은 다음 거래일 몫이라,
-      // 낮에 API가 재시작돼 따라잡기가 다시 돌아도 그 포지션을 닫으면 안 된다.
-      const done = await this.prisma.futuresSettlement.findUnique({
-        where: { symbol_tradingDay: { symbol: def.symbol, tradingDay } },
-      });
+      const done = doneBySymbol.get(def.symbol);
       if (done) {
         symbols.push({ symbol: def.symbol, price: done.price, positions: 0, realizedTotal: 0n });
         continue;
@@ -111,6 +112,11 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
       if (price == null) {
         // 기초자산 가격이 없으면 정산하지 않는다(다음 실행에 다시 시도). 포지션을 잘못된 값으로 닫지 않는다.
         if (open.length > 0) throw new Error(`no settlement price for ${def.symbol}`);
+        // 닫을 포지션이 없으면 가격 없이도 이 거래일은 끝난 것으로 기록한다(price 0 = 결제가격 없음·정산 대상 없음).
+        // 기록이 없으면 낮에 재기동할 때마다 이 종목이 "미정산"으로 보여 미체결 주문을 취소해 버린다.
+        await this.prisma.futuresSettlement.create({
+          data: { symbol: def.symbol, tradingDay, price: 0, positions: 0, realizedTotal: 0n },
+        });
         symbols.push({ symbol: def.symbol, price: null, positions: 0, realizedTotal: 0n });
         continue;
       }
@@ -174,17 +180,21 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
       realizedOut = fill.realized;
     });
     if (realizedOut != null) {
+      const realized = String(realizedOut);
       this.redis
-        .publish(CHANNELS.account(accountId), JSON.stringify({ type: "futures_settled", symbol: def.symbol, tradingDay }))
+        .publish(
+          CHANNELS.account(accountId),
+          JSON.stringify({ type: "futures_settled", symbol: def.symbol, tradingDay, price, realized }),
+        )
         .catch(() => undefined);
     }
     return realizedOut;
   }
 
-  /** 선물 미체결 주문 전부 취소 요청(점검 중이라 새 주문은 없다). 이미 요청된 것도 엔진이 멱등하게 처리한다. */
-  private async cancelOpenFuturesOrders(): Promise<number> {
+  /** 정산할 종목의 미체결 주문 전부 취소 요청(점검 중이라 새 주문은 없다). 이미 요청된 것도 엔진이 멱등하게 처리한다. */
+  private async cancelOpenFuturesOrders(symbols: string[]): Promise<number> {
     const orders = await this.prisma.order.findMany({
-      where: { symbol: { in: FUTURES.map((f) => f.symbol) }, status: { in: ["OPEN", "PARTIAL"] } },
+      where: { symbol: { in: symbols }, status: { in: ["OPEN", "PARTIAL"] } },
       select: { id: true, symbol: true },
     });
     if (orders.length === 0) return 0;

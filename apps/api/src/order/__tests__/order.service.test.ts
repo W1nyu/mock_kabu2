@@ -157,3 +157,40 @@ describe("OrderService.place for futures", () => {
     expect(created[0].holdPerUnit).toBe(futureMarginPerContract(futureDef("KABUF")!, Math.ceil(88_000 * 1.1)));
   });
 });
+
+describe("OrderService.cancel", () => {
+  function setup() {
+    const keys = new Map<string, string>();
+    const redis = {
+      set: vi.fn(async (key: string, value: string, _ex: string, _ttl: number, _nx: string) => {
+        if (keys.has(key)) return null;
+        keys.set(key, value);
+        return "OK";
+      }),
+      del: vi.fn(async (key: string) => keys.delete(key)),
+    };
+    const create = vi.fn(async () => undefined);
+    const prisma = {
+      order: { findUnique: vi.fn(async () => ({ id: "o1", accountId: "a1", symbol: "TANU", status: "OPEN" })) },
+      outbox: { create },
+    };
+    const service = new OrderService(prisma as never, {} as never, redis as never, {} as never);
+    return { service, create, redis, keys };
+  }
+
+  it("writes one cancel event per order within the dedupe window, however often DELETE is re-sent", async () => {
+    const h = setup();
+    await expect(h.service.cancel("a1", "o1")).resolves.toEqual({ ok: true });
+    await expect(h.service.cancel("a1", "o1")).resolves.toEqual({ ok: true, duplicate: true });
+    await h.service.cancel("a1", "o1");
+    expect(h.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the dedupe mark when the outbox write fails so a retry can go through", async () => {
+    const h = setup();
+    h.create.mockRejectedValueOnce(new Error("db down"));
+    await expect(h.service.cancel("a1", "o1")).rejects.toThrow("db down");
+    await h.service.cancel("a1", "o1");
+    expect(h.create).toHaveBeenCalledTimes(2);
+  });
+});

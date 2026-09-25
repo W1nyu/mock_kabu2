@@ -48,6 +48,13 @@ export interface MyOrdersFilter {
 
 const LIVE_ORDER_STATUSES = ["OPEN", "PARTIAL"];
 const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
+/**
+ * 같은 주문의 취소 요청은 이 시간 안에 한 번만 outbox에 쓴다. 취소는 비동기라 주문이 한동안 OPEN으로 보이는데,
+ * 봇·사용자가 그 사이 DELETE를 다시 보내면 요청마다 이벤트가 쌓였다. 엔진이 밀리면 취소가 늦게 반영되고,
+ * 그래서 또 다시 보내는 되먹임으로 outbox가 수십만 건까지 불어난 적이 있다(로컬 2026-09-25, 약 900건/초).
+ * 첫 요청은 outbox에 영속되므로 중복을 버려도 취소는 잃지 않는다. 이 시간이 지나면 다시 받아 준다.
+ */
+const CANCEL_DEDUPE_SECONDS = 30;
 
 @Injectable()
 export class OrderService {
@@ -202,6 +209,11 @@ export class OrderService {
       throw new UnprocessableEntityException(`이미 종결된 주문입니다 (${order.status})`);
     }
 
+    // Redis가 잠깐 안 되면 막지 않고 예전처럼 그냥 쓴다(엔진은 중복 취소를 멱등하게 처리한다).
+    const dedupeKey = KEYS.cancelRequested(orderId);
+    const fresh = await this.redis.set(dedupeKey, "1", "EX", CANCEL_DEDUPE_SECONDS, "NX").catch(() => "OK");
+    if (fresh !== "OK") return { ok: true, duplicate: true };
+
     const event: OrderCancelRequestedEvent = {
       topic: "order.cancel.requested",
       eventId: randomUUID(),
@@ -209,9 +221,14 @@ export class OrderService {
       symbol: order.symbol,
       ts: Date.now(),
     };
-    await this.prisma.outbox.create({
-      data: { eventId: event.eventId, topic: event.topic, payload: event as object },
-    });
+    try {
+      await this.prisma.outbox.create({
+        data: { eventId: event.eventId, topic: event.topic, payload: event as object },
+      });
+    } catch (error) {
+      await this.redis.del(dedupeKey).catch(() => undefined);
+      throw error;
+    }
     this.outboxRelayer?.flushSoon();
     return { ok: true };
   }

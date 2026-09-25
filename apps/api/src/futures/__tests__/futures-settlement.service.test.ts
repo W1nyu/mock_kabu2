@@ -47,7 +47,8 @@ function harness(options: { usdClose?: number | null } = {}) {
         [...positions.values()].filter((p) => p.symbol === where.symbol && p.qty !== 0),
     },
     futuresSettlement: {
-      findUnique: async ({ where }: any) => settlements.get(`${where.symbol_tradingDay.symbol}:${where.symbol_tradingDay.tradingDay}`) ?? null,
+      findMany: async ({ where }: any) =>
+        [...settlements.entries()].filter(([k]) => k.endsWith(`:${where.tradingDay}`)).map(([k, v]) => ({ symbol: k.split(":")[0], ...v })),
       create: async ({ data }: any) => {
         const k = `${data.symbol}:${data.tradingDay}`;
         if (settlements.has(k)) throw new Error("unique violation");
@@ -105,8 +106,11 @@ describe("futures daily settlement", () => {
     // 04:20 이후 새로 연 포지션
     h.positions.set("long:USDF", { accountId: "long", symbol: "USDF", qty: 1, entryValue: 14_050n, marginHeld: 1n });
     h.marginCalls.push({ id: "c2", resolvedAt: null, outcome: null });
+    const outboxBefore = h.outbox.length;
     await h.service.settle("2026-09-26");
     expect(h.positions.get("long:USDF")!.qty).toBe(1);
+    // 낮에 새로 낸 미체결 주문도 취소하지 않는다(재기동마다 모든 선물 주문이 취소되던 문제).
+    expect(h.outbox.length).toBe(outboxBefore);
     expect(h.marginCalls[1].resolvedAt).toBeNull();
   });
 
