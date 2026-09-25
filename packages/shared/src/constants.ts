@@ -17,7 +17,7 @@ export interface SymbolDef {
   listedShares: number;
 }
 
-/** 가상 종목 15개 */
+/** 가상 종목 18개 */
 export const SYMBOLS: SymbolDef[] = [
   { symbol: "MOCK", name: "모의전자", initialPrice: 50_000, tickSize: 50, listedShares: 24_000_000 },
   { symbol: "KABU", name: "카부증권", initialPrice: 120_000, tickSize: 100, listedShares: 10_000_000 },
@@ -36,6 +36,10 @@ export const SYMBOLS: SymbolDef[] = [
   { symbol: "STEL", name: "스텔라엔터", initialPrice: 30_000, tickSize: 50, listedShares: 40_000_000 },
   { symbol: "SLVR", name: "실버모터스", initialPrice: 80_000, tickSize: 100, listedShares: 15_000_000 },
   { symbol: "NOVA", name: "노바셀배터리", initialPrice: 600_000, tickSize: 1_000, listedShares: 2_000_000 },
+  // 2026-09-25 추가 상장 (에너지·유틸리티·부동산)
+  { symbol: "NRFD", name: "노스필드정유", initialPrice: 150_000, tickSize: 100, listedShares: 8_000_000 },
+  { symbol: "GARM", name: "가람전력", initialPrice: 6_000, tickSize: 10, listedShares: 200_000_000 },
+  { symbol: "HAVN", name: "헤이븐리츠", initialPrice: 5_000, tickSize: 10, listedShares: 240_000_000 },
 ];
 
 /** 지수 시작 수준. 첫 구간의 제수는 상장 시가총액 합 ÷ INDEX_BASE_LEVEL이다. */

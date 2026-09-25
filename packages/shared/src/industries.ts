@@ -17,8 +17,9 @@ export const INDUSTRIES: readonly IndustryDef[] = [
   { id: "mobility", label: "모빌리티", symbols: ["SLVR", "BJAY"] },
   { id: "media", label: "미디어·통신", symbols: ["PIXL", "STEL", "SKYL"] },
   { id: "health", label: "헬스케어", symbols: ["SAEM"] },
+  { id: "energy", label: "에너지·유틸리티", symbols: ["NRFD", "GARM"] },
   { id: "consumer", label: "소비재", symbols: ["BORI"] },
-  { id: "finance", label: "금융", symbols: ["KABU"] },
+  { id: "finance", label: "금융·부동산", symbols: ["KABU", "HAVN"] },
 ];
 
 const INDUSTRY_BY_SYMBOL = new Map(

@@ -92,6 +92,9 @@ describe("LiquidityService.ensureReserves", () => {
       ["STEL", "bot28@bots.local"],
       ["SLVR", "bot29@bots.local"],
       ["NOVA", "bot30@bots.local"],
+      ["NRFD", "bot31@bots.local"],
+      ["GARM", "bot32@bots.local"],
+      ["HAVN", "bot33@bots.local"],
     ]);
   });
 

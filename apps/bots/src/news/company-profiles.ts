@@ -146,6 +146,30 @@ export const COMPANY_PROFILES: readonly CompanyProfile[] = [
     macroBeta: { RATE: -1.1, FX: 0.8, OIL: 0.2, COMMODITY: -0.9, GLOBAL: 1.3 },
     plants: ["오창", "청주", "새만금"],
   },
+  {
+    symbol: "NRFD",
+    sector: "ENERGY",
+    capEok: 12_000,
+    // Refiner: firm crude lifts inventory gains and margins; buys crude in dollars.
+    macroBeta: { RATE: -0.5, FX: -0.3, OIL: 1.2, COMMODITY: 0.4, GLOBAL: 0.8 },
+    plants: ["울산", "여수", "대산"],
+  },
+  {
+    symbol: "GARM",
+    sector: "UTILITY",
+    capEok: 12_000,
+    // Regulated power seller: fuel is the cost, tariffs lag, the cycle barely matters.
+    macroBeta: { RATE: -0.9, FX: -0.7, OIL: -1.0, COMMODITY: -0.6, GLOBAL: 0.2 },
+    plants: ["당진", "보령", "영흥"],
+  },
+  {
+    symbol: "HAVN",
+    sector: "REIT",
+    capEok: 12_000,
+    // Income vehicle priced off bond yields: rates dominate everything else.
+    macroBeta: { RATE: -1.6, FX: -0.2, OIL: -0.1, COMMODITY: -0.1, GLOBAL: 0.4 },
+    plants: ["여의도", "강남", "판교"],
+  },
 ];
 
 const PROFILES_BY_SYMBOL = new Map(COMPANY_PROFILES.map((profile) => [profile.symbol, profile]));

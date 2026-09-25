@@ -37,7 +37,7 @@ export const CAPITAL_TEMPLATES: readonly NewsTemplate[] = [
       "{name}, {money} 유상증자… 전액 {plant} 시설자금",
       "{name}, 증설 재원 마련 위해 {money} 규모 유상증자 결의",
     ],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     slots: {
       money: { kind: "money", capFraction: { min: 0.06, max: 0.18 } },
       plant: { kind: "pick", vocab: "plant" },

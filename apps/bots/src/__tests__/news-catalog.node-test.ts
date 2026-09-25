@@ -167,6 +167,19 @@ test("sector gating keeps impossible stories away from the wrong company", () =>
   assert.ok(reachableForKabu.includes("risk.pf"));
 });
 
+test("a REIT gets no factory, production or export stories", () => {
+  const reit = companyProfile("HAVN");
+  assert.equal(reit?.sector, "REIT");
+  const reachable = SYMBOL_POOL.filter(
+    (template) =>
+      !template.excludeSectors?.includes(reit!.sector) &&
+      (!template.sectors || template.sectors.includes(reit!.sector)),
+  ).map((template) => template.id);
+  for (const id of ["risk.accident", "risk.fire", "risk.strike", "biz.plant.open", "biz.capex", "biz.export.record"]) {
+    assert.ok(!reachable.includes(id), id);
+  }
+});
+
 test("clinical-trial stories reach only the pharma listing", () => {
   const bioSymbols = SYMBOLS.filter((symbol) => companyProfile(symbol.symbol)?.sector === "BIO").map((s) => s.symbol);
   assert.deepEqual(bioSymbols, ["SAEM"]);

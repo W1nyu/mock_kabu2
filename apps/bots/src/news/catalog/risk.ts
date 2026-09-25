@@ -113,7 +113,7 @@ export const RISK_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     strength: { min: 0.48, max: 0.7 },
     headlines: ["{name} {plant} 공장 화재… 생산라인 {duration} 가동 중단"],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     slots: {
       plant: { kind: "pick", vocab: "plant" },
       duration: { kind: "duration", range: { min: 3, max: 45 }, unit: "일" },
@@ -126,7 +126,7 @@ export const RISK_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     strength: { min: 0.35, max: 0.55 },
     headlines: ["{name} 노조, 파업 돌입… 임금협상 결렬"],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
   },
   {
     id: "risk.strike.end",
@@ -135,7 +135,7 @@ export const RISK_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "POSITIVE",
     strength: { min: 0.25, max: 0.42 },
     headlines: ["{name} 노사, 임단협 타결… {plant} 정상 조업 재개"],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     slots: { plant: { kind: "pick", vocab: "plant" } },
   },
   {
@@ -230,7 +230,7 @@ export const RISK_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     strength: { min: 0.4, max: 0.65 },
     headlines: ["{name} {plant} 공장 화재… 생산라인 일부 가동 중단", "{name} {plant} 사업장 화재로 {duration} 생산 차질 예상"],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     volumeMultiplier: { min: 1.3, max: 1.7 },
     slots: {
       plant: { kind: "pick", vocab: "plant" },
@@ -268,7 +268,7 @@ export const RISK_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     strength: { min: 0.35, max: 0.55 },
     headlines: ["{name}, 핵심 부품 공급 차질… {product} 출하 {duration} 지연", "{country} 협력사 파업에 {name} 생산 차질"],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     slots: {
       product: { kind: "pick", vocab: "product" },
       duration: { kind: "duration", range: { min: 2, max: 8 }, unit: "개월" },

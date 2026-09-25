@@ -13,7 +13,7 @@ export const BUSINESS_TEMPLATES: readonly NewsTemplate[] = [
       "{name}, {country}서 {money} 규모 {product} 수주",
     ],
     body: ["계약 기간은 {duration}이며 연간 매출에 순차 반영된다."],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     slots: {
       country: { kind: "pick", vocab: "country" },
       counterparty: { kind: "pick", vocab: "counterparty" },
@@ -39,7 +39,7 @@ export const BUSINESS_TEMPLATES: readonly NewsTemplate[] = [
     strength: { min: 0.68, max: 0.9 },
     headlines: ["{name}, 창사 이래 최대 {money} 규모 {product} 수주"],
     body: ["{country} {counterparty}{과} 체결했으며 수주잔고가 크게 늘었다."],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     volumeMultiplier: { min: 1.5, max: 1.9 },
     slots: {
       country: { kind: "pick", vocab: "country" },
@@ -64,7 +64,7 @@ export const BUSINESS_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     strength: { min: 0.55, max: 0.8 },
     headlines: ["{name}, {money} 규모 {product} 계약 해지 통보받아"],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     slots: {
       product: { kind: "pick", vocab: "product" },
       money: { kind: "money", capFraction: { min: 0.05, max: 0.2 } },
@@ -77,7 +77,7 @@ export const BUSINESS_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "POSITIVE",
     strength: { min: 0.3, max: 0.5 },
     headlines: ["{name}, 차세대 {product} 공개… 내년 {quarter} 양산 목표"],
-    excludeSectors: ["BROKER", "TRADING"],
+    excludeSectors: ["BROKER", "TRADING", "REIT"],
     slots: {
       product: { kind: "pick", vocab: "product" },
       quarter: { kind: "quarter", offsetQuarters: 2 },
@@ -90,7 +90,7 @@ export const BUSINESS_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "POSITIVE",
     strength: { min: 0.48, max: 0.7 },
     headlines: ["{name}, {product} 개발 성공… 업계 최초 양산 체제 구축"],
-    excludeSectors: ["BROKER", "TRADING"],
+    excludeSectors: ["BROKER", "TRADING", "REIT"],
     slots: { product: { kind: "pick", vocab: "product" } },
   },
   {
@@ -146,7 +146,7 @@ export const BUSINESS_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "POSITIVE",
     strength: { min: 0.35, max: 0.55 },
     headlines: ["{name}, {plant}에 {money} 투자… {product} 공급능력 {pct} 확대"],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     slots: {
       plant: { kind: "pick", vocab: "plant" },
       product: { kind: "pick", vocab: "product" },
@@ -292,7 +292,7 @@ export const BUSINESS_TEMPLATES: readonly NewsTemplate[] = [
     strength: { min: 0.35, max: 0.58 },
     headlines: ["{name}, {plant} 신공장 준공… 생산능력 {pct} 확대", "{name} {plant} 증설 라인 가동 개시"],
     body: ["총 {money}가 투입됐으며 내년부터 매출에 기여할 전망이다."],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     slots: {
       plant: { kind: "pick", vocab: "plant" },
       pct: { kind: "percent", range: { min: 15, max: 45 }, decimals: 0 },
@@ -306,7 +306,7 @@ export const BUSINESS_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "POSITIVE",
     strength: { min: 0.3, max: 0.52 },
     headlines: ["정부, {name} {product} 사업에 {money} 보조금 확정", "{name}, {country} 정부 인센티브 {money} 확보"],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     slots: {
       product: { kind: "pick", vocab: "product" },
       country: { kind: "pick", vocab: "country" },
@@ -333,7 +333,7 @@ export const BUSINESS_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "POSITIVE",
     strength: { min: 0.32, max: 0.52 },
     headlines: ["{name}, {product} 월간 수출 {money}… 사상 최대", "{name} {product} 해외 매출 비중 {pct} 돌파"],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     slots: {
       product: { kind: "pick", vocab: "product" },
       money: { kind: "money", capFraction: { min: 0.01, max: 0.05 } },
@@ -356,7 +356,7 @@ export const BUSINESS_TEMPLATES: readonly NewsTemplate[] = [
     sentiment: "NEGATIVE",
     strength: { min: 0.35, max: 0.58 },
     headlines: ["{name}, {country} {product} 입찰서 고배… 경쟁사에 밀려", "{name}, {money} 규모 {product} 수주 경쟁서 탈락"],
-    excludeSectors: ["BROKER"],
+    excludeSectors: ["BROKER", "REIT"],
     slots: {
       country: { kind: "pick", vocab: "country" },
       product: { kind: "pick", vocab: "product" },

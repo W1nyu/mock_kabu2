@@ -30,7 +30,10 @@ export type SectorTag =
   | "CONSTRUCTION"
   | "AUTO"
   | "ENTERTAINMENT"
-  | "BATTERY";
+  | "BATTERY"
+  | "ENERGY"
+  | "UTILITY"
+  | "REIT";
 
 /**
  * The macro axis a market-wide story moves along. Each symbol has a signed beta on it.
