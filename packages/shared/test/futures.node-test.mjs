@@ -3,10 +3,12 @@ import test from "node:test";
 import {
   applyFutureFill,
   applyFuturesCash,
+  assessFuturesRisk,
   futureDef,
   futureMaintenanceMargin,
   futureMarginPerContract,
   futurePositionMargin,
+  marginCallLiquidationQty,
   tickSizeOf,
   TRADABLE_SYMBOLS,
 } from "../dist/index.js";
@@ -87,4 +89,37 @@ test("daily settlement runs at 04:11 KST and is keyed by the KST date", () => {
   assert.equal(futuresSettlementDue(at), true);
   // 정산 시각 뒤에는 다음 날 04:11
   assert.equal(new Date(nextFuturesSettlementAt(at)).toISOString(), "2026-09-26T19:11:00.000Z");
+});
+
+test("assessFuturesRisk: margin call below maintenance, shortfall to initial, 90% emergency", () => {
+  const usd = futureDef("USDF");
+  // 1,400.0원에 10계약 롱: 명목 1억4천만 원, 위탁증거금 6,762,000
+  const entryValue = 140_000n;
+  const marginHeld = futurePositionMargin(usd, entryValue);
+  const at = (mark, balance) =>
+    assessFuturesRisk([{ def: usd, qty: 10, entryValue, marginHeld, mark }], { balance, debt: 0n });
+
+  const calm = at(14_000, 10_000_000n);
+  assert.equal(calm.belowMaintenance, false);
+  assert.deepEqual(calm.emergency, []);
+
+  // 1,380.0원: 평가손익 −200만, 유지증거금 4,443,600 / 위탁증거금 6,665,400
+  assert.equal(at(13_800, 7_000_000n).belowMaintenance, false);
+  const call = at(13_800, 6_000_000n);
+  assert.equal(call.unrealized, -2_000_000n);
+  assert.equal(call.equity, 4_000_000n);
+  assert.equal(call.maintenance, 4_443_600n);
+  assert.equal(call.belowMaintenance, true);
+  assert.equal(call.shortfall, 2_665_400n);
+
+  // 손실이 위탁증거금의 90% 이상 → 긴급
+  const lossUnits = Number((marginHeld * 9n) / 10n / 10_000n) + 1;
+  assert.deepEqual(at(14_000 - lossUnits, 100_000_000n).emergency, ["USDF"]);
+});
+
+test("marginCallLiquidationQty closes shortfall/initial of the position, rounded up", () => {
+  assert.equal(marginCallLiquidationQty(10, 100n, 1_000n), 1);
+  assert.equal(marginCallLiquidationQty(10, 101n, 1_000n), 2);
+  assert.equal(marginCallLiquidationQty(-7, 5_000n, 1_000n), 7);
+  assert.equal(marginCallLiquidationQty(3, 0n, 1_000n), 0);
 });

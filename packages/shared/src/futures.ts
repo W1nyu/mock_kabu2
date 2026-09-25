@@ -249,3 +249,74 @@ export function futuresSettlementDue(now: number): boolean {
   const dayStart = Math.floor(kst / 86_400_000) * 86_400_000;
   return kst >= dayStart + FUTURES_SETTLE_MINUTE_KST * 60_000;
 }
+
+/** 추가증거금 유예 시간 — 이 안에 위탁증거금 수준까지 채우지 않으면 반대매매한다. */
+export const FUTURES_MARGIN_CALL_GRACE_MS = 30 * 60_000;
+/** 한 포지션의 평가손실이 그 포지션 위탁증거금의 이 비율(bps)에 닿으면 유예 없이 전량 반대매매한다. */
+export const FUTURES_EMERGENCY_LOSS_BPS = 9_000;
+
+export interface FuturesRiskPosition {
+  def: FutureDef;
+  qty: number;
+  entryValue: bigint;
+  /** 포지션 위탁증거금(진입가 기준) */
+  marginHeld: bigint;
+  /** 현재가(정수 단위) */
+  mark: number;
+}
+
+export interface FuturesRiskAssessment {
+  /** 평가예탁금 = 현금 + 평가손익 − 미수금 */
+  equity: bigint;
+  unrealized: bigint;
+  /** 현재가 기준 유지증거금 합계 */
+  maintenance: bigint;
+  /** 현재가 기준 위탁증거금 합계 — 추가증거금은 여기까지 채워야 해소된다 */
+  initial: bigint;
+  /** 평가예탁금이 유지증거금보다 작다 */
+  belowMaintenance: boolean;
+  /** 위탁증거금까지 모자란 금액(0 이상) */
+  shortfall: bigint;
+  /** 평가손실이 위탁증거금의 90%에 닿은 종목 */
+  emergency: string[];
+}
+
+export function futureUnrealized(def: FutureDef, qty: number, entryValue: bigint, mark: number): bigint {
+  if (qty === 0) return 0n;
+  const markValue = BigInt(Math.abs(qty)) * BigInt(mark);
+  return (qty > 0 ? 1n : -1n) * (markValue - entryValue) * BigInt(def.unitValue);
+}
+
+/** 계좌 하나의 선물 위험도. 현금은 현물과 공유하므로 잔액 전체를 평가예탁금에 넣는다. */
+export function assessFuturesRisk(
+  positions: readonly FuturesRiskPosition[],
+  cash: { balance: bigint; debt: bigint },
+): FuturesRiskAssessment {
+  let unrealized = 0n;
+  let maintenance = 0n;
+  let initial = 0n;
+  const emergency: string[] = [];
+  for (const p of positions) {
+    if (p.qty === 0) continue;
+    const pnl = futureUnrealized(p.def, p.qty, p.entryValue, p.mark);
+    unrealized += pnl;
+    maintenance += futureMaintenanceMargin(p.def, p.qty, p.mark);
+    initial += futureMarginPerContract(p.def, p.mark) * BigInt(Math.abs(p.qty));
+    if (p.marginHeld > 0n && -pnl * 10_000n >= p.marginHeld * BigInt(FUTURES_EMERGENCY_LOSS_BPS)) emergency.push(p.def.symbol);
+  }
+  const equity = cash.balance + unrealized - cash.debt;
+  const shortfall = initial > equity ? initial - equity : 0n;
+  return { equity, unrealized, maintenance, initial, belowMaintenance: equity < maintenance, shortfall, emergency };
+}
+
+/**
+ * 기한 초과 반대매매 수량: 추가증거금 ÷ 위탁증거금 비율만큼(올림) 줄이면 남은 위탁증거금을 평가예탁금이 감당한다.
+ * 평가예탁금이 0 이하면 전량.
+ */
+export function marginCallLiquidationQty(qty: number, shortfall: bigint, initial: bigint): number {
+  const size = Math.abs(qty);
+  if (size === 0 || shortfall <= 0n) return 0;
+  if (initial <= 0n || shortfall >= initial) return size;
+  const n = (BigInt(size) * shortfall + initial - 1n) / initial;
+  return Math.max(1, Math.min(size, Number(n)));
+}

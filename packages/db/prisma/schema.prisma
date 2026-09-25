@@ -391,6 +391,37 @@ model FuturesPosition {
   @@schema("account")
 }
 
+/// 선물 추가증거금(마진콜). 계좌당 진행 중(resolvedAt null)은 하나 — 부분 유니크 인덱스는 마이그레이션 SQL에 있다.
+model FuturesMarginCall {
+  id         String    @id @default(uuid())
+  accountId  String    @map("account_id")
+  startedAt  DateTime  @default(now()) @map("started_at")
+  deadline   DateTime
+  required   BigInt
+  resolvedAt DateTime? @map("resolved_at")
+  outcome    String?
+
+  @@index([accountId, startedAt])
+  @@map("futures_margin_calls")
+  @@schema("account")
+}
+
+/// 반대매매 주문 (증거금을 묶지 않는 시장가)
+model FuturesLiquidation {
+  orderId      String   @id @map("order_id")
+  accountId    String   @map("account_id")
+  symbol       String
+  side         String
+  qty          Int
+  reason       String
+  marginCallId String?  @map("margin_call_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([accountId, createdAt])
+  @@map("futures_liquidations")
+  @@schema("account")
+}
+
 /// 선물 일일 정산 기록 — 거래일(KST 날짜)·종목별 최종 결제가격
 model FuturesSettlement {
   symbol        String

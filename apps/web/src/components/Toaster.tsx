@@ -1,8 +1,10 @@
 "use client";
 
+import { isFuture } from "@mock-kabu/shared";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { fmt, getUser } from "@/lib/api";
+import { fmtFuture, krw } from "@/lib/futures";
 import { pushNotification, showDesktopNotification } from "@/lib/notifications";
 import { subscribe } from "@/lib/socket";
 
@@ -59,6 +61,16 @@ export default function Toaster() {
       if (!fill) return;
       pending.delete(key);
       const avg = fill.qty > 0 ? Math.round(fill.amount / fill.qty) : 0;
+      if (isFuture(fill.symbol)) {
+        push({
+          id: `fill:${key}:${Date.now()}`,
+          href: `/futures/${fill.symbol}`,
+          tone: fill.side === "BUY" ? "up" : "down",
+          title: `${fill.symbol} ${fill.side === "BUY" ? "매수" : "매도"} 체결 ${fmt.format(fill.qty)}계약`,
+          detail: fill.count > 1 ? `${fill.count}건 · 평균 ${fmtFuture(fill.symbol, avg)}` : fmtFuture(fill.symbol, avg),
+        });
+        return;
+      }
       push({
         id: `fill:${key}:${Date.now()}`,
         href: `/symbol/${fill.symbol}`,
@@ -103,6 +115,32 @@ export default function Toaster() {
             amount: qty * price,
             count: 1,
             timer: setTimeout(() => flushFill(key), COALESCE_MS),
+          });
+        }
+        return;
+      }
+      if (data.type === "futures_margin_call") {
+        const at = Date.now();
+        if (data.status === "OPEN") {
+          const deadline = new Date(String(data.deadline));
+          push({
+            id: `margin-call:${at}`,
+            href: "/futures/KABUF",
+            tone: "warn",
+            title: "선물 추가증거금 발생",
+            detail: `${krw(Number(data.required))} · ${deadline.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" })}까지 채우지 않으면 반대매매`,
+          });
+        } else if (data.status === "RESOLVED") {
+          push({ id: `margin-call:${at}`, tone: "info", title: "선물 추가증거금 해소", detail: "위탁증거금 수준을 회복했습니다" });
+        } else if (data.status === "LIQUIDATED" || data.status === "EMERGENCY") {
+          push({
+            id: `margin-call:${at}`,
+            tone: "down",
+            title: data.status === "EMERGENCY" ? "선물 긴급 반대매매" : "선물 반대매매",
+            detail:
+              data.status === "EMERGENCY"
+                ? `평가손실이 증거금의 90%에 닿아 ${Array.isArray(data.symbols) ? data.symbols.join(", ") : ""} 포지션을 시장가로 청산합니다`
+                : "추가증거금 기한이 지나 포지션 일부를 시장가로 청산합니다",
           });
         }
         return;

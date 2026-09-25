@@ -17,6 +17,7 @@ function harness(options: { usdClose?: number | null } = {}) {
   const ledger: { accountId: string; delta: bigint; reason: string }[] = [];
   const settlements = new Map<string, { price: number; positions: number; realizedTotal: bigint }>();
   const outbox: unknown[] = [];
+  const marginCalls = [{ id: "c1", resolvedAt: null as Date | null, outcome: null as string | null }];
 
   const tx = {
     processedEvent: {
@@ -53,6 +54,11 @@ function harness(options: { usdClose?: number | null } = {}) {
         settlements.set(k, data);
       },
     },
+    futuresMarginCall: {
+      updateMany: async ({ data }: any) => {
+        for (const call of marginCalls) if (call.resolvedAt == null) Object.assign(call, data);
+      },
+    },
     indexEpoch: { findFirst: async () => null },
     marketSymbol: { findMany: async () => [] },
     $queryRaw: async () => (options.usdClose === null ? [] : [{ code: "USDKRW", close: options.usdClose ?? 14_100 }]),
@@ -63,7 +69,7 @@ function harness(options: { usdClose?: number | null } = {}) {
   };
   const redis = { publish: vi.fn(async () => 1) };
   const service = new FuturesSettlementService(prisma as never, mutator as never, redis as never);
-  return { service, accounts, positions, debts, ledger, settlements, outbox };
+  return { service, accounts, positions, debts, ledger, settlements, outbox, marginCalls };
 }
 
 describe("futures daily settlement", () => {
@@ -82,6 +88,7 @@ describe("futures daily settlement", () => {
     expect(h.outbox).toHaveLength(1);
     expect(result.symbols.find((s) => s.symbol === "USDF")).toMatchObject({ price: 14_100, positions: 2, realizedTotal: 0n });
     expect(h.settlements.get("USDF:2026-09-26")).toMatchObject({ price: 14_100, positions: 2 });
+    expect(h.marginCalls[0].outcome).toBe("SETTLED");
   });
 
   it("is idempotent — running the same day again changes nothing", async () => {
@@ -97,8 +104,10 @@ describe("futures daily settlement", () => {
     await h.service.settle("2026-09-26");
     // 04:20 이후 새로 연 포지션
     h.positions.set("long:USDF", { accountId: "long", symbol: "USDF", qty: 1, entryValue: 14_050n, marginHeld: 1n });
+    h.marginCalls.push({ id: "c2", resolvedAt: null, outcome: null });
     await h.service.settle("2026-09-26");
     expect(h.positions.get("long:USDF")!.qty).toBe(1);
+    expect(h.marginCalls[1].resolvedAt).toBeNull();
   });
 
   it("turns a loss beyond the balance into debt instead of a negative balance", async () => {

@@ -16,6 +16,13 @@ interface LiveOrder {
   filledQty: number;
 }
 
+function remaining(deadline: string, now: number): string {
+  const ms = Math.max(0, Date.parse(deadline) - now);
+  const m = Math.floor(ms / 60_000);
+  const sec = Math.floor((ms % 60_000) / 1000);
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
 function tone(n: number): string {
   return n > 0 ? "text-up" : n < 0 ? "text-down" : "text-ink-muted";
 }
@@ -28,7 +35,15 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
   const [account, setAccount] = useState<FuturesAccount | null>(null);
   const [orders, setOrders] = useState<LiveOrder[]>([]);
   const [loggedIn, setLoggedIn] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => setLoggedIn(getUser() != null), []);
+  // 추가증거금 기한 카운트다운 — 걸려 있을 때만 1초마다 다시 그린다.
+  const hasCall = account?.marginCall != null;
+  useEffect(() => {
+    if (!hasCall) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(id);
+  }, [hasCall]);
 
   const load = useCallback(() => {
     if (!getUser()) return;
@@ -63,6 +78,22 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
         )}
       </div>
       <div className="space-y-3 p-4 text-[13px]">
+        {account?.marginCall && (
+          <div role="alert" className="rounded-xl border border-warn/40 bg-warn/10 p-3">
+            <p className="flex items-center justify-between gap-2 font-semibold text-warn">
+              <span>추가증거금 발생</span>
+              <span className="num">{remaining(account.marginCall.deadline, now)} 남음</span>
+            </p>
+            <p className="num mt-1 text-ink">
+              {account.marginCall.shortfall > 0 ? `${krw(account.marginCall.shortfall)} 더 필요` : "곧 해소됩니다"}
+              <span className="text-ink-faint"> (발생 시 {krw(account.marginCall.required)})</span>
+            </p>
+            <p className="mt-1 text-[11px] leading-5 text-ink-muted">
+              기한까지 입금하거나 포지션을 줄여 위탁증거금 수준을 회복하지 않으면 모자란 비율만큼 시장가로 반대매매됩니다.
+              평가손실이 증거금의 90%에 닿으면 기한과 상관없이 즉시 전량 반대매매됩니다.
+            </p>
+          </div>
+        )}
         {position ? (
           <dl className="num grid grid-cols-2 gap-x-4 gap-y-1.5">
             <dt className="text-ink-muted">포지션</dt>
@@ -89,6 +120,8 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
             <dd className={`text-right ${tone(account.unrealized)}`}>{krw(account.unrealized)}</dd>
             <dt className="text-ink-muted">묶인 증거금</dt>
             <dd className="text-right">{krw(account.marginHeld)}</dd>
+            <dt className="text-ink-muted">평가예탁금</dt>
+            <dd className="text-right">{krw(account.equity)}</dd>
             <dt className="text-ink-muted">유지증거금</dt>
             <dd className="text-right">{krw(account.maintenanceMargin)}</dd>
             {account.debt > 0 && (
@@ -98,6 +131,33 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
               </>
             )}
           </dl>
+        )}
+
+        {account && account.liquidations.length > 0 && (
+          <div className="border-t border-hairline-soft pt-3">
+            <p className="mb-2 text-xs text-ink-muted">반대매매 내역</p>
+            <ul className="space-y-1">
+              {account.liquidations.slice(0, 5).map((row) => (
+                <li key={row.orderId} className="num flex items-center justify-between gap-2 text-[12px]">
+                  <span>
+                    <span className="mr-1.5 rounded bg-down/12 px-1.5 py-0.5 text-[10px] font-semibold text-down">
+                      {row.reason === "EMERGENCY" ? "긴급" : "기한 초과"}
+                    </span>
+                    {row.symbol} {row.side === "BUY" ? "매수" : "매도"} {row.qty}계약
+                  </span>
+                  <span className="text-ink-faint">
+                    {new Date(row.createdAt).toLocaleString("ko-KR", {
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      timeZone: "Asia/Seoul",
+                    })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
 
         {orders.length > 0 && (

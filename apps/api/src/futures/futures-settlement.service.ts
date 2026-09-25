@@ -129,6 +129,14 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
       });
       symbols.push({ symbol: def.symbol, price, positions, realizedTotal });
     }
+    // 정산으로 포지션이 사라졌으니 진행 중이던 추가증거금도 끝낸다. 이번 실행이 실제로 포지션을 닫았을 때만 —
+    // 낮의 재기동 따라잡기가 정산 뒤에 새로 걸린 추가증거금을 지우면 안 된다.
+    if (symbols.some((s) => s.positions > 0)) {
+      await this.prisma.futuresMarginCall.updateMany({
+        where: { resolvedAt: null },
+        data: { resolvedAt: new Date(), outcome: "SETTLED" },
+      });
+    }
     return { tradingDay, canceledOrders, symbols };
   }
 

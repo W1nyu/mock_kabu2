@@ -32,7 +32,11 @@ export interface FuturesAccount {
   debt: number;
   unrealized: number;
   maintenanceMargin: number;
+  /** 현재가 기준 위탁증거금 합계 — 추가증거금은 여기까지 채워야 해소된다 */
+  initialMargin: number;
   equity: number;
+  marginCall: { startedAt: string; deadline: string; required: number; shortfall: number } | null;
+  liquidations: { orderId: string; symbol: string; side: "BUY" | "SELL"; qty: number; reason: "DEADLINE" | "EMERGENCY"; createdAt: string }[];
 }
 
 export function fmtFuture(symbol: string, units: number | null | undefined): string {

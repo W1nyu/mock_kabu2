@@ -3,6 +3,8 @@ import type { PrismaClient } from "@mock-kabu/db";
 import {
   FUTURES,
   futureMaintenanceMargin,
+  futureMarginPerContract,
+  futureUnrealized,
   indexLevel,
   KEYS,
   REFERENCE_ASSETS,
@@ -120,25 +122,27 @@ export class FuturesService {
 
   /** 내 선물 포지션: 평균가·평가손익·증거금, 계좌 전체의 유지증거금 대비 여유. */
   async positions(accountId: string) {
-    const [positions, overview, encumbrance, account] = await Promise.all([
+    const [positions, overview, encumbrance, account, marginCall, liquidations] = await Promise.all([
       this.prisma.futuresPosition.findMany({ where: { accountId, qty: { not: 0 } } }),
       this.overview(),
       futuresEncumbrance(this.prisma, accountId),
       this.prisma.account.findUnique({ where: { id: accountId }, select: { balance: true, holdAmount: true } }),
+      this.prisma.futuresMarginCall.findFirst({ where: { accountId, resolvedAt: null } }),
+      this.prisma.futuresLiquidation.findMany({ where: { accountId }, orderBy: { createdAt: "desc" }, take: 10 }),
     ]);
     const markBySymbol = new Map(overview.map((row) => [row.symbol, row.lastPrice]));
     let unrealizedTotal = 0n;
     let maintenanceTotal = 0n;
+    let initialTotal = 0n;
     const rows = positions.map((position) => {
       const def = FUTURES.find((future) => future.symbol === position.symbol) as FutureDef;
       const mark = markBySymbol.get(position.symbol) ?? def.initialPrice;
       const qty = position.qty;
-      const markValue = BigInt(Math.abs(qty)) * BigInt(mark);
-      const direction = qty > 0 ? 1n : -1n;
-      const unrealized = direction * (markValue - position.entryValue) * BigInt(def.unitValue);
+      const unrealized = futureUnrealized(def, qty, position.entryValue, mark);
       const maintenance = futureMaintenanceMargin(def, qty, mark);
       unrealizedTotal += unrealized;
       maintenanceTotal += maintenance;
+      initialTotal += futureMarginPerContract(def, mark) * BigInt(Math.abs(qty));
       return {
         symbol: position.symbol,
         qty,
@@ -149,7 +153,7 @@ export class FuturesService {
         maintenanceMargin: maintenance,
       };
     });
-    // 평가예탁금 = 현금 + 평가손익 − 미수금. 유지증거금보다 작으면 추가증거금 대상(4단계에서 반대매매).
+    // 평가예탁금 = 현금 + 평가손익 − 미수금. 유지증거금보다 작으면 추가증거금(FuturesRiskService).
     const equity = (account?.balance ?? 0n) + unrealizedTotal - encumbrance.debt;
     return {
       positions: rows,
@@ -157,7 +161,25 @@ export class FuturesService {
       debt: encumbrance.debt,
       unrealized: unrealizedTotal,
       maintenanceMargin: maintenanceTotal,
+      initialMargin: initialTotal,
       equity,
+      /** 진행 중인 추가증거금. shortfall은 지금 기준으로 위탁증거금까지 더 채워야 할 금액 */
+      marginCall: marginCall
+        ? {
+            startedAt: marginCall.startedAt,
+            deadline: marginCall.deadline,
+            required: marginCall.required,
+            shortfall: initialTotal > equity ? initialTotal - equity : 0n,
+          }
+        : null,
+      liquidations: liquidations.map((row) => ({
+        orderId: row.orderId,
+        symbol: row.symbol,
+        side: row.side,
+        qty: row.qty,
+        reason: row.reason,
+        createdAt: row.createdAt,
+      })),
     };
   }
 }

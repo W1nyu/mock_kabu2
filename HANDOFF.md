@@ -1,5 +1,12 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-25 — 선물 1~4단계 (로컬 커밋, 운영 미배포)
+
+- 설계: `docs/superpowers/specs/2026-09-25-futures-design.md`. 1일물 5종(KABUF·USDF·OILF·GASF·CPRF), 기초자산은 봇이 만드는 가상 가격(원/달러·원유·천연가스·구리, 뉴스 반응).
+- 1단계 기초자산(`market.reference_candles`), 2단계 주문·체결·포지션·증거금·미수금·선물 MM(bot34~38)·화면, 3단계 04:11 KST 일일 정산(`FuturesSettlementService`), 4단계 추가증거금·반대매매(`FuturesRiskService`, 30분 유예·손실 90% 즉시 전량).
+- 배포 대기 마이그레이션: `20260925200000_reference_candles`, `20260925210000_futures`, `20260925220000_futures_settlements`, `20260925230000_futures_risk`. seed로 선물 종목 등록 필요. 봇 CPU 절감(d52cc73)·GCP 오버레이 한도(eb7f300)도 함께 미배포.
+- 반대매매 감시를 끄려면 API 환경변수 `FUTURES_RISK_DISABLED=1`.
+
 ## 2026-09-25 — 18종목·산업군 뉴스·동시 접속 최적화 (GCP 운영 적용, 76c4c94)
 
 - **신규 3종목**: NRFD 노스필드정유 150,000원(800만 주)·GARM 가람전력 6,000원(2억)·HAVN 헤이븐리츠 5,000원(2억 4,000만), MM bot31~33. 산업군 에너지·유틸리티 신설, 금융 → 금융·부동산. 폰 증권 탭 거래대금 숨김도 같이 반영.
