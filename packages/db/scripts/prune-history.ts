@@ -15,7 +15,7 @@
  *  - matching.trades          양쪽 모두 봇인 체결, 30일  (+ 그 실현손익 행, + 정산 claim account.processed_events)
  *  - account.processed_events 30일 지난 비체결(order.closed) 정산 claim. 체결 claim은 체결 행이 남는 한 유지.
  *  - market.news_items        30일
- *  - market.candles           1분 봉, 30일. 지우기 전에 같은 구간을 1시간 봉('1h')으로 합쳐 남긴다 —
+ *  - market.candles·reference_candles  1분 봉, 30일. 지우기 전에 같은 구간을 1시간 봉('1h')으로 합쳐 남긴다 —
  *                             1h·4h·1d 차트와 지수 "전체" 차트는 두 행을 함께 읽으므로 오래된 구간도 보인다.
  *  - account.ledger_entries   (--compact-bot-ledger) 봇 계정의 7일 지난 원장을 계정당 1행(COMPACTED)으로 압축.
  *                             sum(delta) == balance 불변식은 그대로 유지된다.
@@ -85,6 +85,58 @@ async function deleteBatched(sql: string, ...params: unknown[]): Promise<number>
 }
 
 const BOT_ACCOUNTS = `SELECT a.id FROM account.accounts a JOIN auth.users u ON u.id = a.user_id WHERE u.is_bot`;
+
+/**
+ * 1분 봉을 1시간 봉으로 합친 뒤 지운다. 기준 시각을 정시로 내려 한 시간이 반만 합쳐지는 일이 없게 하고,
+ * 하루치씩 한 트랜잭션에서 합친 뒤 지운다 — 중간에 멈춰도 합쳐진 구간과 남은 1분 봉이 겹치지 않는다.
+ * 이미 있는 1시간 봉(앞선 실행이 같은 시를 합친 경우)은 앞 구간으로 보고 이어 붙인다.
+ */
+async function rollupMinuteCandles(
+  target: { table: string; key: string; volume: boolean },
+  before: Date,
+  options: Options,
+): Promise<void> {
+  const { table, key, volume } = target;
+  console.log(`1m candles in ${table} (>${options.candlesDays}d): ${await count(
+    `SELECT COUNT(*) AS n FROM ${table} WHERE interval = '1m' AND ts < $1`,
+    before,
+  )}`);
+  if (!options.apply) return;
+  const [oldest] = await prisma.$queryRawUnsafe<{ ts: Date | null }[]>(
+    `SELECT MIN(ts) AS ts FROM ${table} WHERE interval = '1m' AND ts < $1`,
+    before,
+  );
+  const volumeColumns = volume ? ", volume" : "";
+  const volumeSelect = volume ? ", SUM(volume)::bigint" : "";
+  const volumeMerge = volume ? `, volume = ${table}.volume + EXCLUDED.volume` : "";
+  let rolled = 0;
+  let removed = 0;
+  for (let from = oldest?.ts ? new Date(Math.floor(oldest.ts.getTime() / 86_400_000) * 86_400_000) : before; from < before; ) {
+    const to = new Date(Math.min(from.getTime() + 86_400_000, before.getTime()));
+    const [inserted, deleted] = await prisma.$transaction([
+      prisma.$executeRawUnsafe(
+        `INSERT INTO ${table} (${key}, interval, ts, open, high, low, close${volumeColumns})
+         SELECT ${key}, '1h', date_trunc('hour', ts),
+           (array_agg(open ORDER BY ts ASC))[1], MAX(high), MIN(low),
+           (array_agg(close ORDER BY ts DESC))[1]${volumeSelect}
+         FROM ${table}
+         WHERE interval = '1m' AND ts >= $1 AND ts < $2
+         GROUP BY ${key}, date_trunc('hour', ts)
+         ON CONFLICT (${key}, interval, ts) DO UPDATE SET
+           high = GREATEST(${table}.high, EXCLUDED.high),
+           low = LEAST(${table}.low, EXCLUDED.low),
+           close = EXCLUDED.close${volumeMerge}`,
+        from,
+        to,
+      ),
+      prisma.$executeRawUnsafe(`DELETE FROM ${table} WHERE interval = '1m' AND ts >= $1 AND ts < $2`, from, to),
+    ]);
+    rolled += inserted;
+    removed += deleted;
+    from = to;
+  }
+  console.log(`  rolled ${removed} 1m candles into ${rolled} 1h candles`);
+}
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
@@ -176,48 +228,10 @@ async function main() {
     console.log(`  deleted ${removed}`);
   }
 
-  // 6) 1분 봉 → 1시간 봉 압축. 기준 시각을 정시로 내려 한 시간이 반만 합쳐지는 일이 없게 하고,
-  // 하루치씩 한 트랜잭션에서 합친 뒤 지운다 — 중간에 멈춰도 합쳐진 구간과 남은 1분 봉이 겹치지 않는다.
+  // 6) 1분 봉 → 1시간 봉 압축 (현물 봉, 선물 기초자산 봉).
   const candlesBefore = new Date(Math.floor(daysAgo(options.candlesDays).getTime() / 3_600_000) * 3_600_000);
-  console.log(`1m candles (>${options.candlesDays}d): ${await count(
-    `SELECT COUNT(*) AS n FROM market.candles WHERE interval = '1m' AND ts < $1`,
-    candlesBefore,
-  )}`);
-  if (options.apply) {
-    const [oldest] = await prisma.$queryRawUnsafe<{ ts: Date | null }[]>(
-      `SELECT MIN(ts) AS ts FROM market.candles WHERE interval = '1m' AND ts < $1`,
-      candlesBefore,
-    );
-    let rolled = 0;
-    let removed = 0;
-    for (let from = oldest?.ts ? new Date(Math.floor(oldest.ts.getTime() / 86_400_000) * 86_400_000) : candlesBefore; from < candlesBefore; ) {
-      const to = new Date(Math.min(from.getTime() + 86_400_000, candlesBefore.getTime()));
-      const [inserted, deleted] = await prisma.$transaction([
-        // 이미 있는 1시간 봉(앞선 실행이 같은 시를 합친 경우)은 앞 구간으로 보고 이어 붙인다.
-        prisma.$executeRawUnsafe(
-          `INSERT INTO market.candles (symbol, interval, ts, open, high, low, close, volume)
-           SELECT symbol, '1h', date_trunc('hour', ts),
-             (array_agg(open ORDER BY ts ASC))[1], MAX(high), MIN(low),
-             (array_agg(close ORDER BY ts DESC))[1], SUM(volume)::bigint
-           FROM market.candles
-           WHERE interval = '1m' AND ts >= $1 AND ts < $2
-           GROUP BY symbol, date_trunc('hour', ts)
-           ON CONFLICT (symbol, interval, ts) DO UPDATE SET
-             high = GREATEST(market.candles.high, EXCLUDED.high),
-             low = LEAST(market.candles.low, EXCLUDED.low),
-             close = EXCLUDED.close,
-             volume = market.candles.volume + EXCLUDED.volume`,
-          from,
-          to,
-        ),
-        prisma.$executeRawUnsafe(`DELETE FROM market.candles WHERE interval = '1m' AND ts >= $1 AND ts < $2`, from, to),
-      ]);
-      rolled += inserted;
-      removed += deleted;
-      from = to;
-    }
-    console.log(`  rolled ${removed} 1m candles into ${rolled} 1h candles`);
-  }
+  await rollupMinuteCandles({ table: "market.candles", key: "symbol", volume: true }, candlesBefore, options);
+  await rollupMinuteCandles({ table: "market.reference_candles", key: "code", volume: false }, candlesBefore, options);
 
   // 7) 봇 원장 압축 (opt-in). 계정별로 오래된 행을 한 줄로 합친다 — 합계·마지막 잔액 보존.
   if (options.compactBotLedger) {

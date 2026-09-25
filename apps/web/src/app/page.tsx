@@ -11,6 +11,7 @@ import dynamic from "next/dynamic";
 import Leaderboard from "@/components/Leaderboard";
 import PerformanceCard, { type RealizedStats } from "@/components/PerformanceCard";
 import { NewsList } from "@/components/NewsFeed";
+import ReferenceList from "@/components/ReferenceList";
 import Sparkline from "@/components/Sparkline";
 import ChipTabs from "@/components/ChipTabs";
 import { ALL_INDUSTRIES, INDUSTRY_STORAGE_KEY, industryChipItems } from "@/lib/industry-chips";
@@ -535,6 +536,15 @@ export default function DashboardPage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* ── 원자재·환율 (선물 기초자산) ───────────────────────────── */}
+      <section className="glass overflow-hidden max-sm:hidden">
+        <div className="panel-head">
+          <span className="panel-title">원자재·환율</span>
+          <span className="text-[11px] text-ink-faint">선물 기초자산 · 가상 지수</span>
+        </div>
+        <ReferenceList />
       </section>
 
       {/* ── Latest news ────────────────────────────────────────── */}

@@ -102,7 +102,7 @@ export function isOnTick(price: number, tickSize: number): boolean {
 export const REDIS_NAMESPACE = "mock-kabu2";
 
 const redisKey = (key: string) => `${REDIS_NAMESPACE}:${key}`;
-const SOCKET_CHANNEL_PREFIXES = ["orderbook:", "trades:", "account:", "news:"] as const;
+const SOCKET_CHANNEL_PREFIXES = ["orderbook:", "trades:", "account:", "news:", "ref:"] as const;
 
 /** Firehose scope for the news tab: every story, symbol-scoped or market-wide. */
 export const NEWS_FEED_SCOPE = "all";
@@ -124,6 +124,8 @@ export const CHANNELS = {
   account: (accountId: string) => redisKey(`account:${accountId}`),
   /** 가상 뉴스: news:{symbol} 또는 news:all (전체 피드) */
   news: (scope: string) => redisKey(`news:${scope}`),
+  /** 가상 기초자산 최신값: ref:{code} (원/달러·원자재) */
+  reference: (code: string) => redisKey(`ref:${code}`),
 } as const;
 
 export const REDIS_CHANNEL_PATTERNS = {
@@ -132,6 +134,7 @@ export const REDIS_CHANNEL_PATTERNS = {
   /** Private account events are authorized by the Socket gateway before a room join. */
   account: redisKey("account:*"),
   news: redisKey("news:*"),
+  reference: redisKey("ref:*"),
 } as const;
 
 /** Converts a namespaced Redis channel to the public Socket room name. */
@@ -146,6 +149,8 @@ export function toSocketChannel(redisChannel: string): string | null {
 export const KEYS = {
   /** 최신 호가 스냅샷 JSON — REST 초기 로딩용 */
   orderbookSnapshot: (symbol: string) => redisKey(`snapshot:orderbook:${symbol}`),
+  /** 가상 기초자산 최신값 JSON (ReferenceTick) */
+  referenceLatest: (code: string) => redisKey(`snapshot:ref:${code}`),
   /** 워커가 주기적으로 갱신하는 운영 상태 신호 (짧은 TTL) */
   heartbeat: (worker: string) => redisKey(`heartbeat:${worker}`),
   /** heartbeat와 짝을 이루는 워커 상태 메타데이터 (짧은 TTL) */

@@ -16,6 +16,7 @@ import {
   CHANNELS,
   NEWS_FEED_SCOPE,
   REDIS_CHANNEL_PATTERNS,
+  referenceAsset,
   SYMBOLS,
   toSocketChannel,
 } from "@mock-kabu/shared";
@@ -60,6 +61,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       REDIS_CHANNEL_PATTERNS.orderbook,
       REDIS_CHANNEL_PATTERNS.trades,
       REDIS_CHANNEL_PATTERNS.news,
+      REDIS_CHANNEL_PATTERNS.reference,
     ).catch((e) => {
       console.error("[gateway] psubscribe failed", e);
     });
@@ -260,6 +262,8 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     // News is public like trades and depth. The firehose scope carries every
     // story; a per-symbol scope carries that symbol's plus the market-wide ones.
     if (kind === "news") return scope === NEWS_FEED_SCOPE || ACTIVE_SYMBOLS.has(scope);
+    // 가상 기초자산(원/달러·원자재) 최신값 — 공개.
+    if (kind === "ref") return referenceAsset(scope) !== null;
     return (kind === "orderbook" || kind === "trades") && ACTIVE_SYMBOLS.has(scope);
   }
 }

@@ -150,6 +150,27 @@ export class ApiClient {
     return res.json() as Promise<{ id: string }>;
   }
 
+  /** 가상 기초자산(원/달러·원자재) 최신값 발행 — 뉴스와 같은 내부 토큰. 값은 실제값 × scale 정수. */
+  async publishReference(ts: number, prices: Record<string, number>) {
+    const res = await fetch(`${BASE}/internal/reference/publish`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-liquidity-bootstrap-token": LIQUIDITY_BOOTSTRAP_TOKEN,
+      },
+      body: JSON.stringify({ ts, prices }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new ApiError(res.status, `POST /internal/reference/publish returned ${res.status} ${text.slice(0, 200)}`);
+    }
+  }
+
+  /** 재시작 때 마지막 기초자산 값을 이어받기 위한 공개 조회. */
+  referenceOverview() {
+    return this.request("GET", "/market/reference") as Promise<{ code: string; value: number | null }[]>;
+  }
+
   /** Admin market scenarios that are running or about to start. Same internal token as news. */
   async activeScenarios(): Promise<PressureScenario[]> {
     const res = await fetch(`${BASE}/internal/scenarios/active`, {

@@ -374,6 +374,21 @@ model NewsItem {
   @@schema("market")
 }
 
+/// 가상 기초자산 1분봉 (선물 기초자산 — 원/달러·원자재). 값은 실제값 × scale 정수.
+model ReferenceCandle {
+  code     String
+  interval String // "1m"
+  ts       DateTime
+  open     Int
+  high     Int
+  low      Int
+  close    Int
+
+  @@id([code, interval, ts])
+  @@map("reference_candles")
+  @@schema("market")
+}
+
 model Candle {
   symbol   String
   interval String // "1m"

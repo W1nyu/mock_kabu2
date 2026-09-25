@@ -5,6 +5,7 @@ import { MarketMakerStartupBlockedError, runMarketMaker } from "./market-maker";
 import { MarketModel, referencePriceFromHistory } from "./market-model";
 import { ApiNewsSink } from "./news/api-sink";
 import { startNewsEngine } from "./news/scheduler";
+import { ReferenceNewsSink, startReferenceEngine } from "./reference-engine";
 import { ScenarioBook, startScenarioPolling } from "./scenario";
 import { CompositeNewsSink, ConsoleNewsSink } from "./news/sink";
 import {
@@ -650,10 +651,12 @@ async function main() {
   // Generated news is the only source of market events now. Each published
   // story applies its own impulse to `ref`, which the flow bots below read
   // through chooseFlowSide, so the tape reacts to the headline.
+  // 원/달러·원자재 가상 지수(선물 기초자산). 시장 전체 기사가 채널 방향대로 이 가격도 움직인다.
+  const reference = await startReferenceEngine(clients[0]);
   startNewsEngine(
     ref,
     SYMBOLS,
-    new CompositeNewsSink([new ConsoleNewsSink(), new ApiNewsSink(clients[0])]),
+    new CompositeNewsSink([new ConsoleNewsSink(), new ApiNewsSink(clients[0]), new ReferenceNewsSink(reference.model)]),
     { pressure: (symbol, nowMs) => scenarios.pressure(symbol, nowMs) },
   );
 

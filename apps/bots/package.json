@@ -6,7 +6,7 @@
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "build": "tsc -p tsconfig.build.json",
-    "test": "tsx --test src/__tests__/market-model.node-test.ts src/__tests__/liquidity.node-test.ts src/__tests__/news-slots.node-test.ts src/__tests__/news-catalog.node-test.ts src/__tests__/news-engine.node-test.ts src/__tests__/news-sector.node-test.ts src/__tests__/scenario.node-test.ts"
+    "test": "tsx --test src/__tests__/market-model.node-test.ts src/__tests__/liquidity.node-test.ts src/__tests__/news-slots.node-test.ts src/__tests__/news-catalog.node-test.ts src/__tests__/news-engine.node-test.ts src/__tests__/news-sector.node-test.ts src/__tests__/reference-model.node-test.ts src/__tests__/scenario.node-test.ts"
   },
   "dependencies": {
     "@mock-kabu/shared": "workspace:*",
