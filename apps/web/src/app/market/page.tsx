@@ -268,8 +268,9 @@ export default function MarketPage() {
                       {s.symbol}
                       {!selectedIndustry && industryOf(s.symbol) && (
                         <span className="hidden sm:inline"> · {industryOf(s.symbol)!.label}</span>
-                      )}{" "}
-                      · {fmt.format(Math.round(s.turnover / 10_000))}만 원
+                      )}
+                      {/* 폰은 폭이 좁아 거래대금을 빼고 종목 코드만 둔다. */}
+                      <span className="hidden sm:inline"> · {fmt.format(Math.round(s.turnover / 10_000))}만 원</span>
                     </span>
                   </span>
                   <span className="hidden min-[380px]:block">
