@@ -34,8 +34,9 @@
   - 여러 줄 붙여넣기 확인 창이 뜨면 "붙여넣기"를 누른다.
 - 붙여넣기가 끝내 안 되면 명령을 메모장에 저장(예: `step1.sh`)한 뒤 로컬 PowerShell에서 보낸다. 메모장의 CRLF는 `tr`이 지운다.
   ```powershell
-  Get-Content step1.sh -Raw | ssh mock-kabu "tr -d '\r' | bash -s"
+  Get-Content step1.sh -Raw | ssh mock-kabu "sed '1s/^\xEF\xBB\xBF//' | tr -d '\r' | bash -s"
   ```
+  - ⚠️ PowerShell 파이프는 맨 앞에 BOM을 붙인다. `sed`가 지우지 않으면 첫 명령이 `﻿sudo: command not found`로 실패한다(2026-09-26 확인).
 - ⚠️ **셸 변수는 SSH 세션마다 사라진다.** 새로 접속했으면 먼저 아래 두 줄을 입력한다. 아래 모든 단계가 `$C`를 쓴다.
   ```bash
   cd /opt/mock-kabu2
