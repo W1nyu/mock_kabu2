@@ -35,7 +35,8 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/market/sparks` | 전 종목 미니 추세선 `{ 종목: [5분봉 종가…] }` (최근 72개). 1분 공유 캐시 — 화면마다 종목 수만큼 봉을 요청하지 않게 한 묶음 API |
 | GET | `/market/reference` | 선물 기초자산 가상 지수(원/달러·원유·천연가스·구리) `[{code,name,unit,scale,decimals,value,ts,base,spark}]`. 값은 실제값 × scale 정수, `base`는 09:00 KST 이후 첫 1분봉 시가(없으면 직전 종가). 5초 공유 캐시. 실시간은 소켓 `ref:{code}` |
 | GET | `/market/futures` | 선물 5종(KABUF·USDF·OILF·GASF·CPRF) `[{symbol,name,unit,priceScale,decimals,tickUnits,unitValue,initialMarginBps,maintenanceMarginBps,lastPrice,base,underlying,volume}]`. 가격은 정수 단위(실제 × priceScale), `underlying`은 기초자산(KABU 지수는 현물 최근가로 계산). 2초 공유 캐시 |
-| GET | `/account/futures` 🔒 | 내 선물 포지션 `{positions:[{symbol,qty(±),avgPrice,markPrice,unrealized,marginHeld,maintenanceMargin}],marginHeld,debt,unrealized,maintenanceMargin,initialMargin,equity,marginCall:{startedAt,deadline,required,shortfall}|null,liquidations:[{orderId,symbol,side,qty,reason:DEADLINE|EMERGENCY,createdAt}]}` — 추가증거금·반대매매 상태 포함. 계좌 채널 push `{type:"futures_margin_call",status:OPEN|RESOLVED|LIQUIDATED|EMERGENCY}` |
+| GET | `/account/futures` 🔒 | 내 선물 포지션 `{positions:[{symbol,qty(±),avgPrice,markPrice,unrealized,marginHeld,maintenanceMargin,leverage}],marginHeld,debt,unrealized,maintenanceMargin,initialMargin,equity,leverage:{[symbol]:1~20|null},marginCall:{startedAt,deadline,required,shortfall}|null,liquidations:[{orderId,symbol,side,qty,reason:DEADLINE|EMERGENCY,createdAt}]}` — 추가증거금·반대매매 상태 포함. 계좌 채널 push `{type:"futures_margin_call",status:OPEN|RESOLVED|LIQUIDATED|EMERGENCY}` |
+| POST | `/account/futures/leverage` 🔒 | `{symbol, leverage: 1~20 | null}` 종목 레버리지 설정(null = 거래소 기준 증거금). 그 종목에 포지션·미체결 주문이 있으면 422. 위탁증거금률 = 1/레버리지, 유지 = 위탁의 2/3 |
 | GET | `/market/reference/:code/candles?interval=&limit=` | 기초자산 봉(1분만 저장, 나머지 조회 시 집계, 30일 지난 1분봉은 1시간봉으로 압축) |
 | GET | `/market/trades/latest?limit=` | 전 종목 최근 체결 `{ 종목: [최신순…] }` (봇 시장 관찰용, 0.25초 공유 캐시) |
 
@@ -77,9 +78,6 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/account/daily?days=` | KST 일별 `[{date, closeEquity, closeCash, change, changeRate, realized, fills}]` 최신순 |
 | GET | `/account/leaderboard?limit=&period=all|today|week` | 사용자 계정 수익률 순위 `{total, rows: [{rank, nickname, equity, deposits, pnl, returnRate, indexRate, indexBase, indexCurrent, alpha, realized, me}]}` — 지수 수준은 `/market/index`와 같은 시가총액 가중(기준 시각의 지수 구간 사용). `indexRate = indexCurrent / indexBase − 1`; `alpha = returnRate − indexRate`. today/week는 첫 자산 스냅샷을 기준으로, 전체는 가입 시점을 기준으로 비교한다. 봇·관리자·`smoke-*` 제외 |
 | GET | `/account/ledger?limit=` | 현금 원장 (`deltaExact`, `balanceAfterExact` 십진 문자열 포함) |
-| GET | `/account/recipients?q=` | 관리자 전용 `{total, rows}` — 전체 지급 대상 수와 닉네임 검색 결과(최대 50건) |
-| POST | `/account/transfer` | `{toNickname, amount, adminPassword?}` 계좌 이체. 관리자 계정은 비밀번호 재확인 필요. 1회 금액은 JavaScript 안전 정수 범위 이내 |
-| POST | `/account/transfer-all` | 관리자 전용 `{amountEach, adminPassword, requestId(UUID)}` — 봇·관리자·`smoke-*`를 제외한 모든 계좌에 동일 금액을 원자적으로 지급. `requestId` 재시도는 중복 지급하지 않는다. 현재 비관적 잠금 전략에서 사용 |
 
 ## 운영
 
@@ -98,7 +96,6 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 
 - `{type:"trade", side, symbol, price, qty, tradeId}` — 정산 완료된 내 체결 (매수자/매도자 각각)
 - `{type:"account_update"}` — 주문 종결(홀드 해제)
-- `{type:"balance"}` — 이체
 - `{type:"conditional", id, status, symbol?, side?, qty?, triggerPrice?, label?, orderId?, failReason?}` — 예약 주문 등록/발동/실패/취소
 - `{type:"bracket", id, status, symbol?, qty?, avgFillPrice?, lowerPrice?, upperPrice?, note?}` — 브래킷 의도 상태
 

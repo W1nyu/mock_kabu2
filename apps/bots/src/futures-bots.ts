@@ -44,11 +44,11 @@ export function futuresRiskMode(account: FuturesAccountView): "normal" | "reduce
 
 /** 기초자산이 짧은 창에서 이만큼(bps) 움직이면 모멘텀 신호로 본다 — 기초자산 변동성에 맞춘 값. */
 export const MOMENTUM_THRESHOLD_BPS: Record<string, number> = {
-  KABU_INDEX: 20,
-  USDKRW: 10,
-  OIL: 40,
-  GAS: 70,
-  COPPER: 30,
+  KABU_INDEX: 12,
+  USDKRW: 6,
+  OIL: 25,
+  GAS: 45,
+  COPPER: 18,
 };
 
 /** 창 안 변화율(bps)이 문턱을 넘으면 그 방향, 아니면 null. */
@@ -75,11 +75,14 @@ export function futuresQuoteCenter(def: FutureDef, fairUnits: number, inventory:
   return roundToTick(fairUnits, def.tickUnits) - skewTicks * def.tickUnits;
 }
 
-/** 중심 양쪽 1~N틱에 걸 호가. 안쪽은 얇고 바깥은 두껍게(2~6계약). */
+/**
+ * 중심 양쪽 1~N틱에 걸 호가. 안쪽은 얇고 바깥은 두껍게(4~12계약) — 거래 봇이 한 번에 최대 5계약을 가져가도
+ * 다음 호가 교체(2.5초)까지 한쪽이 비지 않게 한다. 수량만 늘려 주문 건수(부하)는 그대로다.
+ */
 export function planFuturesLadder(def: FutureDef, center: number): FutureQuote[] {
   const quotes: FutureQuote[] = [];
   for (let level = 1; level <= FUTURES_LADDER_LEVELS; level++) {
-    const qty = level + 1;
+    const qty = (level + 1) * 2;
     const bid = center - level * def.tickUnits;
     if (bid > 0) quotes.push({ side: "BUY", price: bid, qty });
     quotes.push({ side: "SELL", price: center + level * def.tickUnits, qty });
@@ -226,11 +229,28 @@ export function reduceOrder(
   return { symbol: pick.symbol, side: pick.qty > 0 ? "SELL" : "BUY", qty: Math.min(Math.abs(pick.qty), 1 + Math.floor(rand() * 3)) };
 }
 
-/** 선물 거래 흐름: 가끔 시장가 1~3계약. 기초자산 쪽으로 되돌리는 방향을 65%로 고른다. 위험하면 줄이기만 한다. */
-export async function runFuturesTrader(client: ApiClient, market: FuturesMarketView, name: string): Promise<void> {
+/** 선물 거래 흐름 봇의 주기·크기 */
+export interface FuturesTraderOptions {
+  /** 주문 사이 대기(ms) 최소·최대 */
+  minWaitMs: number;
+  maxWaitMs: number;
+  /** 한 번에 1~maxQty 계약 */
+  maxQty: number;
+}
+
+/** 거래가 끊기지 않게 하는 기본값 — 봇 3개가 합쳐 초당 약 1건(종목당 분당 10여 건). */
+export const ACTIVE_FUTURES_TRADER: FuturesTraderOptions = { minWaitMs: 1_500, maxWaitMs: 4_000, maxQty: 5 };
+
+/** 선물 거래 흐름: 시장가 1~maxQty 계약. 기초자산 쪽으로 되돌리는 방향을 65%로 고른다. 위험하면 줄이기만 한다. */
+export async function runFuturesTrader(
+  client: ApiClient,
+  market: FuturesMarketView,
+  name: string,
+  options: FuturesTraderOptions = ACTIVE_FUTURES_TRADER,
+): Promise<void> {
   const MAX_POSITION = 20;
   while (true) {
-    await sleep(5_000 + Math.random() * 10_000);
+    await sleep(options.minWaitMs + Math.random() * (options.maxWaitMs - options.minWaitMs));
     try {
       const account = (await client.futuresPositions()) as FuturesAccountView;
       if (futuresRiskMode(account) === "reduce") {
@@ -248,7 +268,7 @@ export async function runFuturesTrader(client: ApiClient, market: FuturesMarketV
       // 한쪽으로 너무 쌓였으면 줄이는 쪽으로만.
       if (position >= MAX_POSITION) side = "SELL";
       if (position <= -MAX_POSITION) side = "BUY";
-      const qty = 1 + Math.floor(Math.random() * 3);
+      const qty = 1 + Math.floor(Math.random() * options.maxQty);
       await client.placeOrder({ symbol: def.symbol, side, type: "MARKET", qty });
     } catch (error) {
       console.warn(`[futures:${name}]`, error instanceof Error ? error.message : error);
@@ -270,7 +290,7 @@ export async function runFuturesMomentumTrader(client: ApiClient, market: Future
   const MAX_POSITION = 10;
   const exitAt = new Map<string, number>();
   while (true) {
-    await sleep(8_000 + Math.random() * 8_000);
+    await sleep(4_000 + Math.random() * 4_000);
     try {
       const now = Date.now();
       const due = [...exitAt.entries()].find(([, at]) => at <= now)?.[0] ?? null;
@@ -292,7 +312,7 @@ export async function runFuturesMomentumTrader(client: ApiClient, market: Future
 
       for (const def of signals) {
         const side = momentumSignal(market, def, now);
-        if (!side || Math.random() > 0.5) continue;
+        if (!side || Math.random() > 0.8) continue;
         const position = account.positions.find((p) => p.symbol === def.symbol)?.qty ?? 0;
         if ((side === "BUY" && position >= MAX_POSITION) || (side === "SELL" && position <= -MAX_POSITION)) continue;
         const qty = 1 + Math.floor(Math.random() * 3);

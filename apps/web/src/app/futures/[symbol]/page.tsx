@@ -2,7 +2,7 @@
 
 import { futureDef } from "@mock-kabu/shared";
 import Link from "next/link";
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import FuturesBook from "@/components/FuturesBook";
 import FuturesOrderPanel from "@/components/FuturesOrderPanel";
 import FuturesOrderSheet from "@/components/FuturesOrderSheet";
@@ -10,13 +10,13 @@ import FuturesPositionPanel from "@/components/FuturesPositionPanel";
 import { MobileTradeBar } from "@/components/MobileOrderSheet";
 import UnitCandleChart from "@/components/UnitCandleChart";
 import { api, getUser } from "@/lib/api";
-import { changePct, fmtFuture, underlyingOverlay, type FutureRow } from "@/lib/futures";
+import { changePct, fmtFuture, type FutureRow } from "@/lib/futures";
 import { COMPACT_TRADE_QUERY, useMediaQuery } from "@/lib/media";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
 
 /**
- * 선물 거래 화면. PC는 왼쪽 차트(기초자산 겹침)·호가, 오른쪽 주문·포지션.
+ * 선물 거래 화면. PC는 왼쪽 차트·호가, 오른쪽 주문·포지션.
  * 폰은 현물 거래 화면처럼 시세 → 차트 → 내 포지션 순으로 두고, 호가·주문은 하단 매수/매도 버튼이 여는 시트에 둔다.
  */
 export default function FuturePage({ params }: { params: Promise<{ symbol: string }> }) {
@@ -31,7 +31,6 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
   const closeSheet = useCallback(() => setSheet(null), []);
   const [loggedIn, setLoggedIn] = useState(false);
   useEffect(() => setLoggedIn(getUser() != null), []);
-  const overlay = useMemo(() => (def ? underlyingOverlay(def.symbol) : undefined), [def]);
 
   useEffect(() => {
     if (!def) return;
@@ -110,7 +109,6 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
               }}
               scale={def.priceScale}
               decimals={def.decimals}
-              overlay={overlay}
             />
           </section>
         </div>

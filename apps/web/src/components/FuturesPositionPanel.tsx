@@ -3,7 +3,8 @@
 import { FUTURES_EMERGENCY_LOSS_BPS, futureDef } from "@mock-kabu/shared";
 import { useCallback, useEffect, useState } from "react";
 import { api, getUser } from "@/lib/api";
-import { fmtFuture, krw, type FuturesAccount } from "@/lib/futures";
+import FuturesPositionActions from "./FuturesPositionActions";
+import { fmtFuture, krw, leverageLabel, type FuturesAccount } from "@/lib/futures";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
 
@@ -141,6 +142,8 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
             <dd className={`text-right font-semibold ${position.qty > 0 ? "text-up" : "text-down"}`}>
               {position.qty > 0 ? "롱" : "숏"} {Math.abs(position.qty)}계약
             </dd>
+            <dt className="text-ink-muted">레버리지</dt>
+            <dd className="text-right">{leverageLabel(symbol, position.leverage)}</dd>
             <dt className="text-ink-muted">평균가</dt>
             <dd className="text-right">{fmtFuture(symbol, Math.round(position.avgPrice))}</dd>
             <dt className="text-ink-muted">평가손익</dt>
@@ -157,6 +160,15 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
           </dl>
         ) : (
           <p className="text-ink-faint">{def.name} 포지션이 없습니다.</p>
+        )}
+        {position && (
+          <FuturesPositionActions
+            symbol={symbol}
+            qty={position.qty}
+            markPrice={position.markPrice}
+            refreshKey={refreshKey}
+            onChanged={load}
+          />
         )}
 
         {account && (account.positions.length > 0 || account.debt > 0) && (

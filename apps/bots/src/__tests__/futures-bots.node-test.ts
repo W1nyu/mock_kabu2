@@ -28,8 +28,8 @@ test("the ladder has N levels a side on ticks, thin inside and thicker outside",
   assert.equal(ladder.length, FUTURES_LADDER_LEVELS * 2);
   const bids = ladder.filter((q) => q.side === "BUY").map((q) => [q.price, q.qty]);
   const asks = ladder.filter((q) => q.side === "SELL").map((q) => [q.price, q.qty]);
-  assert.deepEqual(bids[0], [87_995, 2]);
-  assert.deepEqual(asks.at(-1), [88_025, 6]);
+  assert.deepEqual(bids[0], [87_995, 4]);
+  assert.deepEqual(asks.at(-1), [88_025, 12]);
   assert.ok(ladder.every((q) => q.price % KABUF.tickUnits === 0));
 });
 

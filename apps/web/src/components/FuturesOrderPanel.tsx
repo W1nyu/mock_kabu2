@@ -2,17 +2,18 @@
 
 import { futureDef, futureMarginPerContract, MAX_FUTURES_ORDER_QTY } from "@mock-kabu/shared";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, getUser, newIdempotencyKey } from "@/lib/api";
-import { fmtFuture, krw, toFutureUnits, unitsToInput } from "@/lib/futures";
+import { everyVisible } from "@/lib/visible-interval";
+import { fmtFuture, krw, LEVERAGE_CHOICES, leverageLabel, toFutureUnits, unitsToInput, type FuturesAccount } from "@/lib/futures";
 
 interface AccountInfo {
   available: number;
 }
 
 /**
- * 선물 주문 — 매수(롱)/매도(숏), 지정가/시장가, 계약 수. 필요 위탁증거금을 미리 보여 준다.
- * 신규·청산 구분 없이 주문 증거금을 묶고, 체결되면 포지션 증거금으로 바뀐다(청산분은 풀린다).
+ * 선물 주문 — 레버리지(1~20배), 매수(롱)/매도(숏), 지정가/시장가, 계약 수. 필요 위탁증거금을 미리 보여 준다.
+ * 신규 주문은 레버리지로 계산한 증거금을 묶고, 보유 포지션을 줄이는 청산 주문은 증거금이 필요 없다.
  */
 export default function FuturesOrderPanel({
   symbol,
@@ -33,6 +34,9 @@ export default function FuturesOrderPanel({
   const [priceText, setPriceText] = useState("");
   const [qty, setQty] = useState(1);
   const [available, setAvailable] = useState<number | null>(null);
+  const [futures, setFutures] = useState<FuturesAccount | null>(null);
+  const [liveOrders, setLiveOrders] = useState(0);
+  const [leverageBusy, setLeverageBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   // 로그인 여부는 마운트 뒤에 읽는다 — 서버 렌더와 첫 클라이언트 렌더를 같게 둬 hydration 불일치를 막는다.
@@ -47,16 +51,48 @@ export default function FuturesOrderPanel({
     if (priceHint) setPriceText(unitsToInput(symbol, priceHint.price));
   }, [priceHint, symbol]);
 
-  const refreshAccount = () => {
+  const refreshAccount = useCallback(() => {
     if (!getUser()) return;
-    api<AccountInfo>("/account").then((a) => setAvailable(a.available)).catch(() => {});
-  };
-  useEffect(refreshAccount, []);
+    api<AccountInfo>("/account")
+      .then((a) => setAvailable(a.available))
+      .catch(() => {});
+    api<FuturesAccount>("/account/futures")
+      .then(setFutures)
+      .catch(() => {});
+    api<unknown[]>(`/orders?symbol=${symbol}&status=live&limit=50`)
+      .then((rows) => setLiveOrders(rows.length))
+      .catch(() => {});
+  }, [symbol]);
+  // 체결·청산으로 포지션·미체결이 바뀌면 레버리지 잠금과 청산 판정이 달라진다 — 10초마다(보일 때) 다시 읽는다.
+  useEffect(() => {
+    refreshAccount();
+    return everyVisible(refreshAccount, 10_000);
+  }, [refreshAccount]);
+
+  const leverage = futures?.leverage?.[symbol] ?? null;
+  const positionQty = futures?.positions.find((p) => p.symbol === symbol)?.qty ?? 0;
+  // 포지션·미체결이 있으면 레버리지를 못 바꾼다(서버도 막는다).
+  const leverageLocked = positionQty !== 0 || liveOrders > 0;
+  const closing = (side === "SELL" && positionQty > 0) || (side === "BUY" && positionQty < 0);
+  const closingOnly = closing && qty <= Math.abs(positionQty);
+
+  async function chooseLeverage(next: number | null) {
+    setLeverageBusy(true);
+    setMessage(null);
+    try {
+      await api("/account/futures/leverage", { method: "POST", body: { symbol, leverage: next } });
+      refreshAccount();
+    } catch (error) {
+      setMessage({ ok: false, text: error instanceof Error ? error.message : "레버리지를 바꾸지 못했습니다" });
+    } finally {
+      setLeverageBusy(false);
+    }
+  }
 
   const priceUnits = type === "LIMIT" ? toFutureUnits(symbol, priceText) : lastPrice;
   const margin = useMemo(
-    () => (priceUnits != null ? Number(futureMarginPerContract(def, priceUnits)) * qty : null),
-    [def, priceUnits, qty],
+    () => (priceUnits != null ? Number(futureMarginPerContract(def, priceUnits, leverage)) * qty : null),
+    [def, priceUnits, qty, leverage],
   );
   const tickText = unitsToInput(symbol, def.tickUnits);
   const invalidPrice = type === "LIMIT" && priceUnits == null;
@@ -85,7 +121,11 @@ export default function FuturesOrderPanel({
   if (!loggedIn) {
     return (
       <div className="glass p-4 text-sm text-ink-muted">
-        선물 주문은 <Link href="/login" className="text-sky">로그인</Link> 후 이용할 수 있습니다.
+        선물 주문은{" "}
+        <Link href="/login" className="text-sky">
+          로그인
+        </Link>{" "}
+        후 이용할 수 있습니다.
       </div>
     );
   }
@@ -93,6 +133,45 @@ export default function FuturesOrderPanel({
   const sideTone = side === "BUY" ? "bg-up text-white" : "bg-down text-white";
   return (
     <div className="glass space-y-3 p-4">
+      <div>
+        <div className="flex items-center justify-between text-xs text-ink-muted">
+          <span>레버리지</span>
+          <span className="num font-semibold text-ink">{leverageLabel(symbol, leverage)}</span>
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-1" role="group" aria-label="레버리지">
+          <button
+            type="button"
+            disabled={leverageLocked || leverageBusy}
+            onClick={() => chooseLeverage(null)}
+            aria-pressed={leverage == null}
+            className={`num min-h-8 rounded-full px-2.5 text-[12px] font-medium disabled:opacity-50 ${
+              leverage == null
+                ? "bg-sky/12 text-sky ring-1 ring-sky/30 ring-inset"
+                : "text-ink-muted ring-1 ring-hairline ring-inset"
+            }`}
+          >
+            기본
+          </button>
+          {LEVERAGE_CHOICES.map((choice) => (
+            <button
+              key={choice}
+              type="button"
+              disabled={leverageLocked || leverageBusy}
+              onClick={() => chooseLeverage(choice)}
+              aria-pressed={leverage === choice}
+              className={`num min-h-8 rounded-full px-2.5 text-[12px] font-medium disabled:opacity-50 ${
+                leverage === choice
+                  ? "bg-sky/12 text-sky ring-1 ring-sky/30 ring-inset"
+                  : "text-ink-muted ring-1 ring-hairline ring-inset"
+              }`}
+            >
+              {choice}x
+            </button>
+          ))}
+        </div>
+        {leverageLocked && <p className="mt-1 text-[11px] text-ink-faint">포지션·미체결 주문이 없을 때 바꿀 수 있습니다.</p>}
+      </div>
+
       <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-2/60 p-1">
         {(["BUY", "SELL"] as const).map((s) => (
           <button
@@ -125,7 +204,9 @@ export default function FuturesOrderPanel({
 
       {type === "LIMIT" && (
         <label className="block">
-          <span className="text-xs text-ink-muted">가격 ({def.unit}, 호가 단위 {tickText})</span>
+          <span className="text-xs text-ink-muted">
+            가격 ({def.unit}, 호가 단위 {tickText})
+          </span>
           <input
             inputMode="decimal"
             value={priceText}
@@ -149,7 +230,11 @@ export default function FuturesOrderPanel({
             onChange={(e) => setQty(Math.max(1, Math.min(MAX_FUTURES_ORDER_QTY, Number(e.target.value.replace(/\D/g, "")) || 1)))}
             className="num w-full rounded-lg border border-hairline bg-surface-2/60 px-3 py-2 text-center"
           />
-          <button type="button" className="btn btn-ghost min-h-10 min-w-10" onClick={() => setQty((q) => Math.min(MAX_FUTURES_ORDER_QTY, q + 1))}>
+          <button
+            type="button"
+            className="btn btn-ghost min-h-10 min-w-10"
+            onClick={() => setQty((q) => Math.min(MAX_FUTURES_ORDER_QTY, q + 1))}
+          >
             +
           </button>
         </div>
@@ -157,8 +242,10 @@ export default function FuturesOrderPanel({
 
       <dl className="num space-y-1 text-[13px]">
         <div className="flex justify-between">
-          <dt className="text-ink-muted">필요 증거금 (위탁 {(def.initialMarginBps / 100).toFixed(2)}%)</dt>
-          <dd className="font-semibold">{margin == null ? "—" : krw(margin)}</dd>
+          <dt className="text-ink-muted">
+            {closingOnly ? "필요 증거금 (청산 주문)" : `필요 증거금 (${leverageLabel(symbol, leverage)})`}
+          </dt>
+          <dd className="font-semibold">{closingOnly ? "없음" : margin == null ? "—" : krw(margin)}</dd>
         </div>
         <div className="flex justify-between">
           <dt className="text-ink-muted">주문 가능 금액</dt>

@@ -6,14 +6,14 @@ const NOON = Date.parse("2026-09-26T04:00:00Z");
 const MIN = 60_000;
 
 /**
- * USDF 1,400.0원 10계약 롱 한 계좌. 명목 1억4천만 원 — 위탁증거금 6,762,000, 1,380.0원에서 유지증거금 4,443,600.
+ * USDF 1,400.0원 10계약 롱 한 계좌. 명목 1억4천만 원 — 위탁증거금 7,000,000(5%), 1,380.0원에서 유지증거금 4,595,400(3.33%).
  * Prisma 모양만 흉내 낸 메모리 저장소.
  */
 function harness(options: { balance?: bigint; mark?: number } = {}) {
   const state = {
     balance: options.balance ?? 10_000_000n,
     mark: options.mark ?? 14_000,
-    positions: [{ accountId: "a", symbol: "USDF", qty: 10, entryValue: 140_000n, marginHeld: 6_762_000n }],
+    positions: [{ accountId: "a", symbol: "USDF", qty: 10, entryValue: 140_000n, marginHeld: 7_000_000n }],
     calls: [] as { id: string; accountId: string; startedAt: Date; deadline: Date; required: bigint; resolvedAt: Date | null; outcome: string | null }[],
     orders: [] as { id: string; accountId: string; symbol: string; side: string; type: string; qty: number; holdPerUnit: bigint; status: string }[],
     liquidations: [] as { orderId: string; accountId: string; reason: string; createdAt: Date; qty: number; side: string }[],
@@ -37,7 +37,8 @@ function harness(options: { balance?: bigint; mark?: number } = {}) {
     account: { findMany: async () => [{ id: "a", balance: state.balance }] },
     futuresDebt: { findMany: async () => [] },
     futuresLiquidation: {
-      findMany: async () => state.liquidations,
+      findMany: async ({ where }: any) =>
+        state.liquidations.filter((l) => !where?.orderId || where.orderId.in.includes(l.orderId)),
       create: async ({ data }: any) => state.liquidations.push({ ...data, createdAt: new Date(NOON) }),
     },
     order: {
@@ -72,11 +73,11 @@ describe("futures margin call and forced liquidation", () => {
   });
 
   it("opens a 30-minute margin call below maintenance and resolves it once equity reaches the initial margin", async () => {
-    // 1,380.0원: 평가손익 −200만, 평가예탁금 400만 < 유지증거금 4,443,600
+    // 1,380.0원: 평가손익 −200만, 평가예탁금 400만 < 유지증거금 4,595,400
     const h = harness({ balance: 6_000_000n, mark: 13_800 });
     await h.service.tick(NOON);
     expect(h.state.calls).toHaveLength(1);
-    expect(h.state.calls[0]).toMatchObject({ required: 2_665_400n, resolvedAt: null });
+    expect(h.state.calls[0]).toMatchObject({ required: 2_900_000n, resolvedAt: null });
     expect(h.state.calls[0].deadline.getTime()).toBe(NOON + 30 * MIN);
     expect(h.redis.publish).toHaveBeenCalledWith("mock-kabu2:account:a", expect.stringContaining('"status":"OPEN"'));
 
@@ -85,8 +86,8 @@ describe("futures margin call and forced liquidation", () => {
     expect(h.state.calls).toHaveLength(1);
     expect(h.placed()).toHaveLength(0);
 
-    // 입금으로 위탁증거금(6,665,400) 수준 회복 → 해소
-    h.state.balance = 8_700_000n;
+    // 입금으로 위탁증거금(6,900,000) 수준 회복 → 해소
+    h.state.balance = 9_000_000n;
     await h.service.tick(NOON + 20 * MIN);
     expect(h.state.calls[0].outcome).toBe("RESOLVED");
     expect(h.placed()).toHaveLength(0);
@@ -104,12 +105,12 @@ describe("futures margin call and forced liquidation", () => {
     const h = harness({ balance: 6_000_000n, mark: 13_800 });
     await h.service.tick(NOON);
     await h.service.tick(NOON + 31 * MIN);
-    // 추가증거금 2,665,400 ÷ 위탁증거금 6,665,400 ≈ 0.4 → 10계약 중 4계약(올림)
+    // 추가증거금 2,900,000 ÷ 위탁증거금 6,900,000 ≈ 0.42 → 10계약 중 5계약(올림)
     expect(h.placed()).toEqual([
-      expect.objectContaining({ accountId: "a", symbol: "USDF", side: "SELL", type: "MARKET", qty: 4, price: Math.floor(13_800 / 1.1) }),
+      expect.objectContaining({ accountId: "a", symbol: "USDF", side: "SELL", type: "MARKET", qty: 5, price: Math.floor(13_800 / 1.1) }),
     ]);
     expect(h.state.orders[0].holdPerUnit).toBe(0n);
-    expect(h.state.liquidations[0]).toMatchObject({ reason: "DEADLINE", qty: 4 });
+    expect(h.state.liquidations[0]).toMatchObject({ reason: "DEADLINE", qty: 5 });
     expect(h.state.calls[0].outcome).toBe("LIQUIDATED");
 
     // 반대매매 주문이 아직 살아 있으면 다음 틱이 또 내지 않는다.
@@ -128,8 +129,8 @@ describe("futures margin call and forced liquidation", () => {
   });
 
   it("liquidates the whole position immediately once the loss reaches 90% of its initial margin", async () => {
-    // 1,339.1원: 손실 609단위 × 1,000원 × 10 = 6,090,000 ≥ 6,762,000 × 90%
-    const h = harness({ balance: 100_000_000n, mark: 13_391 });
+    // 1,337.0원: 손실 630단위 × 1,000원 × 10 = 6,300,000 ≥ 7,000,000 × 90%
+    const h = harness({ balance: 100_000_000n, mark: 13_370 });
     await h.service.tick(NOON);
     expect(h.placed()).toEqual([expect.objectContaining({ side: "SELL", qty: 10 })]);
     expect(h.state.liquidations[0].reason).toBe("EMERGENCY");
@@ -150,8 +151,30 @@ describe("futures margin call and forced liquidation", () => {
     expect(h.state.calls.find((c) => c.id === "old")!.outcome).toBe("RESOLVED");
   });
 
+  it("a user's own zero-margin closing order does not block liquidation", async () => {
+    const h = harness({ balance: 6_000_000n, mark: 13_800 });
+    h.state.orders.push({ id: "close", accountId: "a", symbol: "USDF", side: "SELL", type: "LIMIT", qty: 1, holdPerUnit: 0n, status: "OPEN" });
+    await h.service.tick(NOON);
+    await h.service.tick(NOON + 31 * MIN);
+    expect(h.placed()).toHaveLength(1);
+  });
+
+  it("uses the position's leverage for maintenance margin", async () => {
+    // 1,380.0원·평가예탁금 500만: 기준(20배) 유지 3.33%(4,595,400)는 넘고, 10배 유지 6.66%(9,190,800)는 못 넘는다
+    const standard = harness({ balance: 7_000_000n, mark: 13_800 });
+    await standard.service.tick(NOON);
+    expect(standard.state.calls).toHaveLength(0);
+
+    const leveraged = harness({ balance: 7_000_000n, mark: 13_800 });
+    (leveraged.state.positions[0] as any).leverage = 10;
+    await leveraged.service.tick(NOON);
+    expect(leveraged.state.calls).toHaveLength(1);
+    // 해소 기준은 10배 위탁증거금(10%, 13,800,000) — 부족분 8,800,000
+    expect(leveraged.state.calls[0].required).toBe(8_800_000n);
+  });
+
   it("does not run during the daily maintenance window", async () => {
-    const h = harness({ balance: 100_000_000n, mark: 13_391 });
+    const h = harness({ balance: 100_000_000n, mark: 13_370 });
     await h.service.tick(Date.parse("2026-09-25T19:15:00Z")); // 04:15 KST
     expect(h.placed()).toHaveLength(0);
   });

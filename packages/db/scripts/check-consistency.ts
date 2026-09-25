@@ -210,7 +210,7 @@ async function main() {
   const positionRows = await prisma.futuresPosition.findMany({ where: { qty: { not: 0 } } });
   const badMargin = positionRows.filter((row) => {
     const def = futureDef(row.symbol);
-    return !def || row.marginHeld !== futurePositionMargin(def, row.entryValue);
+    return !def || row.marginHeld !== futurePositionMargin(def, row.entryValue, row.leverage);
   });
   check("futures position margin matches its entry value", badMargin.length === 0,
     badMargin.map((row) => ({ accountId: row.accountId, symbol: row.symbol, marginHeld: row.marginHeld })));

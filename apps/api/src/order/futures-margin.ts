@@ -1,3 +1,5 @@
+import { futureMarginPerContract, type FutureDef, type OrderSide } from "@mock-kabu/shared";
+
 /**
  * 선물 때문에 쓸 수 없는 현금(원) = 포지션 위탁증거금 합계 + 미수금.
  *
@@ -43,4 +45,36 @@ export async function futuresEncumbrance(
 /** 주문 가능 금액 계산용 합계 */
 export async function futuresMarginHeld(db: FuturesReader | { [key: string]: any }, accountId: string): Promise<bigint> {
   return (await futuresEncumbrance(db, accountId)).total;
+}
+
+/**
+ * 선물 주문 한 건의 계약당 홀드(원).
+ *  - 청산 주문: 보유 포지션의 반대 방향이고, 수량이 "아직 청산 주문이 걸리지 않은 포지션" 이내면 0.
+ *    이미 걸린 증거금 0 청산 주문(같은 방향, 미체결 잔량)만큼은 빼고 센다 — 같은 포지션으로 청산 주문을 여러 번 내
+ *    반대 포지션을 증거금 없이 여는 것을 막는다.
+ *  - 그 밖(신규·뒤집기): 계좌·종목의 레버리지로 계산한 계약당 위탁증거금.
+ * 계좌 락 안의 트랜잭션으로 부른다.
+ */
+export async function futuresOrderHoldPerUnit(
+  db: { [key: string]: any },
+  accountId: string,
+  def: FutureDef,
+  side: OrderSide,
+  qty: number,
+  priceUnits: number,
+): Promise<bigint> {
+  const position = (await db.futuresPosition.findUnique({
+    where: { accountId_symbol: { accountId, symbol: def.symbol } },
+  })) as { qty: number; leverage: number | null } | null;
+  const held = position?.qty ?? 0;
+  const closing = (side === "SELL" && held > 0) || (side === "BUY" && held < 0);
+  if (closing) {
+    const pending = (await db.order.findMany({
+      where: { accountId, symbol: def.symbol, side, status: { in: ["OPEN", "PARTIAL"] }, holdPerUnit: 0n },
+      select: { qty: true, filledQty: true },
+    })) as { qty: number; filledQty: number }[];
+    const reserved = pending.reduce((sum, order) => sum + (order.qty - order.filledQty), 0);
+    if (qty <= Math.abs(held) - reserved) return 0n;
+  }
+  return futureMarginPerContract(def, priceUnits, position?.leverage ?? null);
 }

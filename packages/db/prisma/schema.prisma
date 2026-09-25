@@ -384,6 +384,8 @@ model FuturesPosition {
   qty        Int      @default(0)
   entryValue BigInt   @default(0) @map("entry_value")
   marginHeld BigInt   @default(0) @map("margin_held")
+  /// 1~20배, null = 거래소 기준 증거금률
+  leverage   Int?
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@id([accountId, symbol])

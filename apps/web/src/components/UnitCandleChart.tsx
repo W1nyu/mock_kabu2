@@ -4,8 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   CandlestickSeries,
   ColorType,
-  LineSeries,
-  LineStyle,
   createChart,
   TickMarkType,
   type IChartApi,
@@ -17,7 +15,6 @@ import ChipTabs from "@/components/ChipTabs";
 import { api } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { chartTheme, useTheme } from "@/lib/theme";
-import { everyVisible } from "@/lib/visible-interval";
 import { formatKstHm, formatKstMonthDay, formatKstTime } from "@/lib/time";
 
 /**
@@ -50,28 +47,18 @@ export interface UnitTick {
   ts: number;
 }
 
-/** 봉 위에 겹쳐 그리는 비교선(선물 차트의 기초자산). 값은 실제값(정수 단위가 아님). */
-export interface ChartOverlay {
-  label: string;
-  load: (interval: string) => Promise<{ ts: number; value: number }[]>;
-}
-
-const OVERLAY_REFRESH_MS = 60_000;
-
 export default function UnitCandleChart({
   candlesUrl,
   channel,
   tickFrom,
   scale,
   decimals,
-  overlay,
 }: {
   candlesUrl: (interval: string, limit: number) => string;
   channel: string;
   tickFrom: (data: unknown) => UnitTick | null;
   scale: number;
   decimals: number;
-  overlay?: ChartOverlay;
 }) {
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -115,37 +102,6 @@ export default function UnitCandleChart({
     });
 
     let active = true;
-    // 기초자산 비교선: 봉 간격 버킷마다 마지막 값. 실시간 값 대신 1분마다(탭이 보일 때) 다시 읽는다.
-    let stopOverlay = () => {};
-    if (overlay) {
-      const line = chart.addSeries(LineSeries, {
-        color: colors.sky,
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        priceLineVisible: false,
-        lastValueVisible: true,
-        crosshairMarkerVisible: false,
-        title: overlay.label,
-        priceFormat: { type: "price", precision: decimals, minMove: 1 / 10 ** decimals },
-      });
-      const loadOverlay = () =>
-        overlay
-          .load(interval)
-          .then((points) => {
-            if (!active) return;
-            const byBucket = new Map<number, number>();
-            for (const point of points) {
-              if (!Number.isFinite(point.value)) continue;
-              byBucket.set(Math.floor(point.ts / 1000 / bucketSeconds) * bucketSeconds, point.value);
-            }
-            line.setData(
-              [...byBucket.entries()].sort((a, b) => a[0] - b[0]).map(([time, value]) => ({ time: time as UTCTimestamp, value })),
-            );
-          })
-          .catch(() => {});
-      void loadOverlay();
-      stopOverlay = everyVisible(loadOverlay, OVERLAY_REFRESH_MS);
-    }
     let last: { time: UTCTimestamp; open: number; high: number; low: number; close: number } | null = null;
     api<CandleDto[]>(candlesUrl(interval, LIMIT), { auth: false })
       .then((rows) => {
@@ -180,25 +136,16 @@ export default function UnitCandleChart({
 
     return () => {
       active = false;
-      stopOverlay();
       unsubscribe();
       chart.remove();
     };
     // candlesUrl·tickFrom은 호출자가 매 렌더 새로 만들 수 있어 의존성에서 뺀다 — 채널이 같으면 같은 차트다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channel, scale, decimals, interval, theme, overlay?.label]);
+  }, [channel, scale, decimals, interval, theme]);
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <ChipTabs label="봉 간격" size="sm" items={INTERVALS} value={interval} onChange={setChartInterval} />
-        {overlay && (
-          <span className="flex items-center gap-1.5 text-[11px] text-ink-muted">
-            <span className="inline-block w-4 border-t border-dashed border-sky" aria-hidden />
-            {overlay.label}
-          </span>
-        )}
-      </div>
+      <ChipTabs label="봉 간격" size="sm" items={INTERVALS} value={interval} onChange={setChartInterval} />
       <div ref={containerRef} className="h-[320px] w-full sm:h-[420px]" />
     </div>
   );

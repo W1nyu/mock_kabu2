@@ -12,12 +12,14 @@ import type { PrismaClient } from "@mock-kabu/db";
 import {
   CHANNELS,
   REDIS_CHANNEL_PATTERNS,
-  SYMBOLS,
+  TRADABLE_SYMBOLS,
   TRAIL_BPS_MAX,
   TRAIL_BPS_MIN,
   advancesWatermark,
   conditionMet,
   describeCondition,
+  formatFuturePrice,
+  futureDef,
   isOnTick,
   tickSizeOf,
   trailingTrigger,
@@ -78,7 +80,14 @@ const OCO_SIBLING_NOTE = "OCO 짝 주문 발동으로 자동 취소";
 /** 다른 API 인스턴스가 만든 대기 주문을 늦어도 이 간격 안에 메모리 인덱스로 가져온다. */
 const INDEX_REFRESH_MS = 10_000;
 const MAX_WAITING_PER_ACCOUNT = 50;
-const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
+/** 현물과 선물 모두 — 선물은 손절·익절(OCO)로 포지션을 닫는 데 쓴다. */
+const ACTIVE_SYMBOLS = new Set(TRADABLE_SYMBOLS);
+
+/** 안내 문구용 가격: 현물은 원, 선물은 정수 단위를 실제 가격으로 */
+function priceText(symbol: string, units: number): string {
+  const def = futureDef(symbol);
+  return def ? formatFuturePrice(def, units) : `${units.toLocaleString("ko-KR")}원`;
+}
 
 /**
  * 조건부(예약) 주문 감시자.
@@ -157,7 +166,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     }
     const tickSize = tickSizeOf(symbol);
     if (orderType === "LIMIT" && tickSize != null && !isOnTick(limitPrice!, tickSize)) {
-      throw new BadRequestException(`${symbol}의 호가 단위는 ${tickSize.toLocaleString("ko-KR")}원입니다`);
+      throw new BadRequestException(`${symbol}의 호가 단위는 ${priceText(symbol, tickSize)}입니다`);
     }
     if (trailBps != null && (!Number.isInteger(trailBps) || trailBps < TRAIL_BPS_MIN || trailBps > TRAIL_BPS_MAX)) {
       throw new BadRequestException(`트레일링 거리는 ${TRAIL_BPS_MIN / 100}%~${TRAIL_BPS_MAX / 100}% 사이여야 합니다`);
@@ -182,7 +191,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
         throw new BadRequestException("direction은 AT_OR_ABOVE/AT_OR_BELOW");
       }
       if (!Number.isInteger(triggerPrice) || triggerPrice <= 0) throw new BadRequestException("트리거 가격은 양의 정수");
-      this.assertNotAlreadyMet(direction, triggerPrice, lastPrice);
+      this.assertNotAlreadyMet(symbol, direction, triggerPrice, lastPrice);
     }
     await this.assertWaitingCapacity(accountId, 1);
 
@@ -221,8 +230,8 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     if (lowerPrice >= upperPrice) throw new BadRequestException("아래 트리거는 위 트리거보다 낮아야 합니다");
 
     const lastPrice = await this.lastPriceOf(symbol);
-    this.assertNotAlreadyMet("AT_OR_BELOW", lowerPrice, lastPrice);
-    this.assertNotAlreadyMet("AT_OR_ABOVE", upperPrice, lastPrice);
+    this.assertNotAlreadyMet(symbol, "AT_OR_BELOW", lowerPrice, lastPrice);
+    this.assertNotAlreadyMet(symbol, "AT_OR_ABOVE", upperPrice, lastPrice);
     await this.assertWaitingCapacity(accountId, 2);
 
     const ocoGroupId = randomUUID();
@@ -255,10 +264,10 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** 이미 만족하는 조건은 예약의 의미가 없다 — 바로 일반 주문을 내라고 안내한다. */
-  private assertNotAlreadyMet(direction: TriggerDirection, triggerPrice: number, lastPrice: number): void {
+  private assertNotAlreadyMet(symbol: string, direction: TriggerDirection, triggerPrice: number, lastPrice: number): void {
     if (conditionMet(direction, triggerPrice, lastPrice)) {
       throw new BadRequestException(
-        `현재가 ${lastPrice.toLocaleString("ko-KR")}원이 이미 ${triggerPrice.toLocaleString("ko-KR")}원 ${
+        `현재가 ${priceText(symbol, lastPrice)}이 이미 ${priceText(symbol, triggerPrice)} ${
           direction === "AT_OR_ABOVE" ? "이상" : "이하"
         } 조건을 만족합니다. 일반 주문을 이용하세요`,
       );

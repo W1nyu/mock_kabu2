@@ -109,7 +109,11 @@ describe("OrderService.place for futures", () => {
     const created: Record<string, unknown>[] = [];
     const outbox: Record<string, unknown>[] = [];
     const tx = {
-      futuresPosition: { aggregate: vi.fn(async () => ({ _sum: { marginHeld: positionMargin } })) },
+      futuresPosition: {
+        aggregate: vi.fn(async () => ({ _sum: { marginHeld: positionMargin } })),
+        // 포지션 없음(신규 주문) — 청산 판정·레버리지는 leverage.test.ts에서 따로 본다.
+        findUnique: vi.fn(async () => null),
+      },
       futuresDebt: { findUnique: vi.fn(async () => (debt > 0n ? { amount: debt } : null)) },
       holding: { findUnique: vi.fn(), update: vi.fn() },
       order: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => (created.push(data), { id: "o1", ...data })) },

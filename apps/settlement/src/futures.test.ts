@@ -6,7 +6,7 @@ const KABUF = futureDef("KABUF")!;
 
 /** 메모리 위의 계좌·포지션·원장·미수금 — Prisma 델리게이트 모양만 흉내 낸다. */
 function fakeContext(accounts: Record<string, { balance: bigint; holdAmount: bigint }>) {
-  const positions = new Map<string, { qty: number; entryValue: bigint; marginHeld: bigint }>();
+  const positions = new Map<string, { qty: number; entryValue: bigint; marginHeld: bigint; leverage?: number | null }>();
   const debts = new Map<string, bigint>();
   const ledger: { accountId: string; delta: bigint; reason: string }[] = [];
   const realized: { accountId: string; side: string; realized: bigint }[] = [];
@@ -75,6 +75,16 @@ describe("futures settlement", () => {
     expect(f.positions.get("B:KABUF")!.qty).toBe(-2);
     expect(f.accounts.A).toEqual({ balance: 10_000_000n, holdAmount: 0n });
     expect(f.ledger).toHaveLength(0);
+  });
+
+  it("holds position margin at the account's chosen leverage for that symbol", async () => {
+    const f = fakeContext({ A: { balance: 10_000_000n, holdAmount: 0n }, B: { balance: 10_000_000n, holdAmount: 0n } });
+    // A는 KABUF 20배로 미리 설정(포지션 없는 설정 행)
+    f.positions.set("A:KABUF", { qty: 0, entryValue: 0n, marginHeld: 0n, leverage: 20 });
+    await fill(f, trade(88_000, 2));
+    // 명목 176,000 × 100원 = 1,760만 원 → 20배면 88만 원, B는 거래소 기준(21.75%)
+    expect(f.positions.get("A:KABUF")!.marginHeld).toBe(880_000n);
+    expect(f.positions.get("B:KABUF")!.marginHeld).toBe(futurePositionMargin(KABUF, 176_000n));
   });
 
   it("closing books realized P&L to cash with a FUTURES_PNL ledger row on each side", async () => {

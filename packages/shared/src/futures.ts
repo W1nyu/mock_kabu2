@@ -54,8 +54,9 @@ export const FUTURES: readonly FutureDef[] = [
     decimals: 1,
     tickUnits: 1,
     unitValue: 1_000,
-    initialMarginBps: 483,
-    maintenanceMarginBps: 322,
+    // 최대 레버리지(20배)에 맞춘 5% — 거래소 기준 4.83%(20.7배)는 선택 가능한 상한을 넘는다.
+    initialMarginBps: 500,
+    maintenanceMarginBps: 333,
     initialPrice: 14_000,
     unit: "원",
   },
@@ -119,22 +120,45 @@ function ceilBps(value: bigint, bps: number): bigint {
   return (numerator + 9_999n) / 10_000n;
 }
 
+/** 선택할 수 있는 최대 레버리지 */
+export const MAX_FUTURES_LEVERAGE = 20;
+
+/** 레버리지 값 검증: 1~20 정수, 또는 null(거래소 기준 증거금) */
+export function isValidLeverage(leverage: unknown): leverage is number | null {
+  return leverage === null || (Number.isInteger(leverage) && (leverage as number) >= 1 && (leverage as number) <= MAX_FUTURES_LEVERAGE);
+}
+
+/**
+ * 증거금률(bps). 레버리지를 정하지 않으면(null) 상품의 거래소 기준 증거금률을 쓴다.
+ * 레버리지 L이면 위탁증거금률 = 1/L(올림), 유지증거금률 = 위탁의 2/3 — 거래소 기준과 같은 비율이다.
+ */
+export function futureMarginBps(def: FutureDef, leverage: number | null | undefined): { initial: number; maintenance: number } {
+  if (leverage == null) return { initial: def.initialMarginBps, maintenance: def.maintenanceMarginBps };
+  const initial = Math.ceil(10_000 / leverage);
+  return { initial, maintenance: Math.floor((initial * 2) / 3) };
+}
+
+/** 거래소 기준 증거금률을 레버리지 배수로 (표시용, 예: 21.75% → 4.6배) */
+export function standardLeverage(def: FutureDef): number {
+  return 10_000 / def.initialMarginBps;
+}
+
 /** 계약 1개의 위탁증거금(원) — 주문 시 묶는 단가 */
-export function futureMarginPerContract(def: FutureDef, priceUnits: number): bigint {
-  return ceilBps(BigInt(priceUnits) * BigInt(def.unitValue), def.initialMarginBps);
+export function futureMarginPerContract(def: FutureDef, priceUnits: number, leverage?: number | null): bigint {
+  return ceilBps(BigInt(priceUnits) * BigInt(def.unitValue), futureMarginBps(def, leverage).initial);
 }
 
 /**
  * 포지션 증거금(원) — 진입 금액(entryValue = Σ 진입가 × 계약 수, 정수 단위) 기준.
  * 체결마다 같은 식으로 다시 계산해 묶음의 증감을 정확히 되돌릴 수 있게 한다.
  */
-export function futurePositionMargin(def: FutureDef, entryValue: bigint): bigint {
-  return ceilBps(entryValue * BigInt(def.unitValue), def.initialMarginBps);
+export function futurePositionMargin(def: FutureDef, entryValue: bigint, leverage?: number | null): bigint {
+  return ceilBps(entryValue * BigInt(def.unitValue), futureMarginBps(def, leverage).initial);
 }
 
 /** 유지증거금(원) — 평가 가격 기준 */
-export function futureMaintenanceMargin(def: FutureDef, qty: number, markUnits: number): bigint {
-  return ceilBps(BigInt(Math.abs(qty)) * BigInt(markUnits) * BigInt(def.unitValue), def.maintenanceMarginBps);
+export function futureMaintenanceMargin(def: FutureDef, qty: number, markUnits: number, leverage?: number | null): bigint {
+  return ceilBps(BigInt(Math.abs(qty)) * BigInt(markUnits) * BigInt(def.unitValue), futureMarginBps(def, leverage).maintenance);
 }
 
 export interface FuturePositionState {
@@ -263,6 +287,8 @@ export interface FuturesRiskPosition {
   marginHeld: bigint;
   /** 현재가(정수 단위) */
   mark: number;
+  /** 포지션 레버리지(null = 거래소 기준 증거금) */
+  leverage?: number | null;
 }
 
 export interface FuturesRiskAssessment {
@@ -300,8 +326,8 @@ export function assessFuturesRisk(
     if (p.qty === 0) continue;
     const pnl = futureUnrealized(p.def, p.qty, p.entryValue, p.mark);
     unrealized += pnl;
-    maintenance += futureMaintenanceMargin(p.def, p.qty, p.mark);
-    initial += futureMarginPerContract(p.def, p.mark) * BigInt(Math.abs(p.qty));
+    maintenance += futureMaintenanceMargin(p.def, p.qty, p.mark, p.leverage);
+    initial += futureMarginPerContract(p.def, p.mark, p.leverage) * BigInt(Math.abs(p.qty));
     if (p.marginHeld > 0n && -pnl * 10_000n >= p.marginHeld * BigInt(FUTURES_EMERGENCY_LOSS_BPS)) emergency.push(p.def.symbol);
   }
   const equity = cash.balance + unrealized - cash.debt;

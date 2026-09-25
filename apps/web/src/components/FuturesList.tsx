@@ -11,7 +11,7 @@ function tone(delta: number | null): string {
   return delta == null ? "text-ink-faint" : delta > 0 ? "text-up" : delta < 0 ? "text-down" : "text-ink-muted";
 }
 
-/** 선물 5종 목록 — 선물가·등락률·기초자산·베이시스(선물 − 기초자산). 체결은 소켓, 기초자산은 15초마다 다시 읽는다. */
+/** 선물 5종 목록 — 이름·티커, 선물가·등락률. 체결은 소켓, 목록은 15초마다 다시 읽는다. */
 export default function FuturesList() {
   const [rows, setRows] = useState<FutureRow[]>([]);
   const [live, setLive] = useState<Record<string, number>>({});
@@ -65,14 +65,7 @@ export default function FuturesList() {
             <span className="min-w-0 flex-1">
               <span className="block truncate font-semibold">{row.name}</span>
               <span className="num block truncate text-xs text-ink-faint">
-                {row.symbol} · 기초 {fmtFuture(row.symbol, row.underlying)}
-                {row.underlying != null && (
-                  <span className="hidden min-[380px]:inline">
-                    {" "}
-                    · 베이시스 {row.price - row.underlying > 0 ? "+" : ""}
-                    {((row.price - row.underlying) / row.priceScale).toFixed(row.decimals)}
-                  </span>
-                )}
+                {row.symbol}
               </span>
             </span>
             <span className="w-[6.5rem] shrink-0 text-right">

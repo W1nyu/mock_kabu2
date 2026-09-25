@@ -52,7 +52,9 @@ export async function settleFuturesTrade(
       ? { qty: existing.qty as number, entryValue: existing.entryValue as bigint }
       : { qty: 0, entryValue: 0n };
     const fill = applyFutureFill(def, before, leg.side, event.price, event.qty);
-    const marginHeld = fill.qty === 0 ? 0n : futurePositionMargin(def, fill.entryValue);
+    // 포지션 증거금은 그 계좌·종목의 레버리지로(없으면 거래소 기준). 레버리지는 포지션이 없을 때만 바뀐다.
+    const leverage = (existing?.leverage as number | null | undefined) ?? null;
+    const marginHeld = fill.qty === 0 ? 0n : futurePositionMargin(def, fill.entryValue, leverage);
     await ctx.tx.futuresPosition.upsert({
       where,
       update: { qty: fill.qty, entryValue: fill.entryValue, marginHeld },

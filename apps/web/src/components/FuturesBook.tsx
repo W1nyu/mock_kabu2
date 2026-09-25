@@ -55,7 +55,7 @@ export default function FuturesBook({ symbol, onPick }: { symbol: string; onPick
           style={{ width: `${(level.qty / maxQty) * 100}%` }}
         />
         <span className={`num relative font-medium ${side === "ask" ? "text-down" : "text-up"}`}>{fmtFuture(symbol, level.price)}</span>
-        <span className="num relative text-ink-muted">{level.qty}계약</span>
+        <span className="num relative text-ink-muted">{level.qty.toLocaleString("ko-KR")}</span>
       </button>
     </li>
   );

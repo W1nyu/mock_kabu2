@@ -118,7 +118,7 @@ export class FuturesRiskService implements OnModuleInit, OnModuleDestroy {
         .flatMap((p) => {
           const def = futureDef(p.symbol);
           const mark = markBySymbol.get(p.symbol) ?? def?.initialPrice;
-          return def && mark ? [{ def, qty: p.qty, entryValue: p.entryValue, marginHeld: p.marginHeld, mark }] : [];
+          return def && mark ? [{ def, qty: p.qty, entryValue: p.entryValue, marginHeld: p.marginHeld, mark, leverage: p.leverage }] : [];
         });
 
       if (riskPositions.length === 0) {
@@ -178,15 +178,20 @@ export class FuturesRiskService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * 반대매매 주문이 아직 살아 있는 계좌. 일반 선물 주문은 늘 증거금을 묶으므로(holdPerUnit > 0),
-   * 증거금 0인 살아 있는 선물 주문은 반대매매 주문뿐이다.
+   * 반대매매 주문이 아직 살아 있는 계좌. 반대매매·청산 주문은 모두 증거금 0이라, 살아 있는 증거금 0 선물 주문 중
+   * 반대매매 기록(futures_liquidations)에 있는 것만 센다 — 사용자의 청산 지정가가 감시를 막지 않게.
    */
   private async pendingLiquidationAccounts(): Promise<Set<string>> {
     const live = await this.prisma.order.findMany({
       where: { symbol: { in: FUTURES.map((f) => f.symbol) }, status: { in: LIVE }, holdPerUnit: 0n },
+      select: { id: true },
+    });
+    if (live.length === 0) return new Set();
+    const rows = await this.prisma.futuresLiquidation.findMany({
+      where: { orderId: { in: live.map((order) => order.id) } },
       select: { accountId: true },
     });
-    return new Set(live.map((o) => o.accountId));
+    return new Set(rows.map((row) => row.accountId));
   }
 
   /** 추가증거금 기록을 연다. outcome을 주면(긴급 반대매매) 바로 닫힌 기록으로 남긴다. */

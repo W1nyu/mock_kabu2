@@ -6,6 +6,8 @@ import {
   assessFuturesRisk,
   futureDef,
   futureMaintenanceMargin,
+  futureMarginBps,
+  isValidLeverage,
   futureMarginPerContract,
   futurePositionMargin,
   marginCallLiquidationQty,
@@ -22,11 +24,11 @@ test("contract specs: tick, unit value and the 2/3 maintenance rule", () => {
   assert.ok(TRADABLE_SYMBOLS.includes("OILF") && TRADABLE_SYMBOLS.includes("MOCK"));
   // KABUF 880.00pt, 1계약 = 880 × 10,000원 = 880만 원 → 위탁 21.75% = 1,914,000원
   assert.equal(futureMarginPerContract(KABUF, 88_000), 1_914_000n);
-  // USDF 1,400.0원, 1계약 = 1만 달러 = 1,400만 원 → 4.83% = 676,200원
-  assert.equal(futureMarginPerContract(USDF, 14_000), 676_200n);
+  // USDF 1,400.0원, 1계약 = 1만 달러 = 1,400만 원 → 5% = 700,000원
+  assert.equal(futureMarginPerContract(USDF, 14_000), 700_000n);
   for (const symbol of ["KABUF", "USDF", "OILF", "GASF", "CPRF"]) {
     const def = futureDef(symbol);
-    assert.equal(def.maintenanceMarginBps * 3, def.initialMarginBps * 2, symbol);
+    assert.equal(def.maintenanceMarginBps, Math.floor((def.initialMarginBps * 2) / 3), symbol);
   }
   assert.equal(futureMaintenanceMargin(KABUF, -2, 88_000), 2_552_000n);
 });
@@ -108,9 +110,9 @@ test("assessFuturesRisk: margin call below maintenance, shortfall to initial, 90
   const call = at(13_800, 6_000_000n);
   assert.equal(call.unrealized, -2_000_000n);
   assert.equal(call.equity, 4_000_000n);
-  assert.equal(call.maintenance, 4_443_600n);
+  assert.equal(call.maintenance, 4_595_400n);
   assert.equal(call.belowMaintenance, true);
-  assert.equal(call.shortfall, 2_665_400n);
+  assert.equal(call.shortfall, 2_900_000n);
 
   // 손실이 위탁증거금의 90% 이상 → 긴급
   const lossUnits = Number((marginHeld * 9n) / 10n / 10_000n) + 1;
@@ -122,4 +124,20 @@ test("marginCallLiquidationQty closes shortfall/initial of the position, rounded
   assert.equal(marginCallLiquidationQty(10, 101n, 1_000n), 2);
   assert.equal(marginCallLiquidationQty(-7, 5_000n, 1_000n), 7);
   assert.equal(marginCallLiquidationQty(3, 0n, 1_000n), 0);
+});
+
+test("leverage sets the margin rate: 1/L initial, 2/3 of that maintenance; null keeps the exchange rate", () => {
+  const usd = futureDef("USDF");
+  assert.deepEqual(futureMarginBps(usd, null), { initial: 500, maintenance: 333 });
+  assert.deepEqual(futureMarginBps(usd, 10), { initial: 1_000, maintenance: 666 });
+  assert.deepEqual(futureMarginBps(usd, 20), { initial: 500, maintenance: 333 });
+  assert.deepEqual(futureMarginBps(usd, 1), { initial: 10_000, maintenance: 6_666 });
+  // 1,400.0원 1계약 명목 1,400만 원 → 20배면 70만 원
+  assert.equal(futureMarginPerContract(usd, 14_000, 20), 700_000n);
+  assert.equal(futureMarginPerContract(usd, 14_000), futureMarginPerContract(usd, 14_000, null));
+  assert.equal(isValidLeverage(20), true);
+  assert.equal(isValidLeverage(21), false);
+  assert.equal(isValidLeverage(0), false);
+  assert.equal(isValidLeverage(2.5), false);
+  assert.equal(isValidLeverage(null), true);
 });

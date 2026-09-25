@@ -167,18 +167,22 @@ export default function Toaster() {
         return;
       }
       if (data.type === "conditional" && typeof data.label === "string") {
+        const symbol = String(data.symbol ?? "");
+        const future = isFuture(symbol);
+        const href = future ? `/futures/${symbol}` : `/symbol/${symbol}`;
         if (data.status === "TRIGGERED") {
+          const price = future ? fmtFuture(symbol, Number(data.triggerPrice)) : `${fmt.format(Number(data.triggerPrice))}원`;
           push({
             id: `cond:${data.id}`,
-            href: `/symbol/${data.symbol}`,
+            href,
             tone: "info",
             title: `${data.symbol} ${data.label} 발동`,
-            detail: `${fmt.format(Number(data.triggerPrice))}원 도달 · ${fmt.format(Number(data.qty))}주 시장가 접수`,
+            detail: `${price} 도달 · ${fmt.format(Number(data.qty))}${future ? "계약" : "주"} 시장가 접수`,
           });
         } else if (data.status === "FAILED") {
           push({
             id: `cond:${data.id}`,
-            href: `/symbol/${data.symbol}`,
+            href,
             tone: "warn",
             title: `${data.symbol} ${data.label} 발동했지만 접수 실패`,
             detail: String(data.failReason ?? "사유 없음"),

@@ -17,7 +17,6 @@ import {
   MAX_ORDER_QTY,
   TRADABLE_SYMBOLS,
   futureDef,
-  futureMarginPerContract,
   isOnTick,
   tickSizeOf,
   type OrderCancelRequestedEvent,
@@ -28,7 +27,7 @@ import {
 import type Redis from "ioredis";
 import { BALANCE_MUTATOR, PRISMA, REDIS } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
-import { futuresMarginHeld } from "./futures-margin";
+import { futuresMarginHeld, futuresOrderHoldPerUnit } from "./futures-margin";
 import { OutboxRelayer } from "./outbox.relayer";
 
 export interface PlaceOrderDto {
@@ -137,19 +136,19 @@ export class OrderService {
     const marketCap = Math.ceil(marketSymbol.lastPrice * MARKET_BUY_HOLD_FACTOR);
     // 홀드 단가(원/주, 원/계약):
     //  - 현물 BUY: LIMIT=지정가, MARKET=체결 상한. 현물 SELL은 현금이 아니라 보유 수량을 묶는다.
-    //  - 선물: 매수·매도 모두 계약당 위탁증거금. 신규·청산을 나누지 않고 보수적으로 묶었다가 체결 때 포지션 증거금으로 바꾼다.
-    const holdPerUnit = future
-      ? futureMarginPerContract(future, type === "LIMIT" ? price! : marketCap)
-      : side === "BUY"
-        ? BigInt(type === "LIMIT" ? price! : marketCap)
-        : 0n;
+    //  - 선물: 계약당 위탁증거금(계좌·종목의 레버리지 반영). 보유 포지션을 줄이기만 하는 청산 주문은 0 —
+    //    실제 증권사처럼 청산에는 증거금이 필요 없다. 계좌 락 안에서 포지션을 읽어 정한다.
+    let holdPerUnit = future ? 0n : side === "BUY" ? BigInt(type === "LIMIT" ? price! : marketCap) : 0n;
 
     const order = await this.mutator.withAccountLock([accountId], async (ctx) => {
+      if (future) {
+        holdPerUnit = await futuresOrderHoldPerUnit(ctx.tx, accountId, future, side, qty, type === "LIMIT" ? price! : marketCap);
+      }
       if (future || side === "BUY") {
         const acc = ctx.accounts[accountId];
         const holdTotal = holdPerUnit * BigInt(qty);
         const available = acc.balance - acc.holdAmount - (await futuresMarginHeld(ctx.tx, accountId));
-        if (available < holdTotal) {
+        if (holdTotal > 0n && available < holdTotal) {
           throw new UnprocessableEntityException(future ? "주문 증거금이 부족합니다" : "주문 가능 금액이 부족합니다");
         }
         await ctx.updateAccount(accountId, {

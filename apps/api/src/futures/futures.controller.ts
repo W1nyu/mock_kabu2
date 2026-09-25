@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { Controller, Get, Headers, Post, UnauthorizedException, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Post, UnauthorizedException, UseGuards } from "@nestjs/common";
 import { futuresTradingDay } from "@mock-kabu/shared";
 import { liquidityBootstrapToken } from "../liquidity/liquidity-reserve";
 import { FuturesSettlementService } from "./futures-settlement.service";
@@ -26,6 +26,12 @@ export class AccountFuturesController {
   @Get()
   positions(@CurrentUser() user: { accountId: string }) {
     return this.futures.positions(user.accountId);
+  }
+
+  /** 종목 레버리지 설정 `{symbol, leverage: 1~20 | null}` — 포지션·미체결이 없을 때만 */
+  @Post("leverage")
+  setLeverage(@CurrentUser() user: { accountId: string }, @Body() body: { symbol: string; leverage: number | null }) {
+    return this.futures.setLeverage(user.accountId, String(body?.symbol ?? ""), body?.leverage ?? null);
   }
 }
 
