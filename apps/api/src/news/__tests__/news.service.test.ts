@@ -57,6 +57,15 @@ describe("NewsService.list", () => {
     });
   });
 
+  it("serves an industry feed without market-wide stories, and a market-only feed", async () => {
+    const { service, prisma } = serviceWith([ROW]);
+    await service.list(undefined, 10, ["MOCK", "DAON"]);
+    await service.list(undefined, 10, null);
+
+    expect(prisma.newsItem.findMany.mock.calls[0][0].where).toEqual({ symbol: { in: ["MOCK", "DAON"] } });
+    expect(prisma.newsItem.findMany.mock.calls[1][0].where).toEqual({ symbol: null });
+  });
+
   it("caps the page size so one request cannot pull the whole table", async () => {
     const { service, prisma } = serviceWith([ROW]);
     await service.list(undefined, 10_000);

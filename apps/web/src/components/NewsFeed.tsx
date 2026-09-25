@@ -1,15 +1,17 @@
 "use client";
 
-import type { NewsItemDto } from "@mock-kabu/shared";
+import { industryOf, type NewsItemDto } from "@mock-kabu/shared";
 import Link from "next/link";
 import { formatNewsTime } from "@/lib/news";
 
 export function NewsRow({
   item,
   showSymbol = true,
+  showIndustry = true,
 }: {
   item: NewsItemDto;
   showSymbol?: boolean;
+  showIndustry?: boolean;
 }) {
   return (
     <li className="border-b border-hairline-soft px-4 py-3 transition-colors last:border-b-0 hover:bg-surface-3/25">
@@ -18,12 +20,17 @@ export function NewsRow({
 
         {showSymbol &&
           (item.symbol ? (
-            <Link
-              href={`/symbol/${item.symbol}`}
-              className="shrink-0 text-xs font-semibold text-ink-muted transition-colors hover:text-sky"
-            >
-              {item.symbolName ?? item.symbol}
-            </Link>
+            <span className="flex min-w-0 items-baseline gap-1.5">
+              <Link
+                href={`/symbol/${item.symbol}`}
+                className="shrink-0 text-xs font-semibold text-ink-muted transition-colors hover:text-sky"
+              >
+                {item.symbolName ?? item.symbol}
+              </Link>
+              {showIndustry && industryOf(item.symbol) && (
+                <span className="truncate text-[11px] text-ink-faint">{industryOf(item.symbol)!.label}</span>
+              )}
+            </span>
           ) : (
             <span className="chip shrink-0">시장 전체</span>
           ))}
@@ -38,11 +45,13 @@ export function NewsRow({
 export function NewsList({
   items,
   showSymbol = true,
+  showIndustry = true,
   loading,
   emptyLabel = "아직 뉴스가 없습니다",
 }: {
   items: readonly NewsItemDto[];
   showSymbol?: boolean;
+  showIndustry?: boolean;
   loading?: boolean;
   emptyLabel?: string;
 }) {
@@ -57,7 +66,7 @@ export function NewsList({
   return (
     <ul>
       {items.map((item) => (
-        <NewsRow key={item.id} item={item} showSymbol={showSymbol} />
+        <NewsRow key={item.id} item={item} showSymbol={showSymbol} showIndustry={showIndustry} />
       ))}
     </ul>
   );

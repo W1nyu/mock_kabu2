@@ -60,12 +60,27 @@ export class NewsService {
     };
   }
 
-  async list(symbol: string | undefined, limit: number): Promise<NewsItemDto[]> {
+  /**
+   * `only`을 주면 그 종목들의 기사만(산업군 피드), `null`이면 시장 전반 기사만 돌려준다.
+   */
+  async list(
+    symbol: string | undefined,
+    limit: number,
+    only?: readonly string[] | null,
+  ): Promise<NewsItemDto[]> {
     const take = Number.isFinite(limit) ? Math.min(Math.max(1, Math.trunc(limit)), MAX_LIMIT) : DEFAULT_LIMIT;
+    const where =
+      only === null
+        ? { symbol: null }
+        : only
+          ? { symbol: { in: [...only] } }
+          : // A market-wide story moved this symbol too, so it belongs in its feed.
+            symbol
+            ? { OR: [{ symbol }, { symbol: null }] }
+            : {};
 
     const rows = await this.prisma.newsItem.findMany({
-      // A market-wide story moved this symbol too, so it belongs in its feed.
-      where: symbol ? { OR: [{ symbol }, { symbol: null }] } : {},
+      where,
       orderBy: { createdAt: "desc" },
       take,
       select: {

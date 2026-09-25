@@ -1,7 +1,7 @@
 "use client";
 
 import type { NewsItemDto } from "@mock-kabu/shared";
-import { NEWS_FEED_SCOPE } from "@mock-kabu/shared";
+import { industryById, industryOf, NEWS_FEED_SCOPE } from "@mock-kabu/shared";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -12,6 +12,8 @@ import Leaderboard from "@/components/Leaderboard";
 import PerformanceCard, { type RealizedStats } from "@/components/PerformanceCard";
 import { NewsList } from "@/components/NewsFeed";
 import Sparkline from "@/components/Sparkline";
+import ChipTabs from "@/components/ChipTabs";
+import { ALL_INDUSTRIES, INDUSTRY_STORAGE_KEY, industryChipItems } from "@/lib/industry-chips";
 import { mergeNews, parseNewsItem } from "@/lib/news";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
@@ -111,6 +113,7 @@ export default function DashboardPage() {
   const [news, setNews] = useState<NewsItemDto[]>([]);
   const [sparks, setSparks] = useState<Record<string, number[]>>({});
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "symbol", dir: "asc" });
+  const [industry, setIndustry] = useState<string>(ALL_INDUSTRIES);
 
   // 정렬 선택은 브라우저에 남긴다 — 마운트 후 읽어 hydration mismatch를 피한다.
   useEffect(() => {
@@ -125,6 +128,25 @@ export default function DashboardPage() {
       // ignore
     }
   }, []);
+
+  // 산업군 필터는 증권 탭과 같은 저장 키를 써서 폰·PC에서 고른 업종이 이어진다.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(INDUSTRY_STORAGE_KEY);
+      if (saved && industryById(saved)) setIndustry(saved);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  function chooseIndustry(next: string) {
+    setIndustry(next);
+    try {
+      window.localStorage.setItem(INDUSTRY_STORAGE_KEY, next);
+    } catch {
+      // ignore
+    }
+  }
 
   function toggleSort(key: SortKey) {
     setSort((current) => {
@@ -302,6 +324,22 @@ export default function DashboardPage() {
       sort.key === "symbol" ? sign * a.symbol.localeCompare(b.symbol) : sign * (valueOf(a) - valueOf(b)),
     );
   }, [livePrices, symbols, turnovers, sort]);
+  const industryItems = useMemo(
+    () =>
+      industryChipItems(
+        new Map(
+          liveSymbols.map((s) => [
+            s.symbol,
+            s.referencePrice > 0 ? ((s.lastPrice - s.referencePrice) / s.referencePrice) * 100 : 0,
+          ]),
+        ),
+      ),
+    [liveSymbols],
+  );
+  const selectedIndustry = industryById(industry);
+  const shownSymbols = selectedIndustry
+    ? liveSymbols.filter((s) => selectedIndustry.symbols.includes(s.symbol))
+    : liveSymbols;
   const liveHoldings = useMemo(
     () =>
       holdings.map((holding) => {
@@ -413,11 +451,17 @@ export default function DashboardPage() {
       {/* ── Market ─────────────────────────────────────────────── */}
       <section className="glass overflow-hidden max-sm:hidden">
         <div className="panel-head">
-          <span className="panel-title">종목</span>
+          <span className="panel-title">
+            {selectedIndustry ? selectedIndustry.label : "종목"}
+            <span className="num ml-1.5 font-medium text-ink-faint">{shownSymbols.length}</span>
+          </span>
           <span className="chip chip-live">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
             LIVE
           </span>
+        </div>
+        <div className="border-b border-hairline-soft px-4 py-3">
+          <ChipTabs label="산업군" size="sm" items={industryItems} value={industry} onChange={chooseIndustry} />
         </div>
         <div className="overflow-x-auto">
           <table className="tbl tbl-hover">
@@ -444,7 +488,7 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {liveSymbols.map((s) => {
+              {shownSymbols.map((s) => {
                 const change = s.referencePrice > 0 ? ((s.lastPrice - s.referencePrice) / s.referencePrice) * 100 : 0;
                 const tone = change > 0 ? "text-up" : change < 0 ? "text-down" : "text-ink-muted";
                 return (
@@ -459,7 +503,10 @@ export default function DashboardPage() {
                         </span>
                         <span>
                           <span className="block font-semibold">{s.name}</span>
-                          <span className="num block text-xs text-ink-faint">{s.symbol}</span>
+                          <span className="num block text-xs text-ink-faint">
+                            {s.symbol}
+                            {!selectedIndustry && industryOf(s.symbol) && ` · ${industryOf(s.symbol)!.label}`}
+                          </span>
                         </span>
                       </Link>
                     </td>

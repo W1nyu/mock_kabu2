@@ -1,13 +1,17 @@
 "use client";
 
+import { industryById, industryOf } from "@mock-kabu/shared";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import ChipTabs from "@/components/ChipTabs";
 import Sparkline from "@/components/Sparkline";
 import { api, fmt } from "@/lib/api";
 import { indexSessionBase, type IndexPoint } from "@/lib/index-session";
+import { ALL_INDUSTRIES, INDUSTRY_STORAGE_KEY, industryChipItems } from "@/lib/industry-chips";
 import { liveIndexLevel, type IndexMeta } from "@/lib/index-meta";
 import { subscribe } from "@/lib/socket";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
+import { readQueryParam, writeQueryParams } from "@/lib/url-query";
 
 /**
  * 증권 탭 — 폰 하단 탭의 두 번째 칸. 지수 요약 카드(누르면 `/market-index`)와 전 종목 목록을
@@ -54,6 +58,7 @@ export default function MarketPage() {
   const [indexMeta, setIndexMeta] = useState<IndexMeta | null>(null);
   const [sparks, setSparks] = useState<Record<string, number[]>>({});
   const [sort, setSort] = useState<SortKey>("change");
+  const [industry, setIndustry] = useState<string>(ALL_INDUSTRIES);
 
   useEffect(() => {
     try {
@@ -62,7 +67,27 @@ export default function MarketPage() {
     } catch {
       // ignore
     }
+    // 주소의 ?industry=가 우선, 없으면 마지막으로 고른 산업군.
+    let initial = readQueryParam("industry");
+    if (!initial) {
+      try {
+        initial = window.localStorage.getItem(INDUSTRY_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+    }
+    if (initial && industryById(initial)) setIndustry(initial);
   }, []);
+
+  function chooseIndustry(next: string) {
+    setIndustry(next);
+    writeQueryParams({ industry: next === ALL_INDUSTRIES ? null : next });
+    try {
+      window.localStorage.setItem(INDUSTRY_STORAGE_KEY, next);
+    } catch {
+      // ignore
+    }
+  }
 
   function chooseSort(next: SortKey) {
     setSort(next);
@@ -164,6 +189,14 @@ export default function MarketPage() {
     );
   }, [rows, live, sort]);
 
+  const industryItems = useMemo(
+    () => industryChipItems(new Map(list.map((row) => [row.symbol, row.change]))),
+    [list],
+  );
+
+  const selectedIndustry = industryById(industry);
+  const shown = selectedIndustry ? list.filter((row) => selectedIndustry.symbols.includes(row.symbol)) : list;
+
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">증권</h1>
@@ -190,10 +223,16 @@ export default function MarketPage() {
         </span>
       </Link>
 
+      {/* ── 산업군 태그 ───────────────────────────────────────── */}
+      <ChipTabs label="산업군" items={industryItems} value={industry} onChange={chooseIndustry} />
+
       {/* ── 종목 목록 ─────────────────────────────────────────── */}
       <section className="glass overflow-hidden">
         <div className="panel-head">
-          <span className="panel-title">전체 종목</span>
+          <span className="panel-title">
+            {selectedIndustry ? selectedIndustry.label : "전체 종목"}
+            <span className="num ml-1.5 font-medium text-ink-faint">{shown.length}</span>
+          </span>
           <div className="flex gap-1" role="group" aria-label="정렬">
             {SORTS.map((s) => (
               <button
@@ -211,7 +250,7 @@ export default function MarketPage() {
           </div>
         </div>
         <ul className="divide-y divide-hairline-soft">
-          {list.map((s) => {
+          {shown.map((s) => {
             const spark = sparks[s.symbol];
             const series = spark && spark.length > 0 ? [...spark.slice(0, -1), s.lastPrice] : [];
             return (
@@ -226,7 +265,11 @@ export default function MarketPage() {
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-semibold">{s.name}</span>
                     <span className="num block truncate text-xs text-ink-faint">
-                      {s.symbol} · {fmt.format(Math.round(s.turnover / 10_000))}만 원
+                      {s.symbol}
+                      {!selectedIndustry && industryOf(s.symbol) && (
+                        <span className="hidden sm:inline"> · {industryOf(s.symbol)!.label}</span>
+                      )}{" "}
+                      · {fmt.format(Math.round(s.turnover / 10_000))}만 원
                     </span>
                   </span>
                   <span className="hidden min-[380px]:block">
