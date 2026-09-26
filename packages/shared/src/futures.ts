@@ -240,7 +240,7 @@ export function applyFutureFill(
 }
 
 /** 정수 단위 → 화면 문자열 */
-export function formatFuturePrice(def: FutureDef, units: number): string {
+export function formatFuturePrice(def: Pick<FutureDef, "priceScale" | "decimals" | "unit">, units: number): string {
   const text = (units / def.priceScale).toLocaleString("ko-KR", {
     minimumFractionDigits: def.decimals,
     maximumFractionDigits: def.decimals,

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import AssetNews from "@/components/AssetNews";
 import FuturesBook from "@/components/FuturesBook";
+import DerivOpenOrders from "@/components/DerivOpenOrders";
 import OptionOrderPanel from "@/components/OptionOrderPanel";
 import UnitCandleChart from "@/components/UnitCandleChart";
 import { api, getUser, won } from "@/lib/api";
@@ -35,6 +36,7 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
   const [account, setAccount] = useState<FuturesAccount | null>(null);
   const [available, setAvailable] = useState<number | null>(null);
   const [priceHint, setPriceHint] = useState<{ price: number; seq: number } | null>(null);
+  const [orderRefreshKey, setOrderRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!def) return;
@@ -204,9 +206,18 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
               position={position}
               available={available}
               priceHint={priceHint}
-              onPlaced={refreshAccount}
+              onPlaced={() => {
+                refreshAccount();
+                setOrderRefreshKey((k) => k + 1);
+              }}
             />
           )}
+          <DerivOpenOrders
+            symbol={def.symbol}
+            refreshKey={orderRefreshKey}
+            priceHint={priceHint}
+            onChanged={refreshAccount}
+          />
           {position && (
             <section className="glass p-4">
               <p className="panel-title">{t("내 포지션")}</p>

@@ -16,6 +16,7 @@ import {
   MAX_FUTURES_ORDER_QTY,
   MAX_ORDER_QTY,
   TRADABLE_SYMBOLS,
+  formatFuturePrice,
   futureDef,
   optionDef,
   isOnTick,
@@ -55,6 +56,12 @@ const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
  * 첫 요청은 outbox에 영속되므로 중복을 버려도 취소는 잃지 않는다. 이 시간이 지나면 다시 받아 준다.
  */
 const CANCEL_DEDUPE_SECONDS = 30;
+
+/** 호가 단위 안내: 현물은 원, 선물·옵션은 정수 단위를 실제 가격으로 */
+function tickText(symbol: string, units: number): string {
+  const def = futureDef(symbol) ?? optionDef(symbol);
+  return def ? formatFuturePrice(def, units) : `${units.toLocaleString("ko-KR")}원`;
+}
 
 @Injectable()
 export class OrderService {
@@ -128,7 +135,7 @@ export class OrderService {
     // 격자 밖 지정가는 호가창에 낯선 단계를 만들고 봇 래더와 어긋나므로 접수 단계에서 막는다.
     const tickSize = tickSizeOf(symbol);
     if (type === "LIMIT" && tickSize != null && !isOnTick(price!, tickSize)) {
-      throw new BadRequestException(`${symbol}의 호가 단위는 ${tickSize.toLocaleString("ko-KR")}원입니다`);
+      throw new BadRequestException(`${symbol}의 호가 단위는 ${tickText(symbol, tickSize)}입니다`);
     }
 
     const marketSymbol = await this.prisma.marketSymbol.findUnique({ where: { symbol } });
@@ -275,7 +282,7 @@ export class OrderService {
     if (!Number.isInteger(qty) || qty <= 0) throw new BadRequestException("정정 수량은 양의 정수");
     const tickSize = tickSizeOf(order.symbol);
     if (tickSize != null && !isOnTick(price, tickSize)) {
-      throw new BadRequestException(`${order.symbol}의 호가 단위는 ${tickSize.toLocaleString("ko-KR")}원입니다`);
+      throw new BadRequestException(`${order.symbol}의 호가 단위는 ${tickText(order.symbol, tickSize)}입니다`);
     }
     if (price === order.price && qty === remaining) {
       throw new BadRequestException("바뀐 내용이 없습니다");

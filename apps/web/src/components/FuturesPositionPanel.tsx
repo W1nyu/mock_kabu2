@@ -9,15 +9,6 @@ import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
 import { useNames, useT } from "@/lib/i18n";
 
-interface LiveOrder {
-  id: string;
-  side: "BUY" | "SELL";
-  type: string;
-  price: number | null;
-  qty: number;
-  filledQty: number;
-}
-
 function remaining(deadline: string, now: number): string {
   const ms = Math.max(0, Date.parse(deadline) - now);
   const m = Math.floor(ms / 60_000);
@@ -29,13 +20,27 @@ function remaining(deadline: string, now: number): string {
  * 긴급 반대매매가 걸리는 선물 가격(정수 단위) 추정: 평가손실 = 포지션 위탁증거금 × 90%가 되는 가격.
  * 계좌 전체의 추가증거금(30분 유예)은 현금에 따라 더 일찍 걸릴 수 있다.
  */
-function emergencyPrice(qty: number, avgPrice: number, marginHeld: number, unitValue: number): number {
-  const lossUnits = (marginHeld * FUTURES_EMERGENCY_LOSS_BPS) / 10_000 / (Math.abs(qty) * unitValue);
+function emergencyPrice(
+  qty: number,
+  avgPrice: number,
+  marginHeld: number,
+  unitValue: number,
+): number {
+  const lossUnits =
+    (marginHeld * FUTURES_EMERGENCY_LOSS_BPS) / 10_000 / (Math.abs(qty) * unitValue);
   return qty > 0 ? avgPrice - lossUnits : avgPrice + lossUnits;
 }
 
 /** 평가예탁금 ÷ 유지증거금 게이지. 100% 아래는 추가증거금, 위탁증거금(= 유지 × 1.5) 위는 여유. */
-function MarginGauge({ equity, maintenance, initial }: { equity: number; maintenance: number; initial: number }) {
+function MarginGauge({
+  equity,
+  maintenance,
+  initial,
+}: {
+  equity: number;
+  maintenance: number;
+  initial: number;
+}) {
   const t = useT();
   const ratio = maintenance > 0 ? equity / maintenance : 0;
   const initialRatio = maintenance > 0 ? initial / maintenance : 1.5;
@@ -47,7 +52,11 @@ function MarginGauge({ equity, maintenance, initial }: { equity: number; mainten
       <div className="relative h-2 overflow-hidden rounded-full bg-surface-2">
         <div className={`h-full rounded-full ${color}`} style={{ width: pct(ratio) }} />
         <span className="absolute inset-y-0 w-px bg-down" style={{ left: pct(1) }} aria-hidden />
-        <span className="absolute inset-y-0 w-px bg-ink-faint" style={{ left: pct(initialRatio) }} aria-hidden />
+        <span
+          className="absolute inset-y-0 w-px bg-ink-faint"
+          style={{ left: pct(initialRatio) }}
+          aria-hidden
+        />
       </div>
       <div className="relative h-3 text-[10px] text-ink-faint">
         <span className="absolute -translate-x-1/2" style={{ left: pct(1) }}>
@@ -66,14 +75,19 @@ function tone(n: number): string {
 }
 
 /**
- * 내 선물 포지션·증거금과 이 종목의 미체결 주문. 체결·주문 변화는 계좌 채널 알림으로 바로 다시 읽고,
+ * 내 선물 포지션·증거금(미체결 주문은 DerivOpenOrders). 체결·주문 변화는 계좌 채널 알림으로 바로 다시 읽고,
  * 평가손익은 선물 가격이 움직이므로 10초마다(탭이 보일 때만) 갱신한다.
  */
-export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: string; refreshKey: number }) {
+export default function FuturesPositionPanel({
+  symbol,
+  refreshKey,
+}: {
+  symbol: string;
+  refreshKey: number;
+}) {
   const t = useT();
   const names = useNames();
   const [account, setAccount] = useState<FuturesAccount | null>(null);
-  const [orders, setOrders] = useState<LiveOrder[]>([]);
   const [loggedIn, setLoggedIn] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => setLoggedIn(getUser() != null), []);
@@ -89,9 +103,6 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
     if (!getUser()) return;
     api<FuturesAccount>("/account/futures")
       .then(setAccount)
-      .catch(() => {});
-    api<LiveOrder[]>(`/orders?symbol=${symbol}&status=live&limit=50`)
-      .then(setOrders)
       .catch(() => {});
   }, [symbol]);
 
@@ -109,7 +120,10 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
   if (!loggedIn) return null;
   const position = account?.positions.find((p) => p.symbol === symbol) ?? null;
   const def = futureDef(symbol)!;
-  const ratio = account && account.maintenanceMargin > 0 ? (account.equity / account.maintenanceMargin) * 100 : null;
+  const ratio =
+    account && account.maintenanceMargin > 0
+      ? (account.equity / account.maintenanceMargin) * 100
+      : null;
 
   return (
     <section className="glass overflow-hidden">
@@ -128,28 +142,44 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
           <div role="alert" className="rounded-xl border border-warn/40 bg-warn/10 p-3">
             <p className="flex items-center justify-between gap-2 font-semibold text-warn">
               <span>{t("추가증거금 발생")}</span>
-              <span className="num">{t("{time} 남음", { time: remaining(account.marginCall.deadline, now) })}</span>
+              <span className="num">
+                {t("{time} 남음", { time: remaining(account.marginCall.deadline, now) })}
+              </span>
             </p>
             <p className="num mt-1 text-ink">
-              {account.marginCall.shortfall > 0 ? t("{amount} 더 필요", { amount: krw(account.marginCall.shortfall) }) : t("곧 해소됩니다")}
-              <span className="text-ink-faint"> {t("(발생 시 {amount})", { amount: krw(account.marginCall.required) })}</span>
+              {account.marginCall.shortfall > 0
+                ? t("{amount} 더 필요", { amount: krw(account.marginCall.shortfall) })
+                : t("곧 해소됩니다")}
+              <span className="text-ink-faint">
+                {" "}
+                {t("(발생 시 {amount})", { amount: krw(account.marginCall.required) })}
+              </span>
             </p>
             <p className="mt-1 text-[11px] leading-5 text-ink-muted">
-              {t("기한까지 입금하거나 포지션을 줄여 위탁증거금 수준을 회복하지 않으면 모자란 비율만큼 시장가로 반대매매됩니다. 평가손실이 증거금의 90%에 닿으면 기한과 상관없이 즉시 전량 반대매매됩니다.")}
+              {t(
+                "기한까지 입금하거나 포지션을 줄여 위탁증거금 수준을 회복하지 않으면 모자란 비율만큼 시장가로 반대매매됩니다. 평가손실이 증거금의 90%에 닿으면 기한과 상관없이 즉시 전량 반대매매됩니다.",
+              )}
             </p>
           </div>
         )}
         {position ? (
           <dl className="num grid grid-cols-2 gap-x-4 gap-y-1.5">
             <dt className="text-ink-muted">{t("포지션")}</dt>
-            <dd className={`text-right font-semibold ${position.qty > 0 ? "text-up" : "text-down"}`}>
+            <dd
+              className={`text-right font-semibold ${position.qty > 0 ? "text-up" : "text-down"}`}
+            >
               {position.qty > 0 ? t("롱") : t("숏")} {t("{n}계약", { n: Math.abs(position.qty) })}
             </dd>
             <dt className="text-ink-muted">{t("레버리지")}</dt>
             <dd className="text-right">{leverageLabel(symbol, position.leverage)}</dd>
             <dt className="text-ink-muted">{t("평균가")}</dt>
             <dd className="text-right">{fmtFuture(symbol, Math.round(position.avgPrice))}</dd>
-            <dt className="text-ink-muted" title={t("기초자산·최근 체결 중앙값·최근가의 중앙값 — 튀는 체결 한 건으로 반대매매되지 않게")}>
+            <dt
+              className="text-ink-muted"
+              title={t(
+                "기초자산·최근 체결 중앙값·최근가의 중앙값 — 튀는 체결 한 건으로 반대매매되지 않게",
+              )}
+            >
               {t("평가가격")}
             </dt>
             <dd className="text-right">{fmtFuture(symbol, position.markPrice)}</dd>
@@ -162,11 +192,23 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
             <dd className="text-right">{krw(position.marginHeld)}</dd>
             <dt className="text-ink-muted">{t("긴급 반대매매가")}</dt>
             <dd className="text-right text-ink-muted">
-              {fmtFuture(symbol, Math.round(emergencyPrice(position.qty, position.avgPrice, position.marginHeld, def.unitValue)))}
+              {fmtFuture(
+                symbol,
+                Math.round(
+                  emergencyPrice(
+                    position.qty,
+                    position.avgPrice,
+                    position.marginHeld,
+                    def.unitValue,
+                  ),
+                ),
+              )}
             </dd>
           </dl>
         ) : (
-          <p className="text-ink-faint">{t("{name} 포지션이 없습니다.", { name: names.future(def.symbol, def.name) })}</p>
+          <p className="text-ink-faint">
+            {t("{name} 포지션이 없습니다.", { name: names.future(def.symbol, def.name) })}
+          </p>
         )}
         {position && (
           <FuturesPositionActions
@@ -182,11 +224,17 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
         {account && (account.positions.length > 0 || account.debt > 0) && (
           <div className="space-y-2 border-t border-hairline-soft pt-3">
             {account.maintenanceMargin > 0 && (
-              <MarginGauge equity={account.equity} maintenance={account.maintenanceMargin} initial={account.initialMargin} />
+              <MarginGauge
+                equity={account.equity}
+                maintenance={account.maintenanceMargin}
+                initial={account.initialMargin}
+              />
             )}
             <dl className="num grid grid-cols-2 gap-x-4 gap-y-1.5">
               <dt className="text-ink-muted">{t("선물 평가손익 합계")}</dt>
-              <dd className={`text-right ${tone(account.unrealized)}`}>{krw(account.unrealized)}</dd>
+              <dd className={`text-right ${tone(account.unrealized)}`}>
+                {krw(account.unrealized)}
+              </dd>
               <dt className="text-ink-muted">{t("묶인 증거금")}</dt>
               <dd className="text-right">{krw(account.marginHeld)}</dd>
               <dt className="text-ink-muted">{t("평가예탁금")}</dt>
@@ -208,12 +256,16 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
             <p className="mb-2 text-xs text-ink-muted">{t("반대매매 내역")}</p>
             <ul className="space-y-1">
               {account.liquidations.slice(0, 5).map((row) => (
-                <li key={row.orderId} className="num flex items-center justify-between gap-2 text-[12px]">
+                <li
+                  key={row.orderId}
+                  className="num flex items-center justify-between gap-2 text-[12px]"
+                >
                   <span>
                     <span className="mr-1.5 rounded bg-down/12 px-1.5 py-0.5 text-[10px] font-semibold text-down">
                       {row.reason === "EMERGENCY" ? t("긴급") : t("기한 초과")}
                     </span>
-                    {row.symbol} {row.side === "BUY" ? t("매수") : t("매도")} {t("{n}계약", { n: row.qty })}
+                    {row.symbol} {row.side === "BUY" ? t("매수") : t("매도")}{" "}
+                    {t("{n}계약", { n: row.qty })}
                   </span>
                   <span className="text-ink-faint">
                     {new Date(row.createdAt).toLocaleString("ko-KR", {
@@ -224,33 +276,6 @@ export default function FuturesPositionPanel({ symbol, refreshKey }: { symbol: s
                       timeZone: "Asia/Seoul",
                     })}
                   </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {orders.length > 0 && (
-          <div className="border-t border-hairline-soft pt-3">
-            <p className="mb-2 text-xs text-ink-muted">{t("미체결 주문")}</p>
-            <ul className="space-y-1.5">
-              {orders.map((order) => (
-                <li key={order.id} className="num flex items-center justify-between gap-2">
-                  <span className={order.side === "BUY" ? "text-up" : "text-down"}>
-                    {order.side === "BUY" ? t("매수") : t("매도")} {t("{n}계약", { n: order.qty - order.filledQty })} @{" "}
-                    {order.price == null ? t("시장가") : fmtFuture(symbol, order.price)}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() =>
-                      api(`/orders/${order.id}`, { method: "DELETE" })
-                        .then(load)
-                        .catch(() => {})
-                    }
-                  >
-                    {t("취소|동작")}
-                  </button>
                 </li>
               ))}
             </ul>

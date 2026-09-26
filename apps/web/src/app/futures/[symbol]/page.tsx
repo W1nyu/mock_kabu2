@@ -7,6 +7,7 @@ import AssetNews from "@/components/AssetNews";
 import FuturesBook from "@/components/FuturesBook";
 import FuturesOrderPanel from "@/components/FuturesOrderPanel";
 import FuturesOrderSheet from "@/components/FuturesOrderSheet";
+import DerivOpenOrders from "@/components/DerivOpenOrders";
 import FuturesPositionPanel from "@/components/FuturesPositionPanel";
 import { MobileTradeBar } from "@/components/MobileOrderSheet";
 import UnitCandleChart from "@/components/UnitCandleChart";
@@ -63,7 +64,10 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
   if (!def) {
     return (
       <div className="mx-auto max-w-3xl py-16 text-center text-sm text-ink-muted">
-        {t("없는 선물입니다.")} <Link href="/market" className="text-sky">{t("증권으로 돌아가기")}</Link>
+        {t("없는 선물입니다.")}{" "}
+        <Link href="/market" className="text-sky">
+          {t("증권으로 돌아가기")}
+        </Link>
       </div>
     );
   }
@@ -71,7 +75,14 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
   const price = last ?? row?.lastPrice ?? null;
   const change = changePct(price, row?.base);
   const basis = price != null && row?.underlying != null ? price - row.underlying : null;
-  const tone = change == null ? "text-ink-faint" : change > 0 ? "text-up" : change < 0 ? "text-down" : "text-ink-muted";
+  const tone =
+    change == null
+      ? "text-ink-faint"
+      : change > 0
+        ? "text-up"
+        : change < 0
+          ? "text-down"
+          : "text-ink-muted";
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 max-lg:pb-20">
@@ -83,7 +94,10 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
         >
           <span aria-hidden>←</span> {t("선물 목록")}
         </Link>
-        <nav aria-label={t("다른 선물")} className="chip-scroller flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
+        <nav
+          aria-label={t("다른 선물")}
+          className="chip-scroller flex min-w-0 flex-1 gap-1.5 overflow-x-auto"
+        >
           {FUTURES.map((future) => (
             <Link
               key={future.symbol}
@@ -104,29 +118,48 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
         <p className="text-[13px] text-ink-muted">
           {def.symbol} · {t("1일물 선물")}{" "}
           <span className="text-ink-faint">
-            · {row?.settlesAt ? t("정산까지 {time} (04:10 현금 정산)", { time: timeLeft(row.settlesAt) }) : t("매일 04:10 현금 정산")}
+            ·{" "}
+            {row?.settlesAt
+              ? t("정산까지 {time} (04:10 현금 정산)", { time: timeLeft(row.settlesAt) })
+              : t("매일 04:10 현금 정산")}
           </span>
         </p>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">{names.future(def.symbol, def.name)}</h1>
+        <h1 className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">
+          {names.future(def.symbol, def.name)}
+        </h1>
         <div className="mt-2 flex flex-wrap items-end gap-x-5 gap-y-1">
-          <p className="num text-2xl font-semibold tracking-tight sm:text-3xl">{fmtFuture(def.symbol, price)}</p>
+          <p className="num text-2xl font-semibold tracking-tight sm:text-3xl">
+            {fmtFuture(def.symbol, price)}
+          </p>
           <p className={`num pb-1 text-sm font-medium ${tone}`}>
             {change == null ? "—" : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}
-            <span className="ml-1 font-normal text-ink-faint">{row?.settlementPrice != null ? t("전일 정산가 대비") : t("오늘")}</span>
+            <span className="ml-1 font-normal text-ink-faint">
+              {row?.settlementPrice != null ? t("전일 정산가 대비") : t("오늘")}
+            </span>
           </p>
         </div>
         <dl className="num mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-ink-muted">
           <div>
-            {t("기초자산")} <span className="text-ink">{fmtFuture(def.symbol, row?.underlying ?? null)}</span>
+            {t("기초자산")}{" "}
+            <span className="text-ink">{fmtFuture(def.symbol, row?.underlying ?? null)}</span>
           </div>
           <div>
-            {t("베이시스")} <span className="text-ink">{basis == null ? "—" : `${basis > 0 ? "+" : ""}${(basis / def.priceScale).toFixed(def.decimals)}`}</span>
+            {t("베이시스")}{" "}
+            <span className="text-ink">
+              {basis == null
+                ? "—"
+                : `${basis > 0 ? "+" : ""}${(basis / def.priceScale).toFixed(def.decimals)}`}
+            </span>
           </div>
           <div title={t("등락률의 기준 — 직전 04:10 일일 정산 가격")}>
-            {t("기준가")} <span className="text-ink">{fmtFuture(def.symbol, row?.base ?? null)}</span>
+            {t("기준가")}{" "}
+            <span className="text-ink">{fmtFuture(def.symbol, row?.base ?? null)}</span>
           </div>
           <div title={t("이번 계약(직전 정산 이후) 거래량")}>
-            {t("거래량")} <span className="text-ink">{t("{n}계약", { n: (row?.volume ?? 0).toLocaleString("ko-KR") })}</span>
+            {t("거래량")}{" "}
+            <span className="text-ink">
+              {t("{n}계약", { n: (row?.volume ?? 0).toLocaleString("ko-KR") })}
+            </span>
           </div>
         </dl>
       </div>
@@ -136,7 +169,9 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
         <div className="lg:col-start-1 lg:row-start-1">
           <section className="glass p-3 sm:p-4">
             <UnitCandleChart
-              candlesUrl={(interval, limit) => `/market/candles/${def.symbol}?interval=${interval}&limit=${limit}`}
+              candlesUrl={(interval, limit) =>
+                `/market/candles/${def.symbol}?interval=${interval}&limit=${limit}`
+              }
               channel={`trades:${def.symbol}`}
               tickFrom={(data) => {
                 const d = data as { price?: unknown; ts?: unknown };
@@ -159,10 +194,14 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
             />
           )}
           <FuturesPositionPanel symbol={def.symbol} refreshKey={refreshKey} />
+          <DerivOpenOrders symbol={def.symbol} refreshKey={refreshKey} priceHint={priceHint} />
         </div>
         {!compact && (
           <div className="lg:col-start-1 lg:row-start-2 lg:self-start">
-            <FuturesBook symbol={def.symbol} onPick={(p) => setPriceHint({ price: p, seq: Date.now() })} />
+            <FuturesBook
+              symbol={def.symbol}
+              onPick={(p) => setPriceHint({ price: p, seq: Date.now() })}
+            />
           </div>
         )}
       </div>

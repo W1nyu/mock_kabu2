@@ -55,7 +55,12 @@ const STATUS_TONE: Record<string, string> = {
 type Tab = "orders" | "fills" | "conditional";
 
 const TABS: { id: Tab; label: string; title: string; hint: string }[] = [
-  { id: "orders", label: "주문", title: "주문 내역", hint: "최근 100건의 주문을 실시간으로 반영합니다." },
+  {
+    id: "orders",
+    label: "주문",
+    title: "주문 내역",
+    hint: "최근 100건의 주문을 실시간으로 반영합니다.",
+  },
   {
     id: "fills",
     label: "체결",
@@ -93,7 +98,17 @@ function priceOf(symbol: string, price: number): string {
 /** 체결 내역을 CSV로 내려받는다. */
 function downloadFillsCsv(fills: FillRow[]) {
   const tr = (ko: string) => translate(getLocale(), ko);
-  const header = ["시각(KST)", "종목", "구분", "체결가", "수량", "체결금액", "실현손익", "차감원가", "테이커"].map(tr);
+  const header = [
+    "시각(KST)",
+    "종목",
+    "구분",
+    "체결가",
+    "수량",
+    "체결금액",
+    "실현손익",
+    "차감원가",
+    "테이커",
+  ].map(tr);
   const rows = fills.map((f) => [
     new Date(f.ts).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false }),
     f.symbol,
@@ -123,10 +138,25 @@ export default function OrdersPage() {
   const [conditional, setConditional] = useState<ConditionalOrderDto[]>([]);
 
   const load = useCallback(() => {
-    api<OrderRow[]>("/orders?limit=100").then(setOrders).catch(() => {});
-    api<FillRow[]>("/account/trades?limit=100").then(setFills).catch(() => {});
-    api<ConditionalOrderDto[]>("/orders/conditional?limit=100").then(setConditional).catch(() => {});
+    api<OrderRow[]>("/orders?limit=100")
+      .then(setOrders)
+      .catch(() => {});
+    api<FillRow[]>("/account/trades?limit=100")
+      .then(setFills)
+      .catch(() => {});
+    api<ConditionalOrderDto[]>("/orders/conditional?limit=100")
+      .then(setConditional)
+      .catch(() => {});
   }, []);
+
+  async function cancelOrder(id: string) {
+    try {
+      await api(`/orders/${id}`, { method: "DELETE" });
+    } catch {
+      // 그 사이 체결됐을 수 있다 — 목록을 다시 읽어 실제 상태를 보여준다.
+    }
+    load();
+  }
 
   async function cancelConditional(id: string) {
     try {
@@ -184,7 +214,11 @@ export default function OrdersPage() {
           <p className="mt-1 text-sm text-ink-muted">{t(current.hint)}</p>
         </div>
         {tab === "fills" && fills.length > 0 && (
-          <button type="button" onClick={() => downloadFillsCsv(fills)} className="btn btn-ghost btn-sm">
+          <button
+            type="button"
+            onClick={() => downloadFillsCsv(fills)}
+            className="btn btn-ghost btn-sm"
+          >
             {t("CSV 내려받기")}
           </button>
         )}
@@ -211,7 +245,7 @@ export default function OrdersPage() {
       <div className="glass overflow-hidden">
         <div className="overflow-x-auto">
           {tab === "orders" ? (
-            <OrdersTable orders={orders} />
+            <OrdersTable orders={orders} onCancel={cancelOrder} />
           ) : tab === "fills" ? (
             <FillsTable fills={fills} />
           ) : (
@@ -223,13 +257,15 @@ export default function OrdersPage() {
   );
 }
 
-function OrdersTable({ orders }: { orders: OrderRow[] }) {
+function OrdersTable({ orders, onCancel }: { orders: OrderRow[]; onCancel: (id: string) => void }) {
   const t = useT();
   return (
     <table className="tbl tbl-hover">
       <thead>
         <tr>
-          <th>{t("시각")} ({MARKET_TIME_ZONE_LABEL})</th>
+          <th>
+            {t("시각")} ({MARKET_TIME_ZONE_LABEL})
+          </th>
           <th>{t("종목")}</th>
           <th>{t("구분")}</th>
           <th className="text-right">{t("가격")}</th>
@@ -261,6 +297,15 @@ function OrdersTable({ orders }: { orders: OrderRow[] }) {
               <span className={`chip ${STATUS_TONE[o.status] ?? ""}`}>
                 {STATUS_LABEL[o.status] ? t(STATUS_LABEL[o.status]) : o.status}
               </span>
+              {(o.status === "OPEN" || o.status === "PARTIAL") && (
+                <button
+                  type="button"
+                  onClick={() => onCancel(o.id)}
+                  className="btn btn-ghost btn-sm ml-1.5"
+                >
+                  {t("취소|동작")}
+                </button>
+              )}
             </td>
           </tr>
         ))}
@@ -284,20 +329,26 @@ function FillsTable({ fills }: { fills: FillRow[] }) {
     <table className="tbl tbl-hover">
       <thead>
         <tr>
-          <th>{t("시각")} ({MARKET_TIME_ZONE_LABEL})</th>
+          <th>
+            {t("시각")} ({MARKET_TIME_ZONE_LABEL})
+          </th>
           <th>{t("종목")}</th>
           <th>{t("구분")}</th>
           <th className="text-right">{t("체결가")}</th>
           <th className="text-right">{t("수량")}</th>
           <th className="text-right">{t("체결금액")}</th>
-          <th className="text-right" title={t("주식은 매도 체결의 평단가 대비 손익, 선물·옵션은 포지션을 줄인 체결의 손익")}>
+          <th
+            className="text-right"
+            title={t("주식은 매도 체결의 평단가 대비 손익, 선물·옵션은 포지션을 줄인 체결의 손익")}
+          >
             {t("실현손익")}
           </th>
         </tr>
       </thead>
       <tbody>
         {fills.map((f) => {
-          const sideTone = f.side === "BUY" ? "text-up" : f.side === "SELL" ? "text-down" : "text-ink-muted";
+          const sideTone =
+            f.side === "BUY" ? "text-up" : f.side === "SELL" ? "text-down" : "text-ink-muted";
           return (
             <tr key={f.tradeId}>
               <td className="num whitespace-nowrap text-ink-muted">{formatKstTime(f.ts)}</td>
@@ -306,7 +357,11 @@ function FillsTable({ fills }: { fills: FillRow[] }) {
                 <span className={`font-medium ${sideTone}`}>{t(SIDE_LABEL[f.side])}</span>
                 <span
                   className="ml-1.5 text-xs text-ink-faint"
-                  title={f.taker ? t("내 주문이 기존 호가를 체결시켰습니다") : t("내 호가에 상대 주문이 체결됐습니다")}
+                  title={
+                    f.taker
+                      ? t("내 주문이 기존 호가를 체결시켰습니다")
+                      : t("내 호가에 상대 주문이 체결됐습니다")
+                  }
                 >
                   {f.taker ? t("테이커") : t("메이커")}
                 </span>
@@ -348,7 +403,9 @@ function ConditionalTable({
     <table className="tbl tbl-hover">
       <thead>
         <tr>
-          <th>{t("등록")} ({MARKET_TIME_ZONE_LABEL})</th>
+          <th>
+            {t("등록")} ({MARKET_TIME_ZONE_LABEL})
+          </th>
           <th>{t("종목")}</th>
           <th>{t("조건")}</th>
           <th className="text-right">{t("트리거")}</th>
@@ -370,9 +427,9 @@ function ConditionalTable({
             <td>
               <span className={`font-medium ${r.side === "BUY" ? "text-up" : "text-down"}`}>
                 {r.trailBps != null
-                  ? `${r.side === "SELL" ? t("트레일링 손절") : t("트레일링 매수")} ${(r.trailBps / 100).toFixed(
-                      r.trailBps % 100 === 0 ? 0 : 1,
-                    )}%`
+                  ? `${r.side === "SELL" ? t("트레일링 손절") : t("트레일링 매수")} ${(
+                      r.trailBps / 100
+                    ).toFixed(r.trailBps % 100 === 0 ? 0 : 1)}%`
                   : t(describeCondition(r.direction, r.side))}
               </span>
               {r.ocoGroupId && (
@@ -383,7 +440,9 @@ function ConditionalTable({
             </td>
             <td className="num text-right">
               {priceOf(r.symbol, r.triggerPrice)}
-              <span className="text-ink-faint">{r.direction === "AT_OR_ABOVE" ? ` ${t("이상")}` : ` ${t("이하")}`}</span>
+              <span className="text-ink-faint">
+                {r.direction === "AT_OR_ABOVE" ? ` ${t("이상")}` : ` ${t("이하")}`}
+              </span>
             </td>
             <td className="num text-right">{fmt.format(r.qty)}</td>
             <td className="num text-right text-ink-muted">
@@ -394,7 +453,9 @@ function ConditionalTable({
                 {t(CONDITIONAL_STATUS_LABEL[r.status])}
               </span>
               {r.failReason && r.status !== "WAITING" && (
-                <span className="ml-1.5 text-[11px] text-ink-faint">{serverText(r.failReason)}</span>
+                <span className="ml-1.5 text-[11px] text-ink-faint">
+                  {serverText(r.failReason)}
+                </span>
               )}
             </td>
             <td className="text-right">
