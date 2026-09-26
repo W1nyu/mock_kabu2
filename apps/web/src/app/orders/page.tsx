@@ -10,7 +10,7 @@ import { fmtFuture } from "@/lib/futures";
 import { formatKstTime, MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
-import { getLocale, translate, useT } from "@/lib/i18n";
+import { getLocale, serverText, translate, useT } from "@/lib/i18n";
 
 interface OrderRow {
   id: string;
@@ -362,7 +362,7 @@ function ConditionalTable({
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.id} title={r.failReason ?? undefined}>
+          <tr key={r.id} title={r.failReason ? serverText(r.failReason) : undefined}>
             <td className="num whitespace-nowrap text-ink-muted">
               {formatKstTime(new Date(r.createdAt).getTime())}
             </td>
@@ -394,7 +394,7 @@ function ConditionalTable({
                 {t(CONDITIONAL_STATUS_LABEL[r.status])}
               </span>
               {r.failReason && r.status !== "WAITING" && (
-                <span className="ml-1.5 text-[11px] text-ink-faint">{r.failReason}</span>
+                <span className="ml-1.5 text-[11px] text-ink-faint">{serverText(r.failReason)}</span>
               )}
             </td>
             <td className="text-right">

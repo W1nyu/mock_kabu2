@@ -11,7 +11,7 @@ import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { formatKstTime } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
-import { useT, type TFunction } from "@/lib/i18n";
+import { serverText, useT, type TFunction } from "@/lib/i18n";
 
 const STATUS_LABEL: Record<ConditionalOrderDto["status"], string> = {
   WAITING: "대기",
@@ -89,7 +89,7 @@ export default function MyConditionalOrders({
             setNotice(
               data.status === "TRIGGERED"
                 ? tr("{label} 발동 — {n}주 시장가 접수", { label: tr(String(data.label)), n: fmt.format(data.qty) })
-                : tr("{label} 발동했지만 접수 실패: {reason}", { label: tr(String(data.label)), reason: data.failReason ?? tr("사유 없음") }),
+                : tr("{label} 발동했지만 접수 실패: {reason}", { label: tr(String(data.label)), reason: data.failReason ? serverText(String(data.failReason)) : tr("사유 없음") }),
             );
           }
           refreshSoon();
@@ -192,7 +192,7 @@ export default function MyConditionalOrders({
           return (
             <li
               key={r.id}
-              title={r.failReason ?? undefined}
+              title={r.failReason ? serverText(r.failReason) : undefined}
               className="flex items-center gap-2 border-t border-hairline-soft bg-surface-3/15 px-4 py-1.5 text-ink-faint"
             >
               <span className={`w-8 shrink-0 ${tone}`}>{tr(STATUS_LABEL[r.status])}</span>
