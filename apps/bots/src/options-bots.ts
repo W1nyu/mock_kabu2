@@ -1,4 +1,4 @@
-import { OPTIONS, type OptionDef, type OptionFamilyDef, type OrderSide } from "@mock-kabu/shared";
+import { ALL_OPTIONS, OPTIONS, type OptionDef, type OptionFamilyDef, type OrderSide } from "@mock-kabu/shared";
 import type { ApiClient } from "./client";
 import { diffFuturesLadder, type FutureQuote } from "./futures-bots";
 
@@ -39,7 +39,13 @@ function roundToTick(value: number, tick: number): number {
  * 바깥으로 1호가씩 3단(2·3·4계약). 매수 호가는 1호가 아래로 내려가지 않는다.
  * 재고가 한도를 넘으면 더 쌓이는 쪽 호가는 내지 않는다(쓰기 증거금 폭주 방지).
  */
-export function planOptionLadder(def: Pick<OptionDef, "tickUnits">, theo: number, inventory: number): FutureQuote[] {
+export function planOptionLadder(
+  def: Pick<OptionDef, "tickUnits">,
+  theo: number,
+  inventory: number,
+  /** 거래를 끝낸 옵션: 보유자가 팔 수 있게 매수 호가만 둔다(새로 쓰지 않는다) */
+  bidOnly = false,
+): FutureQuote[] {
   const tick = def.tickUnits;
   const skewTicks = Math.max(-MAX_SKEW_TICKS, Math.min(MAX_SKEW_TICKS, Math.trunc(inventory / INVENTORY_PER_SKEW_TICK)));
   const center = roundToTick(theo, tick) - skewTicks * tick;
@@ -49,7 +55,7 @@ export function planOptionLadder(def: Pick<OptionDef, "tickUnits">, theo: number
     const qty = level + 1;
     const bid = center - half - (level - 1) * tick;
     if (bid >= tick && inventory < OPTION_MM_MAX_INVENTORY) quotes.push({ side: "BUY", price: bid, qty });
-    if (inventory > -OPTION_MM_MAX_INVENTORY) quotes.push({ side: "SELL", price: Math.max(center + half, tick * 2) + (level - 1) * tick, qty });
+    if (!bidOnly && inventory > -OPTION_MM_MAX_INVENTORY) quotes.push({ side: "SELL", price: Math.max(center + half, tick * 2) + (level - 1) * tick, qty });
   }
   return quotes;
 }
@@ -84,9 +90,13 @@ export class OptionsMarketView {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** 옵션 한 기초자산(콜·풋 × 행사가 5개) 전담 마켓메이커(bot41 주가지수, bot42 원/달러). */
+/**
+ * 옵션 한 기초자산(콜·풋 × 행사가 5개) 전담 마켓메이커(bot43 원자재지수, bot42 원/달러).
+ * 거래를 끝낸 계열(bot41 주가지수)은 만기까지 매수 호가만 둔다.
+ */
 export async function runOptionsMarketMaker(client: ApiClient, family: OptionFamilyDef, market: OptionsMarketView): Promise<void> {
-  const defs = OPTIONS.filter((def) => def.family.code === family.code);
+  const defs = ALL_OPTIONS.filter((def) => def.family.code === family.code);
+  const bidOnly = family.retired === true;
   let inventory = new Map<string, number>();
   let inventoryAt = 0;
   // 이론가가 1호가 넘게 움직일 때만 호가를 옮긴다. 그 사이에는 빈 칸만 채운다.
@@ -105,7 +115,7 @@ export async function runOptionsMarketMaker(client: ApiClient, family: OptionFam
         const previous = lastTheo.get(def.symbol);
         const theo = previous != null && Math.abs(row.theo - previous) <= def.tickUnits ? previous : row.theo;
         const state = await client.quoteState(def.symbol);
-        const diff = diffFuturesLadder(planOptionLadder(def, theo, inventory.get(def.symbol) ?? 0), state.orders);
+        const diff = diffFuturesLadder(planOptionLadder(def, theo, inventory.get(def.symbol) ?? 0, bidOnly), state.orders);
         const now = Date.now();
         const liveIds = new Set(state.orders.map((order) => order.id));
         for (const [id] of cancelSentAt) if (!liveIds.has(id) && now - (cancelSentAt.get(id) ?? 0) > CANCEL_RESEND_MS) cancelSentAt.delete(id);

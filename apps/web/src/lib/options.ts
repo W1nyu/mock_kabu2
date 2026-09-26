@@ -3,7 +3,9 @@ import { optionDef } from "@mock-kabu/shared";
 /** `/market/options` 한 줄 (가격은 모두 정수 단위 = 실제 × priceScale) */
 export interface OptionRow {
   symbol: string;
-  family: "K" | "U";
+  family: string;
+  /** 거래 종료(보유분 매도·만기 정산만) */
+  retired?: boolean;
   familyName: string;
   type: "CALL" | "PUT";
   slot: number;

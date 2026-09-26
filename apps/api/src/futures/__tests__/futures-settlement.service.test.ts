@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FuturesSettlementService } from "../futures-settlement.service";
 
 /** 메모리 위의 계좌·포지션·원장 — Prisma·계좌 락 모양만 흉내 낸다. */
-function harness(options: { usdClose?: number | null; withOptions?: boolean } = {}) {
+function harness(options: { usdClose?: number | null; withOptions?: boolean; withKcom?: boolean } = {}) {
   const accounts: Record<string, { balance: bigint; holdAmount: bigint }> = {
     long: { balance: 5_000_000n, holdAmount: 0n },
     short: { balance: 400_000n, holdAmount: 0n },
@@ -14,6 +14,11 @@ function harness(options: { usdClose?: number | null; withOptions?: boolean } = 
     ["long:USDF", { accountId: "long", symbol: "USDF", qty: 2, entryValue: 28_000n, marginHeld: 1n }],
     ["short:USDF", { accountId: "short", symbol: "USDF", qty: -2, entryValue: 28_000n, marginHeld: 1n }],
   ]);
+  if (options.withKcom) {
+    // 원자재지수 콜 3번(행사가 100.00pt) — 0.40pt에 2계약 매수 / 쓰기
+    positions.set("optBuyer:KCOMC3", { accountId: "optBuyer", symbol: "KCOMC3", qty: 2, entryValue: 80n, marginHeld: 0n });
+    positions.set("optWriter:KCOMC3", { accountId: "optWriter", symbol: "KCOMC3", qty: -2, entryValue: 80n, marginHeld: 800_000n });
+  }
   if (options.withOptions) {
     // 원/달러 콜 3번(행사가 1,400.0원) — 프리미엄 3.0원에 3계약. 매수자 / 쓰기(봇)
     positions.set("optBuyer:UC3", { accountId: "optBuyer", symbol: "UC3", qty: 3, entryValue: 90n, marginHeld: 0n });
@@ -71,11 +76,26 @@ function harness(options: { usdClose?: number | null; withOptions?: boolean } = 
       },
     },
     optionSeries: {
-      findMany: async () => (options.withOptions ? [{ symbol: "UC3", strike: 14_000 }, { symbol: "UP3", strike: 14_000 }] : []),
+      findMany: async () => [
+        ...(options.withOptions ? [{ symbol: "UC3", strike: 14_000 }, { symbol: "UP3", strike: 14_000 }] : []),
+        ...(options.withKcom ? [{ symbol: "KCOMC3", strike: 10_000 }] : []),
+      ],
     },
     indexEpoch: { findFirst: async () => null },
     marketSymbol: { findMany: async () => [] },
-    $queryRaw: async () => (options.usdClose === null ? [] : [{ code: "USDKRW", close: options.usdClose ?? 14_100 }]),
+    $queryRaw: async () => [
+      ...(options.usdClose === null ? [] : [{ code: "USDKRW", close: options.usdClose ?? 14_100 }]),
+      // 원자재 5종 최신 1분봉 종가 — 평균 101.00pt
+      ...(options.withKcom
+        ? [
+            { code: "OIL", close: 10_300 },
+            { code: "GAS", close: 9_800 },
+            { code: "COPPER", close: 10_100 },
+            { code: "GOLD", close: 10_250 },
+            { code: "CORN", close: 10_050 },
+          ]
+        : []),
+    ],
   };
   const mutator = {
     withAccountLock: async ([id]: string[], fn: (ctx: any) => Promise<unknown>) =>
@@ -175,5 +195,18 @@ describe("futures daily settlement", () => {
     const ledgerBefore = h.ledger.length;
     await h.service.settle("2026-09-26");
     expect(h.ledger.length).toBe(ledgerBefore);
+  });
+
+  it("settles KCOM options on the average of the five commodity settlement prices (FX excluded)", async () => {
+    const h = harness({ withKcom: true, usdClose: 14_500 });
+    const result = await h.service.settle("2026-09-26");
+
+    // KCOM 결제가 101.00pt(원/달러 1,450원은 넣지 않는다), 행사가 100.00pt 콜 내재가치 1.00pt = 100단위
+    expect(result.symbols.find((s) => s.symbol === "KCOMC3")).toMatchObject({ price: 100, positions: 2 });
+    expect(h.ledger.filter((l) => l.reason === "OPTION_EXPIRY").map((l) => [l.accountId, l.delta])).toEqual([
+      ["optBuyer", 200_000n],
+      ["optWriter", -100_000n],
+    ]);
+    expect(h.debts.get("optWriter")).toBe(100_000n);
   });
 });

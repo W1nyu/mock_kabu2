@@ -1,6 +1,6 @@
 "use client";
 
-import { OPTIONS, optionDef } from "@mock-kabu/shared";
+import { ALL_OPTIONS, optionDef } from "@mock-kabu/shared";
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import AssetNews from "@/components/AssetNews";
@@ -75,7 +75,8 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
   const row = rows.find((r) => r.symbol === def.symbol) ?? null;
   const price = last ?? row?.lastPrice ?? null;
   const position = account?.options?.find((p) => p.symbol === def.symbol) ?? null;
-  const siblings = OPTIONS.filter((o) => o.family.code === def.family.code);
+  const siblings = ALL_OPTIONS.filter((o) => o.family.code === def.family.code);
+  const retired = def.family.retired === true;
   const strikeOf = (sym: string) => rows.find((r) => r.symbol === sym)?.strike ?? null;
   const intrinsic =
     row?.strike != null && row.underlying != null
@@ -152,7 +153,13 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
           </section>
         </div>
         <div className="space-y-4 max-lg:order-1 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+          {retired && (
+            <p role="note" className="glass p-3 text-[13px] leading-5 text-warn">
+              거래가 끝난 옵션입니다. 새로 살 수 없고, 보유분은 매도하거나 다음 04:10 만기에 현금 정산됩니다.
+            </p>
+          )}
           <OptionOrderPanel
+            retired={retired}
             symbol={def.symbol}
             lastPrice={price}
             position={position}
@@ -184,7 +191,10 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
         </div>
       </div>
 
-      <AssetNews reference={def.family.code === "K" ? "market" : "USDKRW"} title={def.family.code === "K" ? "시장 뉴스" : "관련 뉴스"} />
+      <AssetNews
+        reference={def.family.code === "K" ? "market" : def.family.code === "KCOM" ? "commodity" : "USDKRW"}
+        title={def.family.code === "K" ? "시장 뉴스" : def.family.code === "KCOM" ? "원자재 뉴스" : "관련 뉴스"}
+      />
     </div>
   );
 }

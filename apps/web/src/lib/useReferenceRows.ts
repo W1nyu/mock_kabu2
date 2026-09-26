@@ -60,3 +60,16 @@ export function useReferenceRows(): LiveReferenceRow[] {
 
 /** 환율(원/달러) 코드 — 증권 탭에서 원자재와 따로 보여 준다. */
 export const FX_CODE = "USDKRW";
+
+/**
+ * 원자재지수 KCOM = 원자재 5종(환율 제외) 값의 단순 평균(모두 기준 100). 옵션의 기초자산과 같은 식.
+ * 한 품목이라도 값이 없으면 null.
+ */
+export function kcomIndex(rows: readonly LiveReferenceRow[]): { value: number; change: number | null } | null {
+  const commodities = rows.filter((row) => row.code !== FX_CODE);
+  if (commodities.length === 0 || commodities.some((row) => row.value == null)) return null;
+  const value = commodities.reduce((sum, row) => sum + row.value! / row.scale, 0) / commodities.length;
+  const baseOk = commodities.every((row) => row.base != null && row.base > 0);
+  const base = baseOk ? commodities.reduce((sum, row) => sum + row.base! / row.scale, 0) / commodities.length : null;
+  return { value, change: base ? ((value - base) / base) * 100 : null };
+}

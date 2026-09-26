@@ -30,3 +30,9 @@ test("option flow picks at-the-money strikes most often", () => {
   assert.equal(pickOptionSlot(() => 0.1), 3);
   assert.equal(pickOptionSlot(() => 0.95), 5);
 });
+
+test("retired option families only bid, so holders can still sell before expiry", () => {
+  const quotes = planOptionLadder({ tickUnits: 5 }, 450, -10, true);
+  assert.equal(quotes.filter((q) => q.side === "SELL").length, 0);
+  assert.equal(quotes.filter((q) => q.side === "BUY").length, 3);
+});

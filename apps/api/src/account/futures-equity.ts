@@ -1,5 +1,5 @@
 import { Prisma } from "@mock-kabu/db";
-import { FUTURES, OPTIONS } from "@mock-kabu/shared";
+import { ALL_OPTIONS, FUTURES } from "@mock-kabu/shared";
 
 /**
  * 계좌별 선물 평가 몫(원) = 열린 선물 포지션의 평가손익 + 옵션 평가액 − 미수금.
@@ -10,7 +10,7 @@ import { FUTURES, OPTIONS } from "@mock-kabu/shared";
 export function futuresValueSql(): Prisma.Sql {
   const unitValues = Prisma.join([
     ...FUTURES.map((f) => Prisma.sql`(${f.symbol}, ${f.unitValue}::bigint, false)`),
-    ...OPTIONS.map((o) => Prisma.sql`(${o.symbol}, ${o.unitValue}::bigint, true)`),
+    ...ALL_OPTIONS.map((o) => Prisma.sql`(${o.symbol}, ${o.unitValue}::bigint, true)`),
   ]);
   return Prisma.sql`
     SELECT acc.account_id, COALESCE(pos.unrealized, 0) - COALESCE(debt.amount, 0) AS futures_value

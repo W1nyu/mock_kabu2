@@ -95,6 +95,10 @@ export async function optionOrderHoldPerUnit(
   qty: number,
   priceUnits: number,
 ): Promise<bigint> {
+  if (def.family.retired && side === "BUY" && !(await isBotAccount(db, accountId))) {
+    // 거래를 끝낸 옵션은 새로 사지 못한다. 봇(마켓메이커)의 매수 호가는 보유자가 팔 수 있게 남긴다.
+    throw new UnprocessableEntityException("거래가 끝난 옵션입니다. 보유분 매도만 할 수 있습니다");
+  }
   if (side === "BUY") return BigInt(priceUnits) * BigInt(def.unitValue);
   const position = (await db.futuresPosition.findUnique({
     where: { accountId_symbol: { accountId, symbol: def.symbol } },
@@ -108,12 +112,16 @@ export async function optionOrderHoldPerUnit(
     const reserved = pending.reduce((sum, order) => sum + (order.qty - order.filledQty), 0);
     if (qty <= held - reserved) return 0n;
   }
-  const account = (await db.account.findUnique({ where: { id: accountId }, select: { userId: true } })) as { userId: string } | null;
-  const user = account
-    ? ((await db.user.findUnique({ where: { id: account.userId }, select: { isBot: true } })) as { isBot: boolean } | null)
-    : null;
-  if (!user?.isBot) throw new UnprocessableEntityException("옵션은 보유한 수량만 매도(청산)할 수 있습니다");
+  if (!(await isBotAccount(db, accountId))) throw new UnprocessableEntityException("옵션은 보유한 수량만 매도(청산)할 수 있습니다");
+  if (def.family.retired) throw new UnprocessableEntityException("거래가 끝난 옵션은 새로 쓸 수 없습니다");
   const series = (await db.optionSeries.findUnique({ where: { symbol: def.symbol } })) as { strike: number } | null;
   if (!series) throw new UnprocessableEntityException("오늘의 행사가가 아직 정해지지 않았습니다");
   return optionWriterMarginPerContract(def, series.strike);
+}
+
+async function isBotAccount(db: { [key: string]: any }, accountId: string): Promise<boolean> {
+  const account = (await db.account.findUnique({ where: { id: accountId }, select: { userId: true } })) as { userId: string } | null;
+  if (!account) return false;
+  const user = (await db.user.findUnique({ where: { id: account.userId }, select: { isBot: true } })) as { isBot: boolean } | null;
+  return user?.isBot === true;
 }

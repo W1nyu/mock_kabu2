@@ -1,5 +1,12 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-26 — 주가지수 옵션 → 원자재지수(KCOM) 옵션 — 미배포
+
+- KCOM(Kabu Commodity Index) = 원유·천연가스·구리·금·옥수수 5종 동일 가중 평균(기준 100, 환율 제외). 옵션 `KCOMC1~5`·`KCOMP1~5`, 0.01pt × 1,000원, 행사가 0.5pt 간격, 변동성 1.1%, 쓰기 증거금 4%, MM bot43(`OPT_KCOM`, LIQUIDITY_RESERVE_ORDER 끝에 추가). 계열 정의는 `futures: [...]`(구성 선물 평균 = `optionUnderlyingUnits`)로 일반화.
+- 주가지수 옵션(K)은 지우지 않고 `RETIRED_OPTION_FAMILIES` — 사용자 매수 422, 보유분 매도 가능, 만기 정산은 그대로, 봇 bot41은 매수 호가만(보유자 탈출용), 체인·행사가 깔기에서 제외. 다음 04:11 만기 뒤에는 포지션이 없어 사실상 끝난다.
+- 뉴스 `?reference=commodity`(원자재 아무거나, 환율 제외) — KCOM 옵션 화면의 원자재 뉴스. 원자재 카드·원자재 화면에 KCOM 값.
+- 배포: 마이그레이션 없음. seed(KCOM 10종목) → api·web·matching-engine·settlement·bots(엔진이 새 종목을 읽어야 해 점검 필요).
+
 ## 2026-09-26 14:08 KST — 증권 탭 환율·원자재 카드, 대시보드 옵션 탭 운영 적용 (e8d6c3c)
 
 - 웹만 교체(점검 없음): KABU 지수 카드 아래 환율 카드(→ `/reference/USDKRW`)·원자재 카드(→ 새 `/commodities` → 품목 상세), 탭 "선물·옵션"(원자재·환율 목록 제거), 대시보드 보유 자산 주식/선물/옵션 탭(옵션 표·합계·수익률), 자산 비중에 옵션, 실현손익 라벨 "선물·옵션".

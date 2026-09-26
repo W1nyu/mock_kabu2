@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Sparkline from "@/components/Sparkline";
 import { formatReference } from "@/lib/reference";
-import { FX_CODE, useReferenceRows } from "@/lib/useReferenceRows";
+import { FX_CODE, kcomIndex, useReferenceRows } from "@/lib/useReferenceRows";
 
 function toneClass(delta: number | null): string {
   return delta == null ? "text-ink-faint" : delta > 0 ? "text-up" : delta < 0 ? "text-down" : "text-ink-muted";
@@ -22,6 +22,7 @@ export default function ReferenceCards() {
   const rows = useReferenceRows();
   const fx = rows.find((row) => row.code === FX_CODE) ?? null;
   const commodities = rows.filter((row) => row.code !== FX_CODE);
+  const kcom = kcomIndex(rows);
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
@@ -44,7 +45,15 @@ export default function ReferenceCards() {
 
       <Link href="/commodities" className="glass flex items-center gap-4 p-4 transition-colors active:bg-surface-3/40 sm:p-5">
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] text-ink-muted">원자재{commodities.length > 0 ? ` ${commodities.length}종` : ""}</p>
+          <p className="flex items-baseline justify-between gap-2 text-[13px] text-ink-muted">
+            <span>원자재{commodities.length > 0 ? ` ${commodities.length}종` : ""}</span>
+            {kcom && (
+              <span className="num" title="원자재지수 KCOM — 5종 평균(기준 100), KCOM 옵션의 기초자산">
+                KCOM <span className="font-semibold text-ink">{kcom.value.toFixed(2)}</span>{" "}
+                <span className={toneClass(kcom.change)}>{pct(kcom.change)}</span>
+              </span>
+            )}
+          </p>
           <ul className="num mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[13px]">
             {commodities.map((row) => (
               <li key={row.code} className="flex justify-between gap-2">

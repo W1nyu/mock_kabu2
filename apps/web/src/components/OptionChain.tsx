@@ -15,7 +15,7 @@ import { everyVisible } from "@/lib/visible-interval";
 export default function OptionChain() {
   const [rows, setRows] = useState<OptionRow[]>([]);
   const [live, setLive] = useState<Record<string, number>>({});
-  const [family, setFamily] = useState<"K" | "U">("K");
+  const [family, setFamily] = useState<string>(OPTION_FAMILIES[0].code);
 
   useEffect(() => {
     let active = true;

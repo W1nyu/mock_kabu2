@@ -1,9 +1,11 @@
 import { Body, Controller, Get, Headers, NotFoundException, Post, Query } from "@nestjs/common";
-import { industryById, referenceAsset, SYMBOLS } from "@mock-kabu/shared";
+import { industryById, REFERENCE_ASSETS, referenceAsset, SYMBOLS } from "@mock-kabu/shared";
 import { NewsService, type PublishNewsDto } from "./news.service";
 
 const ACTIVE_SYMBOLS = new Set(SYMBOLS.map((symbol) => symbol.symbol));
 const MARKET_WIDE = "market";
+const COMMODITY = "commodity";
+const COMMODITY_CODES = REFERENCE_ASSETS.map((asset) => asset.code as string).filter((code) => code !== "USDKRW");
 
 /** Public read surface, unguarded like the rest of /market. */
 @Controller("market/news")
@@ -19,10 +21,12 @@ export class NewsController {
     @Query("reference") reference?: string,
   ) {
     const take = limit ? Number(limit) : 40;
-    // 선물·원자재 화면: 그 기초자산(USDKRW·OIL·GAS·COPPER·GOLD·CORN)을 움직인 기사
+    // 선물·원자재 화면: 그 기초자산(USDKRW·OIL·GAS·COPPER·GOLD·CORN)을 움직인 기사.
+    // commodity = 원자재 아무거나(환율 제외) — 원자재지수(KCOM) 옵션 화면
     if (reference !== undefined) {
+      if (reference === COMMODITY) return this.news.list(undefined, take, undefined, false, COMMODITY_CODES);
       if (!referenceAsset(reference)) throw new NotFoundException(`없는 기초자산: ${reference}`);
-      return this.news.list(undefined, take, undefined, false, reference);
+      return this.news.list(undefined, take, undefined, false, [reference]);
     }
     // 산업군 피드는 소속 종목 기사와 산업군 기사 — 시장 전반 기사는 `industry=market`으로 따로 본다.
     if (industry !== undefined) {

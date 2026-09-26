@@ -96,14 +96,15 @@ export class NewsService {
     limit: number,
     industry?: IndustryDef | null,
     ownOnly = false,
-    reference?: string,
+    /** 이 기초자산 코드 중 하나라도 움직인 기사 */
+    reference?: readonly string[],
   ): Promise<NewsItemDto[]> {
     const take = Number.isFinite(limit) ? Math.min(Math.max(1, Math.trunc(limit)), MAX_LIMIT) : DEFAULT_LIMIT;
     const marketWide = { symbol: null, industry: null };
     const own = symbol ? industryOf(symbol) : null;
     const where = reference
       ? // 선물·원자재 화면: 그 기초자산을 움직인 기사
-        { referenceCodes: { has: reference } }
+        { referenceCodes: { hasSome: [...reference] } }
       : industry === null
         ? marketWide
         : industry

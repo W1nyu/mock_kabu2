@@ -32,7 +32,10 @@ export default function OptionOrderPanel({
   available,
   priceHint,
   onPlaced,
+  retired = false,
 }: {
+  /** 거래 종료 — 매수 불가, 보유분 매도만 */
+  retired?: boolean;
   symbol: string;
   lastPrice: number | null;
   position: OptionPosition | null;
@@ -42,7 +45,7 @@ export default function OptionOrderPanel({
 }) {
   const def = optionDef(symbol)!;
   const held = Math.max(0, position?.qty ?? 0);
-  const [side, setSide] = useState<"BUY" | "SELL">("BUY");
+  const [side, setSide] = useState<"BUY" | "SELL">(retired ? "SELL" : "BUY");
   const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT");
   const [priceText, setPriceText] = useState("");
   const [qty, setQty] = useState(1);
@@ -59,8 +62,9 @@ export default function OptionOrderPanel({
   }, [priceHint, symbol]);
   // 보유가 없으면 매도 칸을 쓸 수 없다.
   useEffect(() => {
-    if (held === 0 && side === "SELL") setSide("BUY");
-  }, [held, side]);
+    if (held === 0 && side === "SELL" && !retired) setSide("BUY");
+    if (retired && side === "BUY") setSide("SELL");
+  }, [held, side, retired]);
 
   const maxQty = side === "SELL" ? Math.min(held, MAX_FUTURES_ORDER_QTY) : MAX_FUTURES_ORDER_QTY;
   const priceUnits = type === "LIMIT" ? toUnits(symbol, priceText) : lastPrice;
@@ -116,7 +120,7 @@ export default function OptionOrderPanel({
           <button
             key={s}
             type="button"
-            disabled={s === "SELL" && held === 0}
+            disabled={(s === "SELL" && held === 0) || (s === "BUY" && retired)}
             onClick={() => {
               setSide(s);
               if (s === "SELL") setQty((q) => Math.min(Math.max(1, q), held));
@@ -210,7 +214,7 @@ export default function OptionOrderPanel({
 
       <button
         type="button"
-        disabled={busy || invalidPrice || (side === "SELL" && held === 0)}
+        disabled={busy || invalidPrice || (side === "SELL" && held === 0) || (side === "BUY" && retired)}
         onClick={submit}
         className={`min-h-11 w-full rounded-xl text-sm font-semibold text-white disabled:opacity-50 ${side === "BUY" ? "bg-up" : "bg-down"}`}
       >

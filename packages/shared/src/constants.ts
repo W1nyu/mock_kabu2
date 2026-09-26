@@ -1,5 +1,5 @@
 import { FUTURES, futureDef } from "./futures";
-import { OPTIONS, optionDef } from "./options";
+import { ALL_OPTIONS, optionDef } from "./options";
 
 /** 가입 시 지급되는 가상 현금 보너스 (정수 통화 단위) */
 export const SIGNUP_BONUS = 10_000_000;
@@ -113,7 +113,8 @@ export function tickSizeOf(symbol: string): number | null {
 export const TRADABLE_SYMBOLS: readonly string[] = [
   ...SYMBOLS.map((definition) => definition.symbol),
   ...FUTURES.map((future) => future.symbol),
-  ...OPTIONS.map((option) => option.symbol),
+  // 거래를 끝낸 옵션도 남은 보유분을 팔 수 있게 엔진·주문이 받는다(주문 규칙은 API가 막는다).
+  ...ALL_OPTIONS.map((option) => option.symbol),
 ];
 
 /** 유동성(마켓메이커) 예약 계정 번호의 시작: bot16 */
@@ -129,6 +130,8 @@ export const LIQUIDITY_RESERVE_ORDER: readonly string[] = [
   "GOLDF", "CORNF",
   // 옵션 마켓메이커는 기초자산별 계정 하나가 5행사가 × 콜/풋을 모두 호가한다(종목별 계정 아님).
   "OPT_KABU", "OPT_USD",
+  // 2026-09-26 원자재지수(KCOM) 옵션
+  "OPT_KCOM",
 ];
 
 /** 종목의 유동성 예약 계정 번호(bot N). 배정이 없으면 null. */

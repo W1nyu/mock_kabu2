@@ -1,6 +1,7 @@
 import { Inject, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 import type { PrismaClient } from "@mock-kabu/db";
 import {
+  ALL_OPTIONS,
   atmStrike,
   futuresTradingDay,
   nextFuturesSettlementAt,
@@ -8,6 +9,7 @@ import {
   optionDef,
   OPTIONS,
   optionTheoretical,
+  optionUnderlyingUnits,
   roundPremium,
   strikeForSlot,
   type OptionFamilyDef,
@@ -25,6 +27,8 @@ export interface OptionRow {
   symbol: string;
   family: string;
   familyName: string;
+  /** 거래 종료(보유분 매도·만기 정산만) — 체인·봇 호가에서 뺀다 */
+  retired: boolean;
   type: "CALL" | "PUT";
   slot: number;
   name: string;
@@ -73,25 +77,21 @@ export class OptionsService implements OnModuleInit {
     const have = new Set(rows.map((row) => row.symbol));
     const missing = OPTION_FAMILIES.filter((family) => OPTIONS.some((o) => o.family.code === family.code && !have.has(o.symbol)));
     if (missing.length === 0) return;
-    const underlying = await this.futures.underlyingUnits();
-    const prices = new Map<string, number>();
-    for (const family of missing) {
-      const value = underlying.get(family.future);
-      if (value != null) prices.set(family.future, value);
-    }
-    await this.restrike(prices, now, missing);
+    await this.restrike(await this.futures.underlyingUnits(), now, missing);
   }
 
   /**
-   * 계열마다 기초자산(prices: 선물 심볼 → 정수 단위) 기준 등가격 ±2 행사가를 깔고, 종목 최근가를 새 이론가로 둔다.
+   * 계열마다 기초자산 기준 등가격 ±2 행사가를 깔고, 종목 최근가를 새 이론가로 둔다.
+   * prices는 선물 심볼 → 기초자산(또는 결제가) 정수 단위 — 계열 기초자산은 구성 선물 값의 평균(optionUnderlyingUnits).
    * 매일 04:11 옵션 만기 정산 직후와 처음 배포 때 부른다.
    */
   async restrike(prices: ReadonlyMap<string, number>, now = Date.now(), families: readonly OptionFamilyDef[] = OPTION_FAMILIES) {
     const tradingDay = futuresTradingDay(nextFuturesSettlementAt(now));
     const days = daysToExpiry(now);
     for (const family of families) {
-      const underlying = prices.get(family.future);
-      if (underlying == null || !(underlying > 0)) continue;
+      if (family.retired) continue;
+      const underlying = optionUnderlyingUnits(family, prices);
+      if (underlying == null) continue;
       const atm = atmStrike(family, underlying);
       for (const option of OPTIONS.filter((o) => o.family.code === family.code)) {
         const strike = strikeForSlot(family, atm, option.slot);
@@ -120,7 +120,7 @@ export class OptionsService implements OnModuleInit {
     await this.restrike(await loadPrices(), now, stale);
   }
 
-  /** 옵션 20종목 시세 — 행사가·기초자산·이론가·최근가. 모든 접속자가 같은 값이라 2초 공유한다. */
+  /** 옵션 시세(거래 종료 종목 포함, retired로 표시) — 행사가·기초자산·이론가·최근가. 모든 접속자가 같은 값이라 2초 공유한다. */
   async overview(now = Date.now()): Promise<OptionRow[]> {
     return this.cache.getOrCompute("options:overview", OVERVIEW_TTL_MS, async () => {
       const [series, symbols, underlying] = await Promise.all([
@@ -129,7 +129,8 @@ export class OptionsService implements OnModuleInit {
         this.futures.underlyingUnits(),
       ]);
       // 기동 때 행사가 깔기가 실패했으면(종목 seed 전 기동·기초자산 값 없음) 조회 쪽에서 가끔 다시 시도한다.
-      if (series.length < OPTIONS.length && now - this.lastEnsureAt > ENSURE_RETRY_MS) {
+      const seriesSymbols = new Set(series.map((row) => row.symbol));
+      if (OPTIONS.some((o) => !seriesSymbols.has(o.symbol)) && now - this.lastEnsureAt > ENSURE_RETRY_MS) {
         this.lastEnsureAt = now;
         void this.ensureSeries(now).catch((error) => console.warn("[options] ensure series retry failed", error));
       }
@@ -137,9 +138,9 @@ export class OptionsService implements OnModuleInit {
       const lastBySymbol = new Map(symbols.map((row) => [row.symbol, row.lastPrice]));
       const days = daysToExpiry(now);
       const expiresAt = nextFuturesSettlementAt(now);
-      return OPTIONS.map((option) => {
+      return ALL_OPTIONS.map((option) => {
         const strike = strikeBySymbol.get(option.symbol) ?? null;
-        const s = underlying.get(option.family.future) ?? null;
+        const s = optionUnderlyingUnits(option.family, underlying);
         const theo =
           strike != null && s != null
             ? roundPremium(option, optionTheoretical({ type: option.type, underlying: s, strike, days, dailyVol: option.family.dailyVol }))
@@ -148,6 +149,7 @@ export class OptionsService implements OnModuleInit {
           symbol: option.symbol,
           family: option.family.code,
           familyName: option.family.name,
+          retired: option.family.retired === true,
           type: option.type,
           slot: option.slot,
           name: option.name,
@@ -173,7 +175,7 @@ export class OptionsService implements OnModuleInit {
   async positions(accountId: string) {
     const [rows, overview] = await Promise.all([
       this.prisma.futuresPosition.findMany({
-        where: { accountId, qty: { not: 0 }, symbol: { in: OPTIONS.map((o) => o.symbol) } },
+        where: { accountId, qty: { not: 0 }, symbol: { in: ALL_OPTIONS.map((o) => o.symbol) } },
       }),
       this.overview(),
     ]);

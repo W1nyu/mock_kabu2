@@ -1,5 +1,5 @@
 import { requiredRuntimeEnv } from "./env";
-import { FUTURES, liquidityReserveBotNumber, OPTION_FAMILIES, SYMBOLS, type OrderSide, type SymbolDef } from "@mock-kabu/shared";
+import { ALL_OPTION_FAMILIES, FUTURES, liquidityReserveBotNumber, SYMBOLS, type OrderSide, type SymbolDef } from "@mock-kabu/shared";
 import { ApiClient, isRejection } from "./client";
 import { MarketMakerStartupBlockedError, runMarketMaker } from "./market-maker";
 import { MarketModel, referencePriceFromHistory } from "./market-model";
@@ -599,7 +599,7 @@ async function main() {
   const liquiditySymbols = [
     ...SYMBOLS.map((def) => def.symbol),
     ...FUTURES.map((def) => def.symbol),
-    ...OPTION_FAMILIES.map((family) => family.reserve),
+    ...ALL_OPTION_FAMILIES.map((family) => family.reserve),
   ];
   const liquidityClients: ApiClient[] = [];
   for (const symbol of liquiditySymbols) {
@@ -713,11 +713,12 @@ async function main() {
     for (const index of [6, 7, 8]) void runFuturesTrader(clients[index], futuresMarket, `bot${index + 1}`);
     void runFuturesMomentumTrader(clients[9], futuresMarket, "bot10");
 
-    // 옵션: 기초자산별 마켓메이커(bot41 주가지수, bot42 원/달러, 쓰기 가능) + 매수·청산 거래 흐름(bot8·bot10).
+    // 옵션: 기초자산별 마켓메이커(bot43 원자재지수, bot42 원/달러, 쓰기 가능; 거래 종료한 bot41 주가지수는 매수 호가만)
+    // + 매수·청산 거래 흐름(bot8·bot10).
     const optionsMarket = new OptionsMarketView(clients[0]);
     optionsMarket.start();
     const optionMakersFrom = SYMBOLS.length + FUTURES.length;
-    OPTION_FAMILIES.forEach((family, index) => void runOptionsMarketMaker(liquidityClients[optionMakersFrom + index], family, optionsMarket));
+    ALL_OPTION_FAMILIES.forEach((family, index) => void runOptionsMarketMaker(liquidityClients[optionMakersFrom + index], family, optionsMarket));
     void runOptionsTrader(clients[7], optionsMarket, "bot8");
     void runOptionsTrader(clients[9], optionsMarket, "bot10");
   } else {

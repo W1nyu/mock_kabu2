@@ -11,21 +11,41 @@ import {
   optionPositionMargin,
   optionTheoretical,
   OPTIONS,
+  optionUnderlyingUnits,
+  RETIRED_OPTIONS,
   roundPremium,
   strikeForSlot,
   tickSizeOf,
   TRADABLE_SYMBOLS,
 } from "../dist/index.js";
 
-test("20 option series: 2 underlyings × call/put × 5 strikes, all tradable", () => {
+test("20 live option series (KCOM·USD) plus the retired index options, all tradable", () => {
   assert.equal(OPTIONS.length, 20);
-  assert.ok(isOption("KC3") && isOption("UP5") && !isOption("KABUF"));
-  assert.ok(OPTIONS.every((o) => TRADABLE_SYMBOLS.includes(o.symbol)));
-  assert.equal(optionDef("KC3").name, "주가지수 콜 3");
+  assert.deepEqual([...new Set(OPTIONS.map((o) => o.family.code))], ["KCOM", "U"]);
+  assert.ok(isOption("KCOMC3") && isOption("UP5") && !isOption("KABUF"));
+  assert.equal(optionDef("KCOMC3").name, "원자재지수 콜 3");
+  // 주가지수 옵션은 거래 종료 — 체결·정산을 위해 정의는 남는다
+  assert.equal(RETIRED_OPTIONS.length, 10);
+  assert.ok(isOption("KC3") && optionDef("KC3").family.retired);
+  assert.ok([...OPTIONS, ...RETIRED_OPTIONS].every((o) => TRADABLE_SYMBOLS.includes(o.symbol)));
+  assert.equal(tickSizeOf("KCOMP1"), 1);
   assert.equal(tickSizeOf("KC1"), 5);
   assert.equal(tickSizeOf("UP2"), 1);
   assert.equal(liquidityReserveBotNumber("OPT_KABU"), 41);
   assert.equal(liquidityReserveBotNumber("OPT_USD"), 42);
+  assert.equal(liquidityReserveBotNumber("OPT_KCOM"), 43);
+});
+
+test("KCOM = equal-weight average of the five commodity values, FX excluded; incomplete basket → null", () => {
+  const kcom = optionFamily("KCOM");
+  const prices = new Map([
+    ["OILF", 10_200], ["GASF", 9_700], ["CPRF", 10_050], ["GOLDF", 10_400], ["CORNF", 9_900], ["USDF", 14_000],
+  ]);
+  assert.equal(optionUnderlyingUnits(kcom, prices), 10_050); // 100.50pt
+  prices.delete("GOLDF");
+  assert.equal(optionUnderlyingUnits(kcom, prices), null);
+  assert.equal(optionUnderlyingUnits(optionFamily("U"), prices), 14_000);
+  assert.equal(atmStrike(kcom, 10_073), 10_050); // 0.5pt 간격
 });
 
 test("strikes center on the rounded underlying, one step apart", () => {

@@ -11,8 +11,9 @@ import {
   futuresTradingDay,
   indexLevel,
   nextFuturesSettlementAt,
+  ALL_OPTIONS,
   optionIntrinsic,
-  OPTIONS,
+  optionUnderlyingUnits,
   type FutureDef,
   type OptionDef,
   type OrderCancelRequestedEvent,
@@ -101,7 +102,7 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
     // 낮에 API가 재시작돼 따라잡기가 다시 돌아도 그 포지션을 닫거나 미체결을 취소하면 안 된다.
     const doneRows = await this.prisma.futuresSettlement.findMany({ where: { tradingDay } });
     const doneBySymbol = new Map(doneRows.map((row) => [row.symbol, row]));
-    const pending = [...FUTURES, ...OPTIONS].filter((def) => !doneBySymbol.has(def.symbol)).map((def) => def.symbol);
+    const pending = [...FUTURES, ...ALL_OPTIONS].filter((def) => !doneBySymbol.has(def.symbol)).map((def) => def.symbol);
     const canceledOrders = pending.length > 0 ? await this.cancelOpenFuturesOrders(pending) : 0;
     const prices = pending.length > 0 ? await this.settlementPrices() : new Map<string, number>();
     const symbols: FuturesSettlementResult["symbols"] = [];
@@ -142,13 +143,14 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
     }
     // 옵션 만기 정산(선물 결제가로 내재가치 현금 정산) → 다음 거래일 행사가를 다시 깐다.
     const series = new Map((await this.prisma.optionSeries.findMany()).map((row) => [row.symbol, row.strike]));
-    for (const def of OPTIONS) {
+    // 거래를 끝낸 옵션(주가지수)도 남은 포지션을 만기에 정산한다.
+    for (const def of ALL_OPTIONS) {
       const done = doneBySymbol.get(def.symbol);
       if (done) {
         symbols.push({ symbol: def.symbol, price: done.price, positions: 0, realizedTotal: 0n });
         continue;
       }
-      const underlying = prices.get(def.family.future) ?? null;
+      const underlying = optionUnderlyingUnits(def.family, prices);
       const strike = series.get(def.symbol) ?? null;
       const open = await this.prisma.futuresPosition.findMany({ where: { symbol: def.symbol, qty: { not: 0 } } });
       if (underlying == null || strike == null) {

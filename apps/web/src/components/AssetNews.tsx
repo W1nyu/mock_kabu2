@@ -1,6 +1,6 @@
 "use client";
 
-import { NEWS_FEED_SCOPE, type NewsItemDto } from "@mock-kabu/shared";
+import { NEWS_FEED_SCOPE, REFERENCE_ASSETS, type NewsItemDto } from "@mock-kabu/shared";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { mergeNews, parseNewsItem } from "@/lib/news";
@@ -12,9 +12,12 @@ import { NewsList } from "./NewsFeed";
  * 선물·원자재·환율 화면의 관련 뉴스.
  *  - reference 코드(USDKRW·OIL·GAS·COPPER·GOLD·CORN)면 그 기초자산을 움직인 기사
  *  - "market"이면 시장 전반 기사(주가지수 선물)
+ *  - "commodity"면 원자재 아무거나를 움직인 기사(원자재지수 옵션, 환율 제외)
  * 실시간은 전체 뉴스 피드를 받아 해당하는 기사만 붙이고, 15초마다(보일 때) 다시 읽어 빈틈을 메운다.
  */
-export default function AssetNews({ reference, title = "관련 뉴스" }: { reference: string | "market"; title?: string }) {
+const COMMODITY_CODES: readonly string[] = REFERENCE_ASSETS.map((asset) => asset.code as string).filter((code) => code !== "USDKRW");
+
+export default function AssetNews({ reference, title = "관련 뉴스" }: { reference: string | "market" | "commodity"; title?: string }) {
   const [items, setItems] = useState<NewsItemDto[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -27,7 +30,9 @@ export default function AssetNews({ reference, title = "관련 뉴스" }: { refe
     const matches = (item: NewsItemDto) =>
       reference === "market"
         ? item.symbol == null && item.industry == null
-        : (item.referenceCodes ?? []).includes(reference);
+        : reference === "commodity"
+          ? (item.referenceCodes ?? []).some((code) => COMMODITY_CODES.includes(code))
+          : (item.referenceCodes ?? []).includes(reference);
 
     const load = () =>
       api<NewsItemDto[]>(url, { auth: false })
