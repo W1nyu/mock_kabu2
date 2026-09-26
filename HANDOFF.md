@@ -1,5 +1,10 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-26 14:08 KST — 증권 탭 환율·원자재 카드, 대시보드 옵션 탭 운영 적용 (e8d6c3c)
+
+- 웹만 교체(점검 없음): KABU 지수 카드 아래 환율 카드(→ `/reference/USDKRW`)·원자재 카드(→ 새 `/commodities` → 품목 상세), 탭 "선물·옵션"(원자재·환율 목록 제거), 대시보드 보유 자산 주식/선물/옵션 탭(옵션 표·합계·수익률), 자산 비중에 옵션, 실현손익 라벨 "선물·옵션".
+- 확인: web healthy, `/`·`/market`·`/commodities`·`/reference/USDKRW` 200. 롤백 태그 `mock-kabu2-app:pre-refcards-20260926`(-web), 원본 `/tmp/src-before-pre-refcards-20260926.tgz`.
+
 ## 2026-09-26 12:00 KST — 옵션·선물 개선·랭킹 속도 운영 적용 (8351a0e)
 
 - 사용자 지정 시각에 Claude가 배포(예약 실행). 11:55 점검 예고 → 12:00~12:25 점검(실제 12:01~12:04). 미리 빌드해 두고 점검 중에는 봇 정지 → pgBackRest diff `20260925-183002F_20260926-030106D` → migrate(`20260926100000_options`) → seed(현물 15·선물 7·옵션 20) → api·web·matching-engine·settlement → 점검 해제 → 봇.
