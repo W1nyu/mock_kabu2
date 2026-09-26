@@ -1,6 +1,12 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
-## 2026-09-26 — 주가지수 옵션 → 원자재지수(KCOM) 옵션 — 미배포
+## 2026-09-26 14:40 KST — KCOM 옵션 운영 적용 (f2ca9a7)
+
+- 사용자 "바로 배포해". 미리 빌드 → 14:35 점검 예고 → 14:40~14:44 점검(창 14:55까지): 봇 정지 → pgBackRest diff `20260925-183002F_20260926-054047D` → seed(옵션 20 = KCOM 10 + 원/달러 10) → api·web·matching-engine·settlement → 점검 해제 → 봇.
+- 확인: `/market/options` 30행(거래 20·종료 10), KCOM 행사가 100.00(기초자산 99.94, KCOMC3 이론가 0.30pt), 엔진 52종목, 호가 KCOMC3·KCOMP3·KCOMC1 3/3, 거래 종료 KC3·KP3 매수 3단·매도 0(보유자 탈출용), 정합성 PASS 11 / FAIL 0, 봇 오류 없음(bot7 증거금 부족 제외).
+- 롤백 태그 `mock-kabu2-app:pre-kcom-20260926`(+서비스별), 원본 `/tmp/src-before-pre-kcom-20260926.tgz`.
+
+## 2026-09-26 — 주가지수 옵션 → 원자재지수(KCOM) 옵션 (→ 14:40 운영 적용)
 
 - KCOM(Kabu Commodity Index) = 원유·천연가스·구리·금·옥수수 5종 동일 가중 평균(기준 100, 환율 제외). 옵션 `KCOMC1~5`·`KCOMP1~5`, 0.01pt × 1,000원, 행사가 0.5pt 간격, 변동성 1.1%, 쓰기 증거금 4%, MM bot43(`OPT_KCOM`, LIQUIDITY_RESERVE_ORDER 끝에 추가). 계열 정의는 `futures: [...]`(구성 선물 평균 = `optionUnderlyingUnits`)로 일반화.
 - 주가지수 옵션(K)은 지우지 않고 `RETIRED_OPTION_FAMILIES` — 사용자 매수 422, 보유분 매도 가능, 만기 정산은 그대로, 봇 bot41은 매수 호가만(보유자 탈출용), 체인·행사가 깔기에서 제외. 다음 04:11 만기 뒤에는 포지션이 없어 사실상 끝난다.
