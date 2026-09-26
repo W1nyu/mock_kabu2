@@ -172,6 +172,11 @@ export class ApiClient {
     return this.request("GET", "/market/futures") as Promise<{ symbol: string; lastPrice: number; underlying: number | null }[]>;
   }
 
+  /** 내 계좌 요약 — 주문 가능 금액(원) 등 */
+  accountSummary() {
+    return this.request("GET", "/account") as Promise<{ available: number }>;
+  }
+
   /** 내 선물 포지션 */
   futuresPositions() {
     return this.request("GET", "/account/futures") as Promise<{ positions: { symbol: string; qty: number }[] }>;

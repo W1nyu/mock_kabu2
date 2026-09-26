@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { futureDef } from "@mock-kabu/shared";
 import type { LiveOrder } from "../client";
 import {
+  affordableFuturesQty,
   diffFuturesLadder,
   futuresMomentumSide,
   futuresQuoteCenter,
@@ -72,4 +73,13 @@ test("momentum reads the underlying's move over the window against a per-asset t
   assert.equal(futuresMomentumSide(-45, 40), "SELL");
   assert.equal(futuresMomentumSide(30, 40), null);
   assert.equal(view.changeBps("USDF", 90_000, 100_000), null);
+});
+
+test("futures flow only opens what its free cash can margin (bot7 had its cash tied up in stock)", () => {
+  const kabuf = futureDef("KABUF")!;
+  // 940.00pt × 1.1 × 100원 × 21.75% ≈ 2,249,000원/계약
+  assert.equal(affordableFuturesQty(kabuf, 94_000, 6_000_000, 5), 2);
+  assert.equal(affordableFuturesQty(kabuf, 94_000, 1_000_000, 5), 0);
+  assert.equal(affordableFuturesQty(kabuf, 94_000, 1_000_000_000, 5), 5);
+  assert.equal(affordableFuturesQty(kabuf, 94_000, -5, 5), 0);
 });

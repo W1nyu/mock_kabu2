@@ -1,4 +1,4 @@
-import { FUTURES, type FutureDef, type OrderSide } from "@mock-kabu/shared";
+import { FUTURES, futureMarginPerContract, MARKET_BUY_HOLD_FACTOR, type FutureDef, type OrderSide } from "@mock-kabu/shared";
 import type { ApiClient, LiveOrder } from "./client";
 
 /** 선물 호가 단수(한쪽) — 현물보다 적게 둬 호가 교체 부하를 줄인다. */
@@ -231,6 +231,16 @@ export function reduceOrder(
   return { symbol: pick.symbol, side: pick.qty > 0 ? "SELL" : "BUY", qty: Math.min(Math.abs(pick.qty), 1 + Math.floor(rand() * 3)) };
 }
 
+/**
+ * 가용 현금으로 열 수 있는 계약 수(0~maxQty). 시장가 신규 주문은 최근가 × 1.1 기준 위탁증거금(거래소 기준)을 묶는다.
+ * 주식도 거래하는 봇(bot7 등)은 현금이 주식 재고로 빠져 있어, 이걸 안 보고 내면 422가 반복된다.
+ */
+export function affordableFuturesQty(def: FutureDef, lastUnits: number, available: number, maxQty: number): number {
+  const perContract = Number(futureMarginPerContract(def, Math.ceil(lastUnits * MARKET_BUY_HOLD_FACTOR)));
+  if (!(perContract > 0) || !(available > 0)) return 0;
+  return Math.max(0, Math.min(maxQty, Math.floor(available / perContract)));
+}
+
 /** 선물 거래 흐름 봇의 주기·크기 */
 export interface FuturesTraderOptions {
   /** 주문 사이 대기(ms) 최소·최대 */
@@ -270,7 +280,19 @@ export async function runFuturesTrader(
       // 한쪽으로 너무 쌓였으면 줄이는 쪽으로만.
       if (position >= MAX_POSITION) side = "SELL";
       if (position <= -MAX_POSITION) side = "BUY";
-      const qty = 1 + Math.floor(Math.random() * options.maxQty);
+      let qty = 1 + Math.floor(Math.random() * options.maxQty);
+      const closing = (side === "SELL" && position > 0) || (side === "BUY" && position < 0);
+      if (!closing || qty > Math.abs(position)) {
+        // 새로 여는 몫은 증거금이 필요하다 — 가용 현금 안에서만. 1계약도 못 열면 쌓인 포지션을 줄여 현금을 푼다.
+        const { available } = await client.accountSummary();
+        const affordable = affordableFuturesQty(def, last, available, options.maxQty);
+        if (affordable < 1) {
+          const order = reduceOrder(account.positions);
+          if (order) await client.placeOrder({ ...order, type: "MARKET" });
+          continue;
+        }
+        qty = closing ? Math.abs(position) : Math.min(qty, affordable);
+      }
       await client.placeOrder({ symbol: def.symbol, side, type: "MARKET", qty });
     } catch (error) {
       console.warn(`[futures:${name}]`, error instanceof Error ? error.message : error);
