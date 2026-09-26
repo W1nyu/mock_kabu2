@@ -80,15 +80,11 @@ export default function LoginPage() {
           <button disabled={busy || !nickname.trim() || !password} className="btn btn-primary btn-block">
             {busy ? t("확인 중…") : t("로그인")}
           </button>
+          <Link href="/signup" className="btn btn-ghost btn-block">
+            {t("가입하기")}
+          </Link>
         </form>
       </div>
-
-      <p className="mt-5 text-center text-sm text-ink-muted">
-        {t("계정이 없나요?")}{" "}
-        <Link href="/signup" className="font-medium text-sky hover:underline">
-          {t("가입하고 1,000만원 받기")}
-        </Link>
-      </p>
     </div>
   );
 }
