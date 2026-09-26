@@ -124,11 +124,7 @@ export default function Nav() {
                 {t("로그아웃")}
               </button>
             </>
-          ) : (
-            <Link href="/login" className="btn btn-primary btn-sm">
-              {t("로그인")}
-            </Link>
-          )}
+          ) : null}
         </div>
       </nav>
     </header>
