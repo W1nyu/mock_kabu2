@@ -7,7 +7,7 @@ import { ApiNewsSink } from "./news/api-sink";
 import { startNewsEngine } from "./news/scheduler";
 import { ReferenceNewsSink, startReferenceEngine } from "./reference-engine";
 import { FuturesMarketView, runFuturesMarketMaker, runFuturesMomentumTrader, runFuturesTrader } from "./futures-bots";
-import { OptionsMarketView, runOptionsMarketMaker, runOptionsTrader } from "./options-bots";
+import { OPTIONS_TRADER_STYLES, OptionsMarketView, runOptionsMarketMaker, runOptionsTrader } from "./options-bots";
 import { ScenarioBook, startScenarioPolling } from "./scenario";
 import { CompositeNewsSink, ConsoleNewsSink } from "./news/sink";
 import {
@@ -714,13 +714,15 @@ async function main() {
     void runFuturesMomentumTrader(clients[9], futuresMarket, "bot10");
 
     // 옵션: 기초자산별 마켓메이커(bot43 원자재지수, bot42 원/달러, 쓰기 가능; 거래 종료한 bot41 주가지수는 매수 호가만)
-    // + 매수·청산 거래 흐름(bot8·bot10).
+    // + 거래 흐름 4계정: 매수 위주(bot2·bot8·bot10) + 외가격 쓰기 위주(bot9). 2026-09-26 2 → 4계정, 간격 20~50초 → 8~25초.
     const optionsMarket = new OptionsMarketView(clients[0]);
     optionsMarket.start();
     const optionMakersFrom = SYMBOLS.length + FUTURES.length;
     ALL_OPTION_FAMILIES.forEach((family, index) => void runOptionsMarketMaker(liquidityClients[optionMakersFrom + index], family, optionsMarket));
-    void runOptionsTrader(clients[7], optionsMarket, "bot8");
-    void runOptionsTrader(clients[9], optionsMarket, "bot10");
+    void runOptionsTrader(clients[1], optionsMarket, "bot2", OPTIONS_TRADER_STYLES.buyer);
+    void runOptionsTrader(clients[7], optionsMarket, "bot8", OPTIONS_TRADER_STYLES.buyer);
+    void runOptionsTrader(clients[9], optionsMarket, "bot10", OPTIONS_TRADER_STYLES.buyer);
+    void runOptionsTrader(clients[8], optionsMarket, "bot9", OPTIONS_TRADER_STYLES.writer);
   } else {
     console.log("[bots] futures bots disabled (BOTS_FUTURES_DISABLED=1)");
   }

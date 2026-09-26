@@ -198,35 +198,77 @@ export function pickOptionByOffset(
   return live.find((row) => row.strike === strike && row.type === type) ?? null;
 }
 
+/** 옵션 거래 흐름 한 계정의 성격 */
+export interface OptionsTraderStyle {
+  /** 한 번 쉬는 시간(ms) [최소, 최대] */
+  pauseMs: [number, number];
+  /** 동시에 들고 있는 종목 수 상한 */
+  maxHeld: number;
+  /** 새로 열 때 매도(쓰기)로 여는 비율 — 봇 계정만 쓰기가 허용된다 */
+  writeRatio: number;
+}
+
+export const OPTIONS_TRADER_STYLES: Record<string, OptionsTraderStyle> = {
+  // 매수 위주 개인 투자자 흐름
+  buyer: { pauseMs: [8_000, 20_000], maxHeld: 6, writeRatio: 0.15 },
+  // 외가격을 파는(쓰는) 프리미엄 수취 흐름 — 매수 흐름의 상대편
+  writer: { pauseMs: [10_000, 25_000], maxHeld: 6, writeRatio: 0.7 },
+};
+
+/** 보유 포지션을 닫는 주문 — 매수 보유는 매도, 쓴(매도) 포지션은 되사기. 보유가 없으면 null. */
+export function closingOrder(position: { symbol: string; qty: number }): { symbol: string; side: OrderSide; qty: number } | null {
+  if (position.qty === 0) return null;
+  return { symbol: position.symbol, side: position.qty > 0 ? "SELL" : "BUY", qty: Math.abs(position.qty) };
+}
+
 /**
- * 옵션 거래 흐름(사용자처럼 매수 → 몇 분 뒤 청산 매도만). 20~50초마다:
- * 보유 기간이 끝난 옵션이 있으면 보유 수량 전부 시장가 매도, 아니면 보유 종목이 3개 미만일 때 1~3계약 시장가 매수.
- * 보유 수량보다 많이 팔지 않는다(봇 계정은 쓰기가 허용되므로 여기서 막는다).
+ * 옵션 거래 흐름(사용자처럼 열고 → 1~6분 뒤 청산). `pauseMs`마다:
+ * 보유 기간이 끝난 포지션이 있으면 전부 시장가로 닫고, 아니면 보유 종목이 `maxHeld` 미만일 때 1~3계약을 연다 —
+ * `writeRatio` 확률로 매도(쓰기, 등가격 근처·외가격), 나머지는 매수. 닫을 때 보유 수량보다 많이 거래하지 않는다.
+ * 호가가 없어 닫지 못하면 1분 뒤 다시 시도한다.
  */
-export async function runOptionsTrader(client: ApiClient, market: OptionsMarketView, name: string): Promise<void> {
-  const MAX_HELD = 3;
+export async function runOptionsTrader(
+  client: ApiClient,
+  market: OptionsMarketView,
+  name: string,
+  style: OptionsTraderStyle = OPTIONS_TRADER_STYLES.buyer,
+): Promise<void> {
   const exitAt = new Map<string, number>();
+  const [pauseMin, pauseMax] = style.pauseMs;
   while (true) {
-    await sleep(20_000 + Math.random() * 30_000);
+    await sleep(pauseMin + Math.random() * (pauseMax - pauseMin));
     try {
-      const positions = (await client.optionsPositions()).filter((p) => p.qty > 0);
+      const positions = (await client.optionsPositions()).filter((p) => p.qty !== 0);
       const now = Date.now();
-      for (const p of positions) if (!exitAt.has(p.symbol)) exitAt.set(p.symbol, now + 2 * 60_000 + Math.random() * 6 * 60_000);
+      for (const p of positions) if (!exitAt.has(p.symbol)) exitAt.set(p.symbol, now + 60_000 + Math.random() * 5 * 60_000);
       for (const symbol of [...exitAt.keys()]) if (!positions.some((p) => p.symbol === symbol)) exitAt.delete(symbol);
 
       const due = positions.find((p) => (exitAt.get(p.symbol) ?? Infinity) <= now);
       if (due) {
-        await client.placeOrder({ symbol: due.symbol, side: "SELL" as OrderSide, type: "MARKET", qty: due.qty });
+        const order = closingOrder(due)!;
+        exitAt.set(due.symbol, now + 60_000); // 실패하면 1분 뒤 다시
+        await client.placeOrder({ ...order, type: "MARKET" });
         exitAt.delete(due.symbol);
         continue;
       }
-      if (positions.length >= MAX_HELD) continue;
+      if (positions.length >= style.maxHeld) continue;
       const families = [...new Set(OPTIONS.map((def) => def.family.code))];
       const familyCode = families[Math.floor(Math.random() * families.length)];
-      const rows = market.all().filter((row) => row.family === familyCode);
-      const pick = pickOptionByOffset(rows, pickStrikeOffset(), Math.random() < 0.5 ? "CALL" : "PUT");
-      if (!pick) continue;
-      await client.placeOrder({ symbol: pick.symbol, side: "BUY", type: "MARKET", qty: 1 + Math.floor(Math.random() * 3) });
+      const rows = market.all().filter((row) => row.family === familyCode && !row.expired);
+      const write = Math.random() < style.writeRatio;
+      const type = Math.random() < 0.5 ? "CALL" : "PUT";
+      // 쓰기는 외가격 쪽(콜은 위, 풋은 아래)으로 0~3칸 — 내가격을 쓰면 만기 손실이 커 실제 흐름과 다르다.
+      const offset = write
+        ? (type === "CALL" ? 1 : -1) * Math.floor(Math.random() * 4)
+        : pickStrikeOffset();
+      const pick = pickOptionByOffset(rows, offset, type);
+      if (!pick || positions.some((p) => p.symbol === pick.symbol)) continue;
+      await client.placeOrder({
+        symbol: pick.symbol,
+        side: write ? "SELL" : "BUY",
+        type: "MARKET",
+        qty: 1 + Math.floor(Math.random() * 3),
+      });
     } catch (error) {
       console.warn(`[options:${name}]`, error instanceof Error ? error.message : error);
     }

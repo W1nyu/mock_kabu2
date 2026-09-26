@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { OPTION_MM_MAX_INVENTORY, pickOptionByOffset, pickStrikeOffset, planOptionLadder, strikeSteps } from "../options-bots";
+import { OPTION_MM_MAX_INVENTORY, closingOrder, pickOptionByOffset, pickStrikeOffset, planOptionLadder, strikeSteps } from "../options-bots";
 
 test("option ladder: 3 levels each side around theo with a 4% half-spread (min 1 tick)", () => {
   // 이론가 50.00pt(5,000단위), 호가 5단위: 한쪽 스프레드 200 → 매수 4,800/4,795/4,790, 매도 5,200/5,205/5,210
@@ -49,4 +49,10 @@ test("retired option families only bid, so holders can still sell before expiry"
   const quotes = planOptionLadder({ tickUnits: 5 }, 450, -10, true);
   assert.equal(quotes.filter((q) => q.side === "SELL").length, 0);
   assert.equal(quotes.filter((q) => q.side === "BUY").length, 3);
+});
+
+test("closing an option position trades the opposite side for the whole quantity", () => {
+  assert.deepEqual(closingOrder({ symbol: "KCOMC6", qty: 3 }), { symbol: "KCOMC6", side: "SELL", qty: 3 });
+  assert.deepEqual(closingOrder({ symbol: "UP4", qty: -2 }), { symbol: "UP4", side: "BUY", qty: 2 });
+  assert.equal(closingOrder({ symbol: "UP4", qty: 0 }), null);
 });

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { won } from "@/lib/api";
 import { fmtOption, fmtStrike, optionLabel, type OptionPosition } from "@/lib/options";
 import { useT } from "@/lib/i18n";
+import HoldingsTotalItem from "./HoldingsTotalItem";
 
 function tone(n: number): string {
   return n > 0 ? "text-up" : n < 0 ? "text-down" : "text-ink-muted";
@@ -45,18 +46,26 @@ export default function OptionHoldings({ positions }: { positions: OptionPositio
   }
   const totalValue = positions.reduce((sum, p) => sum + p.value, 0);
   const totalPnl = positions.reduce((sum, p) => sum + p.unrealized, 0);
+  const totalCost = totalValue - totalPnl;
   return (
     <>
       <ul className="divide-y divide-hairline-soft sm:hidden">
         {positions.map((p) => (
           <li key={p.symbol}>
-            <Link href={`/options/${p.symbol}`} className="flex items-center gap-3 px-4 py-3 active:bg-surface-3/45">
+            <Link
+              href={`/options/${p.symbol}`}
+              className="flex items-center gap-3 px-4 py-3 active:bg-surface-3/45"
+            >
               <span className="min-w-0 flex-1">
-                <span className={`block truncate font-semibold ${p.type === "CALL" ? "text-up" : "text-down"}`}>
+                <span
+                  className={`block truncate font-semibold ${p.type === "CALL" ? "text-up" : "text-down"}`}
+                >
                   {optionLabel(p.symbol, p.strike)}
                 </span>
                 <span className="num block text-xs text-ink-faint">
-                  {t("{n}계약", { n: p.qty })} · {t("평균")} {fmtOption(p.symbol, Math.round(p.avgPrice))} · {t("현재")} {fmtOption(p.symbol, p.lastPrice)}
+                  {t("{n}계약", { n: p.qty })} · {t("평균")}{" "}
+                  {fmtOption(p.symbol, Math.round(p.avgPrice))} · {t("현재")}{" "}
+                  {fmtOption(p.symbol, p.lastPrice)}
                 </span>
               </span>
               <span className="shrink-0 text-right">
@@ -64,11 +73,14 @@ export default function OptionHoldings({ positions }: { positions: OptionPositio
                   {p.unrealized > 0 ? "+" : ""}
                   {won(p.unrealized)}
                 </span>
-                <span className="num block text-xs text-ink-faint">{t("평가")} {won(p.value)}</span>
+                <span className="num block text-xs text-ink-faint">
+                  {t("평가")} {won(p.value)}
+                </span>
               </span>
             </Link>
           </li>
         ))}
+        <HoldingsTotalItem value={totalValue} pnl={totalPnl} cost={totalCost} />
       </ul>
       <div className="overflow-x-auto max-sm:hidden">
         <table className="tbl tbl-hover">
@@ -90,7 +102,10 @@ export default function OptionHoldings({ positions }: { positions: OptionPositio
             {positions.map((p) => (
               <tr key={p.symbol}>
                 <td className="font-semibold">
-                  <Link href={`/options/${p.symbol}`} className={`hover:text-sky ${p.type === "CALL" ? "text-up" : "text-down"}`}>
+                  <Link
+                    href={`/options/${p.symbol}`}
+                    className={`hover:text-sky ${p.type === "CALL" ? "text-up" : "text-down"}`}
+                  >
                     {optionLabel(p.symbol, p.strike).replace(/ [^ ]+$/, "")}
                   </Link>
                 </td>
@@ -117,6 +132,12 @@ export default function OptionHoldings({ positions }: { positions: OptionPositio
               <td className={`num text-right font-semibold ${tone(totalPnl)}`}>
                 {totalPnl > 0 ? "+" : ""}
                 {won(totalPnl)}
+                {totalCost > 0 && (
+                  <span className="ml-1 text-xs opacity-80">
+                    ({totalPnl > 0 ? "+" : ""}
+                    {((totalPnl / totalCost) * 100).toFixed(2)}%)
+                  </span>
+                )}
               </td>
             </tr>
           </tfoot>

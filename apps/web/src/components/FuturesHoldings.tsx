@@ -5,6 +5,7 @@ import Link from "next/link";
 import { won } from "@/lib/api";
 import { fmtFuture, leverageLabel, type FuturesAccount } from "@/lib/futures";
 import { useNames, useT } from "@/lib/i18n";
+import HoldingsTotalItem from "./HoldingsTotalItem";
 
 function tone(n: number): string {
   return n > 0 ? "text-up" : n < 0 ? "text-down" : "text-ink-muted";
@@ -32,6 +33,8 @@ export default function FuturesHoldings({ account }: { account: FuturesAccount |
 function FuturesRows({ positions }: { positions: FuturesAccount["positions"] }) {
   const t = useT();
   const names = useNames();
+  const totalMargin = positions.reduce((sum, p) => sum + p.marginHeld, 0);
+  const totalPnl = positions.reduce((sum, p) => sum + p.unrealized, 0);
   return (
     <>
       <ul className="divide-y divide-hairline-soft sm:hidden">
@@ -39,14 +42,18 @@ function FuturesRows({ positions }: { positions: FuturesAccount["positions"] }) 
           const name = names.future(p.symbol, futureDef(p.symbol)?.name ?? p.symbol);
           return (
             <li key={p.symbol}>
-              <Link href={`/futures/${p.symbol}`} className="flex items-center gap-3 px-4 py-3 active:bg-surface-3/45">
+              <Link
+                href={`/futures/${p.symbol}`}
+                className="flex items-center gap-3 px-4 py-3 active:bg-surface-3/45"
+              >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-semibold">{name}</span>
                   <span className="num block text-xs text-ink-faint">
                     <span className={p.qty > 0 ? "text-up" : "text-down"}>
                       {p.qty > 0 ? t("롱") : t("숏")} {t("{n}계약", { n: Math.abs(p.qty) })}
                     </span>{" "}
-                    · {leverageLabel(p.symbol, p.leverage)} · {t("평균")} {fmtFuture(p.symbol, Math.round(p.avgPrice))}
+                    · {leverageLabel(p.symbol, p.leverage)} · {t("평균")}{" "}
+                    {fmtFuture(p.symbol, Math.round(p.avgPrice))}
                   </span>
                 </span>
                 <span className="shrink-0 text-right">
@@ -54,12 +61,20 @@ function FuturesRows({ positions }: { positions: FuturesAccount["positions"] }) 
                     {p.unrealized > 0 ? "+" : ""}
                     {won(p.unrealized)}
                   </span>
-                  <span className="num block text-xs text-ink-faint">{t("증거금")} {won(p.marginHeld)}</span>
+                  <span className="num block text-xs text-ink-faint">
+                    {t("증거금")} {won(p.marginHeld)}
+                  </span>
                 </span>
               </Link>
             </li>
           );
         })}
+        <HoldingsTotalItem
+          value={totalMargin}
+          pnl={totalPnl}
+          cost={totalMargin}
+          valueLabel={t("증거금")}
+        />
       </ul>
       <div className="overflow-x-auto max-sm:hidden">
         <table className="tbl tbl-hover">
@@ -69,7 +84,12 @@ function FuturesRows({ positions }: { positions: FuturesAccount["positions"] }) 
               <th className="text-right">{t("포지션")}</th>
               <th className="text-right">{t("레버리지")}</th>
               <th className="text-right">{t("평균가")}</th>
-              <th className="text-right" title={t("기초자산·최근 체결 중앙값·최근가의 중앙값 — 평가손익과 반대매매 판단에 쓴다")}>
+              <th
+                className="text-right"
+                title={t(
+                  "기초자산·최근 체결 중앙값·최근가의 중앙값 — 평가손익과 반대매매 판단에 쓴다",
+                )}
+              >
                 {t("평가가격")}
               </th>
               <th className="text-right">{t("증거금")}</th>
@@ -98,6 +118,24 @@ function FuturesRows({ positions }: { positions: FuturesAccount["positions"] }) 
               </tr>
             ))}
           </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={5} className="text-ink-muted">
+                {t("합계")}
+              </td>
+              <td className="num text-right font-semibold">{won(totalMargin)}</td>
+              <td className={`num text-right font-semibold ${tone(totalPnl)}`}>
+                {totalPnl > 0 ? "+" : ""}
+                {won(totalPnl)}
+                {totalMargin > 0 && (
+                  <span className="ml-1 text-xs opacity-80" title={t("증거금 대비")}>
+                    ({totalPnl > 0 ? "+" : ""}
+                    {((totalPnl / totalMargin) * 100).toFixed(2)}%)
+                  </span>
+                )}
+              </td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </>

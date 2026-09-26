@@ -25,6 +25,7 @@ import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { everyVisible } from "@/lib/visible-interval";
 import { getLocale, translate, useNames, useT } from "@/lib/i18n";
+import HoldingsTotalItem from "@/components/HoldingsTotalItem";
 
 // lightweight-charts는 브라우저 전용이고 번들이 크다. 첫 화면(자산·시세 표)을 먼저 그리고 차트는 뒤에 싣는다.
 const EquityChart = dynamic(() => import("@/components/EquityChart"), {
@@ -378,7 +379,6 @@ export default function DashboardPage() {
   // 옵션은 프리미엄을 현금으로 냈으므로 평가액(최근가 × 수량 × 승수) 전체가 자산이다.
   const optionsValue = futures?.optionsValue ?? 0;
   const optionPositions = futures?.options ?? [];
-  const optionsCost = optionPositions.reduce((sum, p) => sum + p.value - p.unrealized, 0);
   const optionsPnl = optionPositions.reduce((sum, p) => sum + p.unrealized, 0);
   const futuresValue = Math.max(0, futuresMargin + futuresUnrealized);
   const optionsShare = Math.max(0, optionsValue);
@@ -394,14 +394,14 @@ export default function DashboardPage() {
   const realizedToday = (realized?.today ?? 0) + (realized?.futures?.today ?? 0);
   const realizedTotal = (realized?.total ?? 0) + (realized?.futures?.total ?? 0);
   const futuresPositions = futures?.positions.length ?? 0;
-  // 평가손익 = 주식 평가손익 + 선물 평가손익. 수익률의 분모는 주식 매입원가 + 선물 증거금(투입 금액).
+  // 평가손익 = 주식 + 선물 + 옵션 평가손익.
   const stockCost = liveHoldings.reduce((sum, h) => sum + h.costBasis, 0);
   const stockPnl = liveHoldings.reduce((sum, h) => sum + h.pnl, 0);
   const futuresOpen = futuresPositions + optionPositions.length > 0;
-  // 옵션은 낸 프리미엄(원가)이 투입 금액이다.
-  const totalCost = stockCost + (futures?.marginHeld ?? 0) + optionsCost;
   const totalPnl = stockPnl + (futures?.unrealized ?? 0) + optionsPnl;
-  const totalPnlRate = totalCost > 0 ? totalPnl / totalCost : 0;
+  // 수익률은 총 자산 대비 — 평가손익이 반영되기 전 총 자산(= 총 자산 − 평가손익)을 분모로 한다.
+  const pnlBase = Number(totalExact) - totalPnl;
+  const totalPnlRate = pnlBase > 0 ? totalPnl / pnlBase : 0;
 
 
   const hasHoldings = liveHoldings.length > 0;
@@ -424,7 +424,7 @@ export default function DashboardPage() {
                 <>
                   <span
                     className={pnlTone}
-                    title={t("주식 {stock} · 선물 {futures} · 옵션 {options} — 수익률은 주식 매입원가 + 선물 증거금 + 옵션 매수원가 대비", {
+                    title={t("주식 {stock} · 선물 {futures} · 옵션 {options} — 수익률은 총 자산(평가손익 반영 전) 대비", {
                       stock: signedWon(stockPnl),
                       futures: signedWon(futures?.unrealized ?? 0),
                       options: signedWon(optionsPnl),
@@ -434,7 +434,7 @@ export default function DashboardPage() {
                     {won(totalPnl)} ({totalPnl >= 0 ? "+" : ""}
                     {(totalPnlRate * 100).toFixed(2)}%)
                   </span>
-                  <span className="ml-2 font-normal text-ink-faint">{t("평가손익 · 전체 수익률")}</span>
+                  <span className="ml-2 font-normal text-ink-faint">{t("평가손익 · 총 자산 대비")}</span>
                 </>
               ) : (
                 <span className="font-normal text-ink-faint">{t("평가손익")} —</span>
@@ -592,6 +592,7 @@ export default function DashboardPage() {
                 </li>
               );
             })}
+            <HoldingsTotalItem value={stockValue} pnl={stockPnl} cost={stockCost} />
           </ul>
           <div className="overflow-x-auto max-sm:hidden">
             <table className="tbl tbl-hover">
@@ -629,6 +630,24 @@ export default function DashboardPage() {
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={5} className="text-ink-muted">
+                    {t("합계")}
+                  </td>
+                  <td className="num text-right font-semibold">{won(stockValue)}</td>
+                  <td className={`num text-right font-semibold ${stockPnl >= 0 ? "text-up" : "text-down"}`}>
+                    {stockPnl >= 0 ? "+" : ""}
+                    {won(stockPnl)}
+                    {stockCost > 0 && (
+                      <span className="ml-1 text-xs opacity-80">
+                        ({stockPnl >= 0 ? "+" : ""}
+                        {((stockPnl / stockCost) * 100).toFixed(2)}%)
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
           </>
