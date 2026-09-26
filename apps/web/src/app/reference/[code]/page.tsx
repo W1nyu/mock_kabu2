@@ -8,6 +8,7 @@ import ReferenceChart from "@/components/ReferenceChart";
 import { api } from "@/lib/api";
 import { formatReference, parseReferenceTick, referenceChange, type ReferenceRow } from "@/lib/reference";
 import { subscribe } from "@/lib/socket";
+import { FX_CODE } from "@/lib/useReferenceRows";
 import { everyVisible } from "@/lib/visible-interval";
 
 /** 어떤 뉴스가 이 가격을 움직이는지 — 사용자가 뉴스와 가격을 이어서 볼 수 있게 적어 둔다. */
@@ -16,7 +17,11 @@ const DRIVERS: Record<string, string> = {
   OIL: "유가 관련 시장 뉴스(OPEC 감산·증산, 중동 리스크, 수요 둔화 등)에 반응합니다.",
   GAS: "유가·에너지 뉴스에 일부 반응하고, 천연가스를 직접 다룬 기사에 크게 반응합니다.",
   COPPER: "원자재·산업금속 뉴스(중국 경기, 인프라 투자, 금속 재고 등)에 반응하고, 구리를 직접 다룬 기사에 크게 반응합니다.",
+  GOLD: "위험 회피 뉴스(지정학 리스크, 증시 급락 등)에 오르고 위험 선호 뉴스에 내리며, 금을 직접 다룬 기사에 크게 반응합니다.",
+  CORN: "농산물 뉴스(가뭄·작황·풍작 등)와 원자재 전반 뉴스에 반응합니다.",
 };
+/** 이 기초자산으로 정산하는 선물 */
+const FUTURE_OF: Record<string, string> = { USDKRW: "USDF", OIL: "OILF", GAS: "GASF", COPPER: "CPRF", GOLD: "GOLDF", CORN: "CORNF" };
 
 export default function ReferencePage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
@@ -65,14 +70,14 @@ export default function ReferencePage({ params }: { params: Promise<{ code: stri
   return (
     <div className="mx-auto max-w-5xl space-y-4">
       <Link
-        href="/market?kind=futures"
+        href={def.code === FX_CODE ? "/market" : "/commodities"}
         className="inline-flex items-center gap-1.5 text-[13px] text-ink-muted transition-colors hover:text-sky"
       >
-        <span aria-hidden>←</span> 선물·원자재
+        <span aria-hidden>←</span> {def.code === FX_CODE ? "증권" : "원자재"}
       </Link>
       <div className="glass p-4 sm:p-5">
         <p className="text-[13px] text-ink-muted">
-          {def.code} · 선물 기초자산 <span className="text-ink-faint">(가상 지수)</span>
+          {def.code} · {def.code === FX_CODE ? "환율" : "원자재"} <span className="text-ink-faint">(가상 지수)</span>
         </p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">{def.name}</h1>
         <p className="num mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">{formatReference(shown, def)}</p>
@@ -87,7 +92,15 @@ export default function ReferencePage({ params }: { params: Promise<{ code: stri
       <AssetNews reference={def.code} />
 
       <p className="px-1 text-[13px] leading-6 text-ink-muted">
-        {DRIVERS[def.code]} 이 가격은 모의 시장이 만드는 가상 지수이며, 곧 추가될 선물의 정산 기준이 됩니다.
+        {DRIVERS[def.code]} 이 가격은 모의 시장이 만드는 가상 지수이며,{" "}
+        {FUTURE_OF[def.code] ? (
+          <Link href={`/futures/${FUTURE_OF[def.code]}`} className="text-sky">
+            {FUTURE_OF[def.code]} 선물
+          </Link>
+        ) : (
+          "같은 이름 선물"
+        )}
+        의 정산 기준입니다.
       </p>
     </div>
   );

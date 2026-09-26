@@ -11,6 +11,7 @@ import dynamic from "next/dynamic";
 import PerformanceCard, { type RealizedStats } from "@/components/PerformanceCard";
 import { NewsList } from "@/components/NewsFeed";
 import FuturesHoldings from "@/components/FuturesHoldings";
+import OptionHoldings from "@/components/OptionHoldings";
 import FuturesList from "@/components/FuturesList";
 import type { FuturesAccount } from "@/lib/futures";
 import ReferenceList from "@/components/ReferenceList";
@@ -115,7 +116,7 @@ export default function DashboardPage() {
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
   const [realized, setRealized] = useState<RealizedSummary | null>(null);
   const [futures, setFutures] = useState<FuturesAccount | null>(null);
-  const [holdingsTab, setHoldingsTab] = useState<"stock" | "futures">("stock");
+  const [holdingsTab, setHoldingsTab] = useState<"stock" | "futures" | "options">("stock");
   const [symbols, setSymbols] = useState<SymbolRow[]>([]);
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [turnovers, setTurnovers] = useState<Record<string, number>>({});
@@ -373,9 +374,10 @@ export default function DashboardPage() {
   const optionPositions = futures?.options ?? [];
   const optionsCost = optionPositions.reduce((sum, p) => sum + p.value - p.unrealized, 0);
   const optionsPnl = optionPositions.reduce((sum, p) => sum + p.unrealized, 0);
-  const futuresValue = Math.max(0, futuresMargin + futuresUnrealized) + Math.max(0, optionsValue);
+  const futuresValue = Math.max(0, futuresMargin + futuresUnrealized);
+  const optionsShare = Math.max(0, optionsValue);
   const cashValue = Math.max(0, (account?.balance ?? 0) - futuresMargin - futuresDebt);
-  const total = cashValue + stockValue + futuresValue;
+  const total = cashValue + stockValue + futuresValue + optionsShare;
   // 총 자산 = 현금 잔액 + 주식 평가금액 + 선물 평가손익 + 옵션 평가액 − 미수금
   const totalExact =
     BigInt(account?.balanceExact ?? String(account?.balance ?? 0)) +
@@ -385,11 +387,11 @@ export default function DashboardPage() {
     BigInt(Math.round(futuresDebt));
   const realizedToday = (realized?.today ?? 0) + (realized?.futures?.today ?? 0);
   const realizedTotal = (realized?.total ?? 0) + (realized?.futures?.total ?? 0);
-  const futuresPositions = (futures?.positions.length ?? 0) + optionPositions.length;
+  const futuresPositions = futures?.positions.length ?? 0;
   // 평가손익 = 주식 평가손익 + 선물 평가손익. 수익률의 분모는 주식 매입원가 + 선물 증거금(투입 금액).
   const stockCost = liveHoldings.reduce((sum, h) => sum + h.costBasis, 0);
   const stockPnl = liveHoldings.reduce((sum, h) => sum + h.pnl, 0);
-  const futuresOpen = futuresPositions > 0;
+  const futuresOpen = futuresPositions + optionPositions.length > 0;
   // 옵션은 낸 프리미엄(원가)이 투입 금액이다.
   const totalCost = stockCost + (futures?.marginHeld ?? 0) + optionsCost;
   const totalPnl = stockPnl + (futures?.unrealized ?? 0) + optionsPnl;
@@ -449,7 +451,7 @@ export default function DashboardPage() {
               label="누적 실현손익"
               value={realized ? signedWon(realizedTotal) : "—"}
               tone={realized ? toneOf(realizedTotal) : undefined}
-              title={`지금까지 확정된 손익 — 주식 ${signedWon(realized?.total ?? 0)} · 선물 ${signedWon(realized?.futures?.total ?? 0)}`}
+              title={`지금까지 확정된 손익 — 주식 ${signedWon(realized?.total ?? 0)} · 선물·옵션 ${signedWon(realized?.futures?.total ?? 0)}`}
             />
           </dl>
         </div>
@@ -461,6 +463,7 @@ export default function DashboardPage() {
               <div className="bg-sky/70" style={{ width: `${(cashValue / total) * 100}%` }} />
               <div className="bg-indigo/70" style={{ width: `${(stockValue / total) * 100}%` }} />
               <div className="bg-warn/70" style={{ width: `${(futuresValue / total) * 100}%` }} />
+              <div className="bg-ok/70" style={{ width: `${(optionsShare / total) * 100}%` }} />
             </div>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-muted">
               <span className="flex items-center gap-1.5">
@@ -471,10 +474,16 @@ export default function DashboardPage() {
                 <span className="h-2 w-2 rounded-full bg-indigo/70" />
                 주식 {((stockValue / total) * 100).toFixed(1)}%
               </span>
-              <span className="flex items-center gap-1.5" title="선물 증거금 + 평가손익 + 옵션 평가액">
+              <span className="flex items-center gap-1.5" title="선물 증거금 + 평가손익">
                 <span className="h-2 w-2 rounded-full bg-warn/70" />
                 선물 {((futuresValue / total) * 100).toFixed(1)}%
               </span>
+              {optionsShare > 0 && (
+                <span className="flex items-center gap-1.5" title="옵션 평가액(최근가 × 수량 × 승수)">
+                  <span className="h-2 w-2 rounded-full bg-ok/70" />
+                  옵션 {((optionsShare / total) * 100).toFixed(1)}%
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -500,7 +509,8 @@ export default function DashboardPage() {
             {(
               [
                 ["stock", `주식 ${liveHoldings.length}`],
-                ["futures", `선물·옵션 ${futuresPositions}`],
+                ["futures", `선물 ${futuresPositions}`],
+                ["options", `옵션 ${optionPositions.length}`],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -519,6 +529,8 @@ export default function DashboardPage() {
         </div>
         {holdingsTab === "futures" ? (
           <FuturesHoldings account={futures} />
+        ) : holdingsTab === "options" ? (
+          <OptionHoldings positions={optionPositions} />
         ) : !hasHoldings ? (
           <div className="px-5 py-12 text-center">
             <p className="text-sm text-ink-muted">보유 종목이 없습니다.</p>

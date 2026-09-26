@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ChipTabs from "@/components/ChipTabs";
 import FuturesList from "@/components/FuturesList";
 import OptionChain from "@/components/OptionChain";
-import ReferenceList from "@/components/ReferenceList";
+import ReferenceCards from "@/components/ReferenceCards";
 import Sparkline from "@/components/Sparkline";
 import { api, fmt } from "@/lib/api";
 import { indexSessionBase, type IndexPoint } from "@/lib/index-session";
@@ -48,7 +48,7 @@ const KIND_STORAGE_KEY = "market:kind";
 type MarketKind = "stock" | "futures";
 const KINDS: { id: MarketKind; label: string }[] = [
   { id: "stock", label: "현물" },
-  { id: "futures", label: "선물·원자재" },
+  { id: "futures", label: "선물·옵션" },
 ];
 const indexFormatter = new Intl.NumberFormat("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -254,7 +254,10 @@ export default function MarketPage() {
         </span>
       </Link>
 
-      {/* ── 현물 | 선물 전환 ──────────────────────────────────── */}
+      {/* ── 환율·원자재 요약 (누르면 각 화면) ─────────────────────── */}
+      <ReferenceCards />
+
+      {/* ── 현물 | 선물·옵션 전환 ─────────────────────────────── */}
       <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-2/60 p-1" role="tablist" aria-label="시장 구분">
         {KINDS.map((k) => (
           <button
@@ -367,14 +370,6 @@ export default function MarketPage() {
             <OptionChain />
           </section>
 
-          {/* ── 원자재·환율 (선물 기초자산) ───────────────────────────── */}
-          <section className="glass overflow-hidden">
-            <div className="panel-head">
-              <span className="panel-title">원자재·환율</span>
-              <span className="text-[11px] text-ink-faint">선물 기초자산 · 가상 지수</span>
-            </div>
-            <ReferenceList />
-          </section>
         </>
       )}
     </div>

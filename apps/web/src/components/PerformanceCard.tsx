@@ -26,7 +26,7 @@ type Market = "all" | "stock" | "futures";
 const MARKET_TABS: { id: Market; label: string }[] = [
   { id: "all", label: "전체" },
   { id: "stock", label: "주식" },
-  { id: "futures", label: "선물" },
+  { id: "futures", label: "선물·옵션" },
 ];
 
 /**
@@ -108,7 +108,7 @@ export default function PerformanceCard({
         <div className="grid flex-1 place-items-center px-5 py-10 text-center">
           <p className="text-sm text-ink-faint">
             {market === "futures"
-              ? "아직 선물 청산이 없습니다. 포지션을 청산(또는 일일 정산)하면 계산됩니다."
+              ? "아직 선물·옵션 청산이 없습니다. 포지션을 청산(또는 일일 정산·만기)하면 계산됩니다."
               : "아직 매도 체결이 없습니다. 첫 매도 뒤 승률과 손익비가 계산됩니다."}
           </p>
         </div>
