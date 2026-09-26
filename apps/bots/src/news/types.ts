@@ -1,6 +1,7 @@
 import type { ReferenceCode } from "@mock-kabu/shared";
 import type { MarketEventSentiment } from "../market-model";
 import type { Range } from "./random";
+import type { LocalizedSlots, NewsTranslations } from "./i18n";
 
 export type { Range };
 
@@ -177,6 +178,10 @@ export interface NewsItem {
   readonly slotValues: Readonly<Record<string, string>>;
   readonly parentItemId: string | null;
   readonly impact: readonly NewsImpact[];
+  /** 슬롯 값의 영어·일본어 표기(속편이 이어받는다) */
+  readonly localizedSlots?: LocalizedSlots;
+  /** 영어·일본어 기사(번역 템플릿이 있는 언어만) */
+  readonly translations?: NewsTranslations;
   /** 기초자산 충격(로그 수익률) — 기사 속 숫자를 만든 값과 같다 */
   readonly referenceMoves?: readonly { readonly code: ReferenceCode; readonly move: number }[];
 }

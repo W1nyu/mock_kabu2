@@ -5,6 +5,28 @@ import { isParticleKey, resolveParticle } from "./particles";
 import { randomInt, uniform, weightedPick } from "./random";
 import type { NewsTemplate, SlotSpec, VocabKey } from "./types";
 import { vocabList } from "./vocab";
+import {
+  formatCountLocale,
+  formatDurationLocale,
+  formatEokLocale,
+  formatLevelLocale,
+  formatQuarterLocale,
+  formatWonLocale,
+  symbolNameLocale,
+  vocabLocale,
+} from "./i18n/format";
+import { NEWS_LOCALES, type LocalizedSlots } from "./i18n";
+
+/** 한 슬롯 값의 세 언어 표기 */
+export interface SlotTexts {
+  readonly ko: string;
+  readonly en: string;
+  readonly ja: string;
+}
+
+function same(text: string): SlotTexts {
+  return { ko: text, en: text, ja: text };
+}
 
 const groupFormatter = new Intl.NumberFormat("ko-KR");
 
@@ -53,11 +75,16 @@ export function snapToTick(price: number, tickSize: number): number {
   return Math.max(tick, Math.round(price / tick) * tick);
 }
 
-/** Calendar quarter label, offset in whole quarters from `nowMs`. */
-export function quarterLabel(nowMs: number, offsetQuarters: number): string {
+/** Calendar quarter number (1–4), offset in whole quarters from `nowMs`. */
+export function quarterNumber(nowMs: number, offsetQuarters: number): number {
   const date = new Date(nowMs);
   const index = date.getUTCFullYear() * 4 + Math.floor(date.getUTCMonth() / 3) + offsetQuarters;
-  return `${(((index % 4) + 4) % 4) + 1}분기`;
+  return (((index % 4) + 4) % 4) + 1;
+}
+
+/** Calendar quarter label, offset in whole quarters from `nowMs`. */
+export function quarterLabel(nowMs: number, offsetQuarters: number): string {
+  return `${quarterNumber(nowMs, offsetQuarters)}분기`;
 }
 
 /** The slice of RecentNewsMemory the slot sampler needs. */
@@ -81,6 +108,8 @@ export interface SlotContext {
   readonly memory: VocabMemory;
   /** A sequel reuses its parent's bindings so it reads as the same story. */
   readonly inherited?: Readonly<Record<string, string>>;
+  /** 부모 기사의 영어·일본어 슬롯 값(같은 키를 이어받을 때 번역도 함께) */
+  readonly inheritedLocalized?: LocalizedSlots;
   /**
    * reference 슬롯용: 다른 슬롯을 다 채운 뒤(예: {commodity}) 이 기사가 움직일 대표 기초자산을 알려 준다.
    * 없거나 null이면 reference 슬롯은 range에서 무작위로 뽑는다.
@@ -107,15 +136,26 @@ const LEVEL_STEPS: Readonly<Record<ReferenceCode, readonly number[]>> = {
   CORN: [1, 0.5, 0.1],
 };
 
-function formatLevel(value: number, decimals: number, unit: string): string {
+function formatLevelNumber(value: number, decimals: number): string {
   const rounded = Number(value.toFixed(decimals));
-  const text =
-    decimals === 0
-      ? group(rounded)
-      : `${group(Math.trunc(rounded))}.${Math.abs(rounded % 1)
-          .toFixed(decimals)
-          .slice(2)}`;
-  return `${text}${unit}`;
+  return decimals === 0
+    ? group(rounded)
+    : `${group(Math.trunc(rounded))}.${Math.abs(rounded % 1)
+        .toFixed(decimals)
+        .slice(2)}`;
+}
+
+function formatLevel(value: number, decimals: number, unit: string): string {
+  return `${formatLevelNumber(value, decimals)}${unit}`;
+}
+
+function levelTexts(value: number, decimals: number, unit: string): SlotTexts {
+  const number = formatLevelNumber(value, decimals);
+  return {
+    ko: `${number}${unit}`,
+    en: formatLevelLocale(number, unit, "en"),
+    ja: formatLevelLocale(number, unit, "ja"),
+  };
 }
 
 /** 오르는 기사는 지금 값 위·도착 값 이하의 눈금, 내리는 기사는 지금 값 아래·도착 값 이상의 눈금 */
@@ -129,16 +169,16 @@ export function referenceLevel(plan: ReferenceSlotPlan): number {
   return target;
 }
 
-function sampleReferenceSlot(spec: SlotSpec, plan: ReferenceSlotPlan): string | null {
+function sampleReferenceSlot(spec: SlotSpec, plan: ReferenceSlotPlan): SlotTexts | null {
   if (spec.kind === "percent") {
     const pct = Math.max(0.1, Math.abs(Math.exp(plan.move) - 1) * 100);
-    return `${pct.toFixed(spec.decimals ?? 1)}%`;
+    return same(`${pct.toFixed(spec.decimals ?? 1)}%`);
   }
   if (spec.kind === "level") {
     const level = referenceLevel(plan);
     // 눈금이 정수면 정수로, 0.5·0.1 눈금이면 소수 한 자리로 쓴다.
     const decimals = Number.isInteger(Number(level.toFixed(6))) ? 0 : 1;
-    return formatLevel(level, decimals, spec.unit);
+    return levelTexts(level, decimals, spec.unit);
   }
   return null;
 }
@@ -165,48 +205,75 @@ function samplePick(vocab: VocabKey, ctx: SlotContext): string {
   return chosen;
 }
 
-function sampleSlot(spec: SlotSpec, ctx: SlotContext): string {
+function moneyTexts(eok: number): SlotTexts {
+  const rounded = roundEok(eok);
+  return { ko: formatEok(eok), en: formatEokLocale(rounded, "en"), ja: formatEokLocale(rounded, "ja") };
+}
+
+/** 슬롯 하나를 뽑아 세 언어 표기를 함께 만든다(난수는 한국어와 같은 순서로 한 번만 쓴다). */
+function sampleSlot(spec: SlotSpec, ctx: SlotContext): SlotTexts {
   switch (spec.kind) {
     case "money": {
       const capEok = ctx.profile?.capEok ?? 10_000;
       const eok = Math.max(spec.minEok ?? 5, capEok * uniform(ctx.random, spec.capFraction));
-      return formatEok(eok);
+      return moneyTexts(eok);
     }
     case "macroMoney":
-      return formatEok(uniform(ctx.random, spec.eok));
+      return moneyTexts(uniform(ctx.random, spec.eok));
     case "percent":
-      return `${uniform(ctx.random, spec.range).toFixed(spec.decimals ?? 1)}%`;
+      return same(`${uniform(ctx.random, spec.range).toFixed(spec.decimals ?? 1)}%`);
     case "targetPrice": {
       const base = ctx.price ?? ctx.symbol?.initialPrice ?? 0;
       const target = snapToTick(
         roundNicePrice(base * uniform(ctx.random, spec.ratio)),
         ctx.symbol?.tickSize ?? 1,
       );
-      return `${group(target)}원`;
+      return { ko: `${group(target)}원`, en: formatWonLocale(target, "en"), ja: formatWonLocale(target, "ja") };
     }
     case "level":
-      return formatLevel(uniform(ctx.random, spec.range), spec.decimals ?? 0, spec.unit);
+      return levelTexts(uniform(ctx.random, spec.range), spec.decimals ?? 0, spec.unit);
     case "multiple":
-      return uniform(ctx.random, spec.range).toFixed(spec.decimals ?? 0);
-    case "count":
-      return `${group(randomInt(ctx.random, Math.round(spec.range.min), Math.round(spec.range.max)))}${spec.unit}`;
-    case "duration":
-      return `${randomInt(ctx.random, Math.round(spec.range.min), Math.round(spec.range.max))}${spec.unit}`;
-    case "quarter":
-      return quarterLabel(ctx.nowMs, spec.offsetQuarters ?? -1);
-    case "pick":
-      return samplePick(spec.vocab, ctx);
+      return same(uniform(ctx.random, spec.range).toFixed(spec.decimals ?? 0));
+    case "count": {
+      const value = randomInt(ctx.random, Math.round(spec.range.min), Math.round(spec.range.max));
+      return {
+        ko: `${group(value)}${spec.unit}`,
+        en: formatCountLocale(value, spec.unit, "en"),
+        ja: formatCountLocale(value, spec.unit, "ja"),
+      };
+    }
+    case "duration": {
+      const value = randomInt(ctx.random, Math.round(spec.range.min), Math.round(spec.range.max));
+      return {
+        ko: `${value}${spec.unit}`,
+        en: formatDurationLocale(value, spec.unit, "en"),
+        ja: formatDurationLocale(value, spec.unit, "ja"),
+      };
+    }
+    case "quarter": {
+      const quarter = quarterNumber(ctx.nowMs, spec.offsetQuarters ?? -1);
+      return { ko: `${quarter}분기`, en: formatQuarterLocale(quarter, "en"), ja: formatQuarterLocale(quarter, "ja") };
+    }
+    case "pick": {
+      const value = samplePick(spec.vocab, ctx);
+      return { ko: value, en: vocabLocale(value, "en"), ja: vocabLocale(value, "ja") };
+    }
   }
 }
 
 /** Keys every SYMBOL-scope template can use without declaring them. */
 export function autoBoundSlots(ctx: SlotContext): Record<string, string> {
+  return Object.fromEntries(Object.entries(autoBoundTexts(ctx)).map(([key, texts]) => [key, texts.ko]));
+}
+
+function autoBoundTexts(ctx: SlotContext): Record<string, SlotTexts> {
   if (!ctx.symbol) return {};
-  const price = ctx.price ?? ctx.symbol.initialPrice;
+  const price = Math.round(ctx.price ?? ctx.symbol.initialPrice);
+  const symbol = ctx.symbol;
   return {
-    name: ctx.symbol.name,
-    symbol: ctx.symbol.symbol,
-    price: `${group(Math.round(price))}원`,
+    name: { ko: symbol.name, en: symbolNameLocale(symbol.symbol, symbol.name, "en"), ja: symbolNameLocale(symbol.symbol, symbol.name, "ja") },
+    symbol: same(symbol.symbol),
+    price: { ko: `${group(price)}원`, en: formatWonLocale(price, "en"), ja: formatWonLocale(price, "ja") },
   };
 }
 
@@ -219,8 +286,16 @@ export function autoBoundSlots(ctx: SlotContext): Record<string, string> {
  */
 const INHERITABLE_SLOTS = new Set(["money", "country", "counterparty", "product", "title", "plant"]);
 
-export function bindSlots(template: NewsTemplate, ctx: SlotContext): Record<string, string> {
-  const values: Record<string, string> = autoBoundSlots(ctx);
+/**
+ * 슬롯을 채운다. 반환값은 한국어 값이고, `localized`를 주면 같은 값의 영어·일본어 표기를 거기에 채운다.
+ */
+export function bindSlots(template: NewsTemplate, ctx: SlotContext, localized?: LocalizedSlots): Record<string, string> {
+  const values: Record<string, string> = {};
+  const put = (key: string, texts: SlotTexts) => {
+    values[key] = texts.ko;
+    if (localized) for (const locale of NEWS_LOCALES) localized[locale][key] = texts[locale];
+  };
+  for (const [key, texts] of Object.entries(autoBoundTexts(ctx))) put(key, texts);
   const deferred: [string, SlotSpec][] = [];
   for (const [key, spec] of Object.entries(template.slots ?? {})) {
     // reference 슬롯은 {commodity} 같은 다른 슬롯이 정해진 뒤에 채운다.
@@ -231,11 +306,19 @@ export function bindSlots(template: NewsTemplate, ctx: SlotContext): Record<stri
     // A sequel keeps the parent's identifying figures, so "3,200억 수주"
     // becomes "3,200억 본계약" rather than an unrelated new number.
     const inherited = INHERITABLE_SLOTS.has(key) ? ctx.inherited?.[key] : undefined;
-    values[key] = inherited ?? sampleSlot(spec, ctx);
+    if (inherited !== undefined) {
+      put(key, {
+        ko: inherited,
+        en: ctx.inheritedLocalized?.en[key] ?? vocabLocale(inherited, "en"),
+        ja: ctx.inheritedLocalized?.ja[key] ?? vocabLocale(inherited, "ja"),
+      });
+      continue;
+    }
+    put(key, sampleSlot(spec, ctx));
   }
   if (deferred.length > 0) {
     const plan = ctx.referencePlan?.(values) ?? null;
-    for (const [key, spec] of deferred) values[key] = (plan && sampleReferenceSlot(spec, plan)) ?? sampleSlot(spec, ctx);
+    for (const [key, spec] of deferred) put(key, (plan && sampleReferenceSlot(spec, plan)) ?? sampleSlot(spec, ctx));
   }
   return values;
 }

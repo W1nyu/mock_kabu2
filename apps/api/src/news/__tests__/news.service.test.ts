@@ -37,6 +37,7 @@ describe("NewsService.list", () => {
       category: "CAPITAL",
       headline: ROW.headline,
       body: null,
+      translations: {},
       ts: Date.parse("2026-09-08T10:42:00.000Z"),
     });
     expect(Object.keys(item)).not.toContain("sentiment");

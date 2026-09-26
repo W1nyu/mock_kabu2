@@ -132,6 +132,8 @@ export class ApiClient {
     parentExternalId: string | null;
     externalId: string;
     referenceCodes?: string[];
+    /** 영어·일본어 기사 */
+    translations?: Partial<Record<"en" | "ja", { headline: string; body: string | null }>>;
   }) {
     const res = await fetch(`${BASE}/internal/news/publish`, {
       method: "POST",

@@ -370,6 +370,8 @@ model NewsItem {
   parentExternalId String? @map("parent_external_id")
   /// 이 기사가 움직인 선물 기초자산 코드(USDKRW·OIL·GAS·COPPER·GOLD·CORN) — GIN 인덱스는 마이그레이션 SQL에
   referenceCodes String[] @default([]) @map("reference_codes")
+  /// 영어·일본어 번역 {en: {headline, body}, ja: {...}} — 없으면 빈 객체
+  translations   Json     @default("{}")
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@index([createdAt])

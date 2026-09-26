@@ -3,7 +3,7 @@
 import { industryById, industryOf, type NewsItemDto } from "@mock-kabu/shared";
 import Link from "next/link";
 import { formatNewsTime } from "@/lib/news";
-import { useNames, useT } from "@/lib/i18n";
+import { useI18n, useNames, useT } from "@/lib/i18n";
 
 export function NewsRow({
   item,
@@ -14,8 +14,12 @@ export function NewsRow({
   showSymbol?: boolean;
   showIndustry?: boolean;
 }) {
-  const t = useT();
+  const { t, locale } = useI18n();
   const names = useNames();
+  // 화면 언어의 번역이 있으면 그것, 없으면(옛 기사) 한국어 원문
+  const translated = locale === "ko" ? null : (item.translations?.[locale] ?? null);
+  const headline = translated?.headline ?? item.headline;
+  const body = translated ? translated.body : item.body;
   return (
     <li className="border-b border-hairline-soft px-4 py-3 transition-colors last:border-b-0 hover:bg-surface-3/25">
       <div className="flex items-baseline gap-3">
@@ -42,8 +46,8 @@ export function NewsRow({
           ))}
       </div>
 
-      <p className="mt-1 text-sm leading-snug font-medium">{item.headline}</p>
-      {item.body && <p className="mt-1 text-xs leading-relaxed text-ink-muted">{item.body}</p>}
+      <p className="mt-1 text-sm leading-snug font-medium">{headline}</p>
+      {body && <p className="mt-1 text-xs leading-relaxed text-ink-muted">{body}</p>}
     </li>
   );
 }

@@ -18,6 +18,7 @@ import { companyProfile, MIN_MACRO_BETA } from "./company-profiles";
 import { RecentNewsMemory, renderKey } from "./memory";
 import { clamp, pickOne, triangular, unitRandom, uniform, weightedPick } from "./random";
 import { bindSlots, renderTemplate, type SlotContext } from "./slots";
+import { emptyLocalizedSlots, renderTranslations, type LocalizedSlots, type NewsTranslations } from "./i18n";
 import type { FollowUpOutcome, NewsImpact, NewsItem, NewsTemplate, SectorTag } from "./types";
 
 /** How many times a duplicate render is resampled before it is accepted anyway. */
@@ -114,19 +115,28 @@ function renderWithSlots(
   template: NewsTemplate,
   ctx: GeneratorContext,
   slotContext: SlotContext,
-): { headline: string; body: string | null; slotValues: Record<string, string> } {
-  let slotValues = bindSlots(template, slotContext);
+): {
+  headline: string;
+  body: string | null;
+  slotValues: Record<string, string>;
+  localizedSlots: LocalizedSlots;
+  translations: NewsTranslations | undefined;
+} {
+  let localizedSlots = emptyLocalizedSlots();
+  let slotValues = bindSlots(template, slotContext, localizedSlots);
   for (let attempt = 0; attempt < MAX_RESAMPLE_ATTEMPTS; attempt++) {
     if (!ctx.memory.isDuplicateRender(renderKey(template.id, slotValues))) break;
-    slotValues = bindSlots(template, slotContext);
+    localizedSlots = emptyLocalizedSlots();
+    slotValues = bindSlots(template, slotContext, localizedSlots);
   }
 
   const index = ctx.memory.nextHeadlineIndex(template.id, template.headlines.length);
   const headline = renderTemplate(template.headlines[index], slotValues);
-  const body = template.body?.length
-    ? renderTemplate(pickOne(ctx.random, template.body), slotValues)
-    : null;
-  return { headline, body, slotValues };
+  // 본문은 번역도 같은 번호를 쓰도록 번호로 고른다(pickOne과 같은 난수 사용).
+  const bodyIndex = template.body?.length ? template.body.indexOf(pickOne(ctx.random, template.body)) : null;
+  const body = bodyIndex != null && template.body ? renderTemplate(template.body[bodyIndex], slotValues) : null;
+  const translations = renderTranslations(template.id, index, bodyIndex, localizedSlots);
+  return { headline, body, slotValues, localizedSlots, translations };
 }
 
 function makeId(ctx: GeneratorContext, template: NewsTemplate): string {
@@ -188,7 +198,7 @@ export function generateSymbolNews(
     price: ctx.prices.get(symbol.symbol) ?? symbol.initialPrice,
     memory: ctx.memory,
   };
-  const { headline, body, slotValues } = renderWithSlots(template, ctx, slotContext);
+  const { headline, body, slotValues, localizedSlots, translations } = renderWithSlots(template, ctx, slotContext);
 
   return {
     id: makeId(ctx, template),
@@ -201,6 +211,8 @@ export function generateSymbolNews(
     body,
     publishedAtMs: ctx.nowMs,
     slotValues,
+    localizedSlots,
+    ...(translations ? { translations } : {}),
     parentItemId: null,
     impact: [
       {
@@ -253,7 +265,7 @@ export function generateMacroNews(ctx: GeneratorContext, forcedTemplateId?: stri
       return { code: primary[0], current, move: referenceNewsMove(primary[0], primary[1], direction, macroStrength) };
     },
   };
-  const { headline, body, slotValues } = renderWithSlots(template, ctx, slotContext);
+  const { headline, body, slotValues, localizedSlots, translations } = renderWithSlots(template, ctx, slotContext);
   const referenceMoves = referenceWeights(template, slotValues).map(([code, weight]) => ({
     code,
     move: referenceNewsMove(code, weight, direction, macroStrength),
@@ -297,6 +309,8 @@ export function generateMacroNews(ctx: GeneratorContext, forcedTemplateId?: stri
     body,
     publishedAtMs: ctx.nowMs,
     slotValues,
+    localizedSlots,
+    ...(translations ? { translations } : {}),
     parentItemId: null,
     impact,
     ...(referenceMoves.length > 0 ? { referenceMoves } : {}),
@@ -335,7 +349,7 @@ export function generateSectorNews(ctx: GeneratorContext): NewsItem | null {
     price: null,
     memory: ctx.memory,
   };
-  const { headline, body, slotValues } = renderWithSlots(template, ctx, slotContext);
+  const { headline, body, slotValues, localizedSlots, translations } = renderWithSlots(template, ctx, slotContext);
 
   const impact: NewsImpact[] = [];
   let lead: { symbol: string; weight: number } | null = null;
@@ -371,6 +385,8 @@ export function generateSectorNews(ctx: GeneratorContext): NewsItem | null {
     body,
     publishedAtMs: ctx.nowMs,
     slotValues,
+    localizedSlots,
+    ...(translations ? { translations } : {}),
     parentItemId: null,
     impact,
   };
@@ -412,8 +428,9 @@ export function generateSequel(
     memory: ctx.memory,
     // The sequel keeps the parent's figures so it reads as the same story.
     inherited: parent.slotValues,
+    inheritedLocalized: parent.localizedSlots,
   };
-  const { headline, body, slotValues } = renderWithSlots(template, ctx, slotContext);
+  const { headline, body, slotValues, localizedSlots, translations } = renderWithSlots(template, ctx, slotContext);
 
   return {
     id: makeId(ctx, template),
@@ -426,6 +443,8 @@ export function generateSequel(
     body,
     publishedAtMs: ctx.nowMs,
     slotValues,
+    localizedSlots,
+    ...(translations ? { translations } : {}),
     parentItemId: parent.id,
     impact: [
       {

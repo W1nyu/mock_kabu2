@@ -12,6 +12,7 @@ import {
   SYMBOLS,
   type IndustryDef,
   type NewsItemDto,
+  type NewsTranslationsDto,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
 import { MemoCache } from "../core/memo-cache";
@@ -44,6 +45,7 @@ export interface PublishNewsDto {
   sentiment?: unknown;
   impact?: unknown;
   referenceCodes?: unknown;
+  translations?: unknown;
 }
 
 interface NewsRow {
@@ -54,6 +56,7 @@ interface NewsRow {
   category: string;
   headline: string;
   body: string | null;
+  translations?: unknown;
   createdAt: Date;
 }
 
@@ -82,6 +85,7 @@ export class NewsService {
       category: row.category,
       headline: row.headline,
       body: row.body,
+      translations: sanitizeTranslations(row.translations) ?? {},
       ts: row.createdAt.getTime(),
     };
   }
@@ -134,6 +138,7 @@ export class NewsService {
         category: true,
         headline: true,
         body: true,
+        translations: true,
         createdAt: true,
       },
     });
@@ -169,6 +174,8 @@ export class NewsService {
     }
     const parentExternalId =
       dto.parentExternalId == null ? null : requireString(dto.parentExternalId, "parentExternalId");
+    const translations = dto.translations == null ? {} : sanitizeTranslations(dto.translations);
+    if (translations === null) throw new BadRequestException("translations must be {en|ja: {headline, body}}");
 
     // Not shown anywhere. Stamped because it is what makes a later
     // "did this story actually move the price" analysis possible, the same
@@ -192,6 +199,7 @@ export class NewsService {
         impact: dto.impact as number,
         priceAtPublish,
         referenceCodes: [...new Set(referenceCodes as string[])],
+        translations: translations as Prisma.InputJsonObject,
       },
       // A retry after a network failure must not duplicate a headline.
       update: {},
@@ -203,6 +211,7 @@ export class NewsService {
         category: true,
         headline: true,
         body: true,
+        translations: true,
         createdAt: true,
       },
     });
@@ -267,4 +276,23 @@ function requireString(value: unknown, field: string): string {
     throw new BadRequestException(`${field} must be a non-empty string`);
   }
   return value;
+}
+
+const TRANSLATION_LOCALES = ["en", "ja"] as const;
+const MAX_HEADLINE = 400;
+const MAX_BODY = 2_000;
+
+/** 번역 객체를 {en|ja: {headline, body}}만 남겨 돌려준다. 모양이 틀리면 null. */
+export function sanitizeTranslations(value: unknown): NewsTranslationsDto | null {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
+  const out: NewsTranslationsDto = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!(TRANSLATION_LOCALES as readonly string[]).includes(key)) return null;
+    if (entry == null || typeof entry !== "object") return null;
+    const { headline, body } = entry as { headline?: unknown; body?: unknown };
+    if (typeof headline !== "string" || headline.length === 0 || headline.length > MAX_HEADLINE) return null;
+    if (body != null && (typeof body !== "string" || body.length > MAX_BODY)) return null;
+    out[key as "en" | "ja"] = { headline, body: (body as string | null | undefined) ?? null };
+  }
+  return out;
 }

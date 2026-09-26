@@ -58,6 +58,14 @@ export interface NewsItemDto {
   category: string;
   headline: string;
   body: string | null;
+  /** 영어·일본어 기사(있는 언어만). 화면 언어에 없으면 한국어 headline·body를 쓴다. */
+  translations?: NewsTranslationsDto;
   /** epoch ms */
   ts: number;
 }
+
+export interface NewsTranslationDto {
+  headline: string;
+  body: string | null;
+}
+export type NewsTranslationsDto = Partial<Record<"en" | "ja", NewsTranslationDto>>;
