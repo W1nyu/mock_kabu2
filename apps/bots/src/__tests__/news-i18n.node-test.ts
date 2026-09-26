@@ -96,6 +96,7 @@ test("generated stories carry complete English and Japanese versions with no Kor
       const translation = item.translations?.[locale];
       assert.ok(translation, `${item.templateId} has no ${locale} story`);
       assert.ok(!HANGUL.test(translation.headline), `${item.templateId} ${locale}: ${translation.headline}`);
+      if (locale === "en") assert.ok(!/^[a-z]/.test(translation.headline), `${item.templateId} en starts lowercase: ${translation.headline}`);
       if (item.body) assert.ok(translation.body, `${item.templateId} ${locale} lost its body`);
       if (translation.body) assert.ok(!HANGUL.test(translation.body), `${item.templateId} ${locale}: ${translation.body}`);
     }

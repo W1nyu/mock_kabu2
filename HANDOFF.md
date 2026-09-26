@@ -1,6 +1,13 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
-## 2026-09-26 — 영어·일본어 공식 지원 + bot7 증거금 부족 수정 — 미배포
+## 2026-09-26 16:26 KST — 영어·일본어 지원·bot7 수정 운영 적용 (a621241)
+
+- 사용자 "배포해". 미리 빌드 → 16:21 예고 → 16:26~16:31 점검: 봇 정지 → pgBackRest diff `20260925-183002F_20260926-072645D` → migrate(`20260926140000_news_translations`) → api·web·matching-engine·settlement → 점검 해제 → 봇.
+- 확인: 웹 `mk_locale` 쿠키별 `<html lang>`·제목 ko/en/ja, 호가 정상, 정합성 PASS 11 / FAIL 0, 배포 뒤 첫 기사부터 translations 저장(예: "국세청, 다온반도체에 과징금…" → en/ja), bot7 증거금 부족 0건.
+- 뒤이어 고침(미배포): 영어 헤드라인 첫 글자 대문자(어휘로 시작하면 "the tax authority…"였다).
+- 롤백 태그 `mock-kabu2-app:pre-i18n-20260926`(+서비스별), 원본 `/tmp/src-before-pre-i18n-20260926.tgz`.
+
+## 2026-09-26 — 영어·일본어 공식 지원 + bot7 증거금 부족 수정 (→ 16:26 운영 적용)
 
 - **언어 선택**: 쿠키 `mk_locale`(없으면 Accept-Language) → 서버가 첫 화면부터 그 언어로 그린다. 상단 메뉴 `KO/EN/JA`, 설정 화면에도 선택. `apps/web/src/lib/i18n` — `useT()`의 키는 한국어 원문(`t("주문 가능 금액")`, `{n}` 자리표시자), 사전 `messages.ts`(한국어 → [영어, 일본어], 약 630개). 같은 한국어가 뜻이 다르면 `"취소|동작"`처럼 구분. 문장 속 링크는 `rich()`. 빠진 번역: `node apps/web/scripts/i18n-missing.mjs`. 운영자 화면(admin·ops·replay)은 한국어 유지.
 - **이름**: shared `i18n.ts` — 종목·업종·원자재·선물·옵션 이름, 원화 표기(1,234원 / ₩1,234 / 1,234ウォン).

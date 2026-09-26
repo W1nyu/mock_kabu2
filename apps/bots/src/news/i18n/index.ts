@@ -63,8 +63,10 @@ export function renderTranslations(
   for (const locale of NEWS_LOCALES) {
     const translation = TEMPLATE_TRANSLATIONS[locale][templateId];
     if (!translation || translation.h.length === 0) continue;
-    const headline = renderPlain(translation.h[headlineIndex % translation.h.length], localized[locale]);
-    if (headline == null) continue;
+    const rendered = renderPlain(translation.h[headlineIndex % translation.h.length], localized[locale]);
+    if (rendered == null) continue;
+    // 영어 헤드라인이 어휘("the tax authority")로 시작해도 첫 글자는 대문자로.
+    const headline = locale === "en" ? rendered.charAt(0).toUpperCase() + rendered.slice(1) : rendered;
     let body: string | null = null;
     if (bodyIndex != null && translation.b && translation.b.length > 0) {
       body = renderPlain(translation.b[bodyIndex % translation.b.length], localized[locale]);
