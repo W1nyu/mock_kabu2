@@ -270,6 +270,7 @@ model MatchingProcessedOrderEvent {
   eventId     String   @id @map("event_id")
   processedAt DateTime @default(now()) @map("processed_at")
 
+  @@index([processedAt])
   @@map("processed_order_events")
   @@schema("matching")
 }
@@ -293,6 +294,7 @@ model MatchingClosedOrderMarker {
   eventId   String   @unique @map("event_id")
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([createdAt])
   @@map("closed_order_markers")
   @@schema("matching")
 }

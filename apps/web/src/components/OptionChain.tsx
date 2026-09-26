@@ -10,7 +10,8 @@ import { everyVisible } from "@/lib/visible-interval";
 import { useNames, useT } from "@/lib/i18n";
 
 /**
- * 옵션 체인 — 기초자산(주가지수·원/달러)마다 행사가 5줄, 왼쪽 콜·오른쪽 풋의 최근가(이론가).
+ * 옵션 체인 — 기초자산(원자재지수·원/달러)마다 행사가 줄, 왼쪽 콜·오른쪽 풋의 최근가(이론가).
+ * 기본은 등가격 ±2(5줄)만 — 선물 목록과 비슷한 높이. "모두 보기"로 전체 행사가를 편다.
  * 칸을 누르면 그 옵션 거래 화면으로. 이론가는 10초마다, 체결가는 소켓으로 갱신한다.
  */
 export default function OptionChain() {
@@ -19,6 +20,7 @@ export default function OptionChain() {
   const [rows, setRows] = useState<OptionRow[]>([]);
   const [live, setLive] = useState<Record<string, number>>({});
   const [family, setFamily] = useState<string>(OPTION_FAMILIES[0].code);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -54,7 +56,10 @@ export default function OptionChain() {
   // 행사가별 한 줄(높은 행사가가 위). 종목 번호가 아니라 행사가로 묶는다 — 장중에 행사가 개수를 늘린 날은
   // 번호와 행사가 순서가 다를 수 있다.
   const strikes = useMemo(() => {
-    const byStrike = new Map<number, { strike: number | null; call?: OptionRow; put?: OptionRow }>();
+    const byStrike = new Map<
+      number,
+      { strike: number | null; call?: OptionRow; put?: OptionRow }
+    >();
     for (const row of familyRows) {
       const key = row.strike ?? -row.slot;
       const entry = byStrike.get(key) ?? { strike: row.strike };
@@ -62,7 +67,9 @@ export default function OptionChain() {
       else entry.put = row;
       byStrike.set(key, entry);
     }
-    return [...byStrike.entries()].sort(([a], [b]) => b - a).map(([key, entry]) => ({ key, ...entry }));
+    return [...byStrike.entries()]
+      .sort(([a], [b]) => b - a)
+      .map(([key, entry]) => ({ key, ...entry }));
   }, [familyRows]);
   const head = familyRows[0];
   // 등가격 = 기초자산에 가장 가까운 행사가
@@ -70,9 +77,21 @@ export default function OptionChain() {
     const u = head?.underlying;
     if (u == null) return null;
     let best: number | null = null;
-    for (const s of strikes) if (s.strike != null && (best == null || Math.abs(s.strike - u) < Math.abs(best - u))) best = s.strike;
+    for (const s of strikes)
+      if (s.strike != null && (best == null || Math.abs(s.strike - u) < Math.abs(best - u)))
+        best = s.strike;
     return best;
   }, [strikes, head]);
+
+  // 등가격 ±NEAR 행사가만(끝에 붙으면 반대쪽으로 채워 항상 NEAR*2+1줄)
+  const NEAR = 2;
+  const visible = useMemo(() => {
+    if (showAll || atmStrike == null || strikes.length <= NEAR * 2 + 1) return strikes;
+    const at = strikes.findIndex((s) => s.strike === atmStrike);
+    const from = Math.max(0, Math.min(strikes.length - (NEAR * 2 + 1), at - NEAR));
+    return strikes.slice(from, from + NEAR * 2 + 1);
+  }, [strikes, atmStrike, showAll]);
+  const hidden = strikes.length - visible.length;
 
   const cell = (row: OptionRow | undefined, align: "left" | "right") => {
     if (!row) return <td />;
@@ -81,12 +100,14 @@ export default function OptionChain() {
       <td className={align === "left" ? "text-left" : "text-right"}>
         <Link
           href={`/options/${row.symbol}`}
-          className={`block rounded-lg px-2 py-1.5 transition-colors hover:bg-surface-3/30 active:bg-surface-3/45 ${
-            row.type === "CALL" ? "hover:text-up" : "hover:text-down"
-          }`}
+          className={`flex items-baseline gap-1.5 rounded-lg px-2 py-1 transition-colors hover:bg-surface-3/30 active:bg-surface-3/45 ${
+            align === "right" ? "flex-row-reverse" : ""
+          } ${row.type === "CALL" ? "hover:text-up" : "hover:text-down"}`}
         >
-          <span className="num block font-semibold">{fmtOption(row.symbol, price)}</span>
-          <span className="num block text-[11px] text-ink-faint">{t("이론")} {fmtOption(row.symbol, row.theo)}</span>
+          <span className="num font-semibold">{fmtOption(row.symbol, price)}</span>
+          <span className="num text-[11px] text-ink-faint" title={t("이론가")}>
+            {fmtOption(row.symbol, row.theo)}
+          </span>
         </Link>
       </td>
     );
@@ -103,7 +124,9 @@ export default function OptionChain() {
               aria-pressed={family === f.code}
               onClick={() => setFamily(f.code)}
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
-                family === f.code ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35" : "text-ink-muted hover:text-ink"
+                family === f.code
+                  ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
+                  : "text-ink-muted hover:text-ink"
               }`}
             >
               {names.optionFamily(f.code, f.name)}
@@ -112,12 +135,18 @@ export default function OptionChain() {
         </div>
         {head && (
           <p className="num text-[12px] text-ink-muted">
-            {t("기초자산")} <span className="font-semibold text-ink">{fmtOption(head.symbol, head.underlying)}</span>
-            <span className="text-ink-faint"> · {t("만기까지 {time}", { time: timeLeft(head.expiresAt) })}</span>
+            {t("기초자산")}{" "}
+            <span className="font-semibold text-ink">
+              {fmtOption(head.symbol, head.underlying)}
+            </span>
+            <span className="text-ink-faint">
+              {" "}
+              · {t("만기까지 {time}", { time: timeLeft(head.expiresAt) })}
+            </span>
           </p>
         )}
       </div>
-      <table className="tbl mt-1 w-full table-fixed">
+      <table className="tbl tbl-compact mt-1 w-full table-fixed">
         <thead>
           <tr>
             <th className="text-left text-up">{t("콜")}</th>
@@ -126,7 +155,7 @@ export default function OptionChain() {
           </tr>
         </thead>
         <tbody>
-          {strikes.map((s) => {
+          {visible.map((s) => {
             const atm = s.strike != null && s.strike === atmStrike;
             // 내가격 쪽은 살짝 칠한다: 콜은 행사가 < 기초자산, 풋은 행사가 > 기초자산.
             const u = head?.underlying ?? null;
@@ -135,9 +164,15 @@ export default function OptionChain() {
             return (
               <tr key={s.key}>
                 <td className={callItm ? "bg-up/5" : undefined}>{cell(s.call, "left")}</td>
-                <td className={`num text-center ${atm ? "font-semibold text-sky" : "text-ink-muted"}`}>
+                <td
+                  className={`num text-center ${atm ? "font-semibold text-sky" : "text-ink-muted"}`}
+                >
                   {s.call ? fmtStrike(s.call.symbol, s.strike) : "—"}
-                  {atm && <span className="block text-[10px] font-normal text-ink-faint">{t("등가격")}</span>}
+                  {atm && (
+                    <span className="ml-1 text-[10px] font-normal text-ink-faint">
+                      {t("등가격")}
+                    </span>
+                  )}
                 </td>
                 <td className={putItm ? "bg-down/5" : undefined}>{cell(s.put, "right")}</td>
               </tr>
@@ -152,8 +187,19 @@ export default function OptionChain() {
           )}
         </tbody>
       </table>
+      {(hidden > 0 || showAll) && strikes.length > NEAR * 2 + 1 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          className="block w-full border-t border-hairline-soft py-2 text-center text-xs text-sky hover:bg-surface-3/25"
+        >
+          {showAll ? t("등가격 근처만 보기") : t("행사가 {n}개 모두 보기", { n: strikes.length })}
+        </button>
+      )}
       <p className="px-4 pb-3 pt-2 text-[11px] leading-5 text-ink-faint">
-        {t("1일물 유럽형 — 매일 04:10 기초자산 가격으로 내가격이면 차액을 현금으로 받고, 외가격이면 소멸합니다. 매수와 보유분 매도만 할 수 있습니다.")}
+        {t(
+          "1일물 유럽형 — 매일 04:10 기초자산 가격으로 내가격이면 차액을 현금으로 받고, 외가격이면 소멸합니다. 매수와 보유분 매도만 할 수 있습니다.",
+        )}
       </p>
     </div>
   );

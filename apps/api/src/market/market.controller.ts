@@ -129,7 +129,10 @@ export class MarketController {
           MAX(t.created_at) AS last_trade_ts
         FROM matching.trades t
         JOIN market.symbols s ON s.symbol = t.symbol
-        WHERE t.created_at >= ${sessionStart} AND t.created_at >= ${LISTED_SINCE}
+        -- 종목 조건이 있어야 (symbol, created_at) 인덱스를 탄다. 없으면 2초마다 체결 테이블 전체를 훑었다.
+        -- 결과도 현물(ACTIVE_SYMBOLS)만 쓴다 — 선물·옵션 체결은 여기서 합칠 필요가 없다.
+        WHERE t.symbol IN (${Prisma.join([...ACTIVE_SYMBOLS])})
+          AND t.created_at >= ${sessionStart} AND t.created_at >= ${LISTED_SINCE}
         GROUP BY t.symbol
       `,
     ]);

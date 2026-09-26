@@ -371,6 +371,8 @@ export const MESSAGES: Readonly<Record<string, readonly [string, string]>> = {
   "평가손익 · 총 자산 대비": ["Unrealized P&L · vs. total assets", "評価損益 · 総資産比"],
   "주식 {stock} · 선물 {futures} · 옵션 {options} — 수익률은 총 자산(평가손익 반영 전) 대비": ["Stocks {stock} · Futures {futures} · Options {options} — return is relative to total assets before unrealized P&L", "株式 {stock} · 先物 {futures} · オプション {options} — 収益率は総資産(評価損益反映前)比"],
   "증거금 대비": ["vs. margin", "証拠金比"],
+  "등가격 근처만 보기": ["Show near the money only", "アットザマネー付近のみ表示"],
+  "행사가 {n}개 모두 보기": ["Show all {n} strikes", "権利行使価格{n}本をすべて表示"],
   "만기가 지나 정산이 끝난 옵션입니다. 더는 주문할 수 없습니다.": ["This option has expired and been settled. No more orders can be placed.", "満期を過ぎて精算済みのオプションです。これ以上注文できません。"],
   "거래가 끝난 옵션입니다. 새로 살 수 없고, 보유분은 매도하거나 다음 04:10 만기에 현금 정산됩니다.": ["This option has been retired. You can't buy it; sell what you hold, or it is cash-settled at the next 04:10 expiry.", "取引が終了したオプションです。新規購入はできず、保有分は売却するか次の04:10満期に現金決済されます。"],
   "내 포지션": ["My position", "マイポジション"],

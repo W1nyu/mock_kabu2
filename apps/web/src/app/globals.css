@@ -361,6 +361,10 @@ body::before {
   .tbl tbody tr:last-child td {
     border-bottom: none;
   }
+  /* 촘촘한 표(옵션 체인) — 칸 안 링크가 여백을 가지므로 칸 여백을 줄인다 */
+  .tbl-compact tbody td {
+    padding: 0.125rem 0.5rem;
+  }
   /* 합계 줄 — 본문과 같은 칸 여백, 위 구분선 */
   .tbl tfoot td {
     padding: 0.6875rem 1rem;
