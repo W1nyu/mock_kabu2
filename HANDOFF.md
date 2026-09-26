@@ -1,5 +1,13 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-26 — 운영 서버 점검, 인덱스 2개·개요 쿼리·옵션 체인 높이 (83ed7c2, 미배포)
+
+- **핵심 문제**: 매칭 엔진이 1분마다 7일 지난 멱등 기록을 지우는데(`pruneDurableLog`) `processed_order_events.processed_at`·`closed_order_markers.created_at`에 인덱스가 없어 매번 610만·370만 행(각 약 900MB)을 통째로 읽었다(분당 약 1,000만 행, EXPLAIN·60초 seq_scan 증가로 확인). 마이그레이션 `20260926200000_index_processed_order_event_age`·`20260926200100_index_closed_order_marker_age`(CREATE INDEX CONCURRENTLY, 무중단).
+- **시세 개요**: `/market/overview` 세션 집계가 종목 조건 없이 `created_at`만으로 체결 전체를 병렬 스캔(2초 캐시라 보는 사람이 있으면 2초마다) → 현물 종목 IN 조건으로 `(symbol, created_at)` 인덱스 사용(운영 EXPLAIN ANALYZE 1.17초 → 0.64초). API 재시작 필요.
+- **옵션 체인 높이**: 기본 등가격 ±2(5줄), "행사가 11개 모두 보기", 칸 한 줄(최근가·이론가), `.tbl-compact`.
+- 그 밖에 점검 결과(문제 아님): 디스크 25%, 메모리 여유 5.4GB(스왑 0.9GB 사용), Postgres 1.38/1.5GB는 대부분 파일 캐시(anon 250MB), 컨테이너 재시작 0, 1시간 오류 로그 0(bot7 422 1건), 백업 정상, TLS 12/22 만료(Caddy 자동 갱신), Redis 3.7MB. `mock-kabu-prune.service` failed 표시는 9/25 스키마 불일치 때 정합성 검사 예외 — 이후 정합성 PASS 11, 오늘 04:11 실행에서 풀린다.
+- 배포: 운영 적용 스크립트(migrate + web 재시작)는 권한 검사에 막혀 미실행. migrate(무중단) → web(무중단) → api(점검 중 권장).
+
 ## 2026-09-26 19:25 KST — 대시보드·옵션 거래 흐름 운영 적용 (1a95370, web·bots만 무점검)
 
 - 확인: web 200·healthy, 봇 재시작 뒤 4분간 옵션 체결 KCOM 13·원/달러 15(시간당 약 420건, 이전 약 46건), 옵션 봇 오류 없음, 정합성 PASS 11 / FAIL 0.
