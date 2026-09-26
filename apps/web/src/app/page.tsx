@@ -24,6 +24,7 @@ import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { everyVisible } from "@/lib/visible-interval";
+import { getLocale, translate, useNames, useT } from "@/lib/i18n";
 
 // lightweight-charts는 브라우저 전용이고 번들이 크다. 첫 화면(자산·시세 표)을 먼저 그리고 차트는 뒤에 싣는다.
 const EquityChart = dynamic(() => import("@/components/EquityChart"), {
@@ -107,10 +108,15 @@ function parseTradeTick(data: any): TradeTick | null {
 
 function formatTurnoverManWon(turnover: number | undefined): string {
   if (turnover == null || !Number.isFinite(turnover)) return "—";
-  return `${fmt.format(Math.round(turnover / 10_000))}만 원`;
+  const locale = getLocale();
+  // 영어는 만 단위가 없어 ₩12.3M처럼 줄여 쓴다. 일본어는 한국어처럼 万 단위.
+  if (locale === "en") return `₩${new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(turnover)}`;
+  return translate(locale, "{n}만 원", { n: fmt.format(Math.round(turnover / 10_000)) });
 }
 
 export default function DashboardPage() {
+  const t = useT();
+  const names = useNames();
   const router = useRouter();
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
@@ -340,7 +346,7 @@ export default function DashboardPage() {
           ]),
         ),
       ),
-    [liveSymbols],
+    [liveSymbols, t],
   );
   const selectedIndustry = industryById(industry);
   const shownSymbols = selectedIndustry
@@ -409,7 +415,7 @@ export default function DashboardPage() {
       <section className="glass overflow-hidden">
         <div className="flex flex-col gap-6 p-5 sm:p-6 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
           <div>
-            <p className="panel-title">총 자산</p>
+            <p className="panel-title">{t("총 자산")}</p>
             <p className="num mt-2 text-4xl font-semibold tracking-tight sm:text-5xl">
               {won(totalExact)}
             </p>
@@ -418,40 +424,54 @@ export default function DashboardPage() {
                 <>
                   <span
                     className={pnlTone}
-                    title={`주식 ${signedWon(stockPnl)} · 선물 ${signedWon(futures?.unrealized ?? 0)} · 옵션 ${signedWon(optionsPnl)} — 수익률은 주식 매입원가 + 선물 증거금 + 옵션 매수원가 대비`}
+                    title={t("주식 {stock} · 선물 {futures} · 옵션 {options} — 수익률은 주식 매입원가 + 선물 증거금 + 옵션 매수원가 대비", {
+                      stock: signedWon(stockPnl),
+                      futures: signedWon(futures?.unrealized ?? 0),
+                      options: signedWon(optionsPnl),
+                    })}
                   >
                     {totalPnl >= 0 ? "▲" : "▼"} {totalPnl >= 0 ? "+" : ""}
                     {won(totalPnl)} ({totalPnl >= 0 ? "+" : ""}
                     {(totalPnlRate * 100).toFixed(2)}%)
                   </span>
-                  <span className="ml-2 font-normal text-ink-faint">평가손익 · 전체 수익률</span>
+                  <span className="ml-2 font-normal text-ink-faint">{t("평가손익 · 전체 수익률")}</span>
                 </>
               ) : (
-                <span className="font-normal text-ink-faint">평가손익 —</span>
+                <span className="font-normal text-ink-faint">{t("평가손익")} —</span>
               )}
             </p>
           </div>
 
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
-            <Metric label="현금 잔액" value={won(BigInt(account?.balanceExact ?? String(account?.balance ?? 0)))} />
-            <Metric label="주문 가능" value={won(BigInt(account?.availableExact ?? String(account?.available ?? 0)))} />
-            <Metric label="주식 평가금액" value={won(stockValueExact)} />
+            <Metric label={t("현금 잔액")} value={won(BigInt(account?.balanceExact ?? String(account?.balance ?? 0)))} />
+            <Metric label={t("주문 가능")} value={won(BigInt(account?.availableExact ?? String(account?.available ?? 0)))} />
+            <Metric label={t("주식 평가금액")} value={won(stockValueExact)} />
             <Metric
-              label="선물·옵션 평가금액"
+              label={t("선물·옵션 평가금액")}
               value={won(Math.round(futuresMargin + futuresUnrealized + optionsValue))}
-              title={`선물 증거금 ${won(futuresMargin)} + 선물 평가손익 ${signedWon(futuresUnrealized)} + 옵션 평가액 ${won(optionsValue)}`}
+              title={t("선물 증거금 {margin} + 선물 평가손익 {pnl} + 옵션 평가액 {options}", {
+                margin: won(futuresMargin),
+                pnl: signedWon(futuresUnrealized),
+                options: won(optionsValue),
+              })}
             />
             <Metric
-              label="오늘 실현손익"
+              label={t("오늘 실현손익")}
               value={realized ? signedWon(realizedToday) : "—"}
               tone={realized ? toneOf(realizedToday) : undefined}
-              title={`KST 당일 확정 손익 — 주식 ${signedWon(realized?.today ?? 0)} · 선물 ${signedWon(realized?.futures?.today ?? 0)}`}
+              title={t("KST 당일 확정 손익 — 주식 {stock} · 선물·옵션 {futures}", {
+                stock: signedWon(realized?.today ?? 0),
+                futures: signedWon(realized?.futures?.today ?? 0),
+              })}
             />
             <Metric
-              label="누적 실현손익"
+              label={t("누적 실현손익")}
               value={realized ? signedWon(realizedTotal) : "—"}
               tone={realized ? toneOf(realizedTotal) : undefined}
-              title={`지금까지 확정된 손익 — 주식 ${signedWon(realized?.total ?? 0)} · 선물·옵션 ${signedWon(realized?.futures?.total ?? 0)}`}
+              title={t("지금까지 확정된 손익 — 주식 {stock} · 선물·옵션 {futures}", {
+                stock: signedWon(realized?.total ?? 0),
+                futures: signedWon(realized?.futures?.total ?? 0),
+              })}
             />
           </dl>
         </div>
@@ -468,20 +488,20 @@ export default function DashboardPage() {
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-muted">
               <span className="flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-sky/70" />
-                현금 {((cashValue / total) * 100).toFixed(1)}%
+                {t("현금")} {((cashValue / total) * 100).toFixed(1)}%
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-indigo/70" />
-                주식 {((stockValue / total) * 100).toFixed(1)}%
+                {t("주식")} {((stockValue / total) * 100).toFixed(1)}%
               </span>
-              <span className="flex items-center gap-1.5" title="선물 증거금 + 평가손익">
+              <span className="flex items-center gap-1.5" title={t("선물 증거금 + 평가손익")}>
                 <span className="h-2 w-2 rounded-full bg-warn/70" />
-                선물 {((futuresValue / total) * 100).toFixed(1)}%
+                {t("선물")} {((futuresValue / total) * 100).toFixed(1)}%
               </span>
               {optionsShare > 0 && (
-                <span className="flex items-center gap-1.5" title="옵션 평가액(최근가 × 수량 × 승수)">
+                <span className="flex items-center gap-1.5" title={t("옵션 평가액(최근가 × 수량 × 승수)")}>
                   <span className="h-2 w-2 rounded-full bg-ok/70" />
-                  옵션 {((optionsShare / total) * 100).toFixed(1)}%
+                  {t("옵션")} {((optionsShare / total) * 100).toFixed(1)}%
                 </span>
               )}
             </div>
@@ -504,13 +524,13 @@ export default function DashboardPage() {
       {/* ── Holdings ───────────────────────────────────────────── */}
       <section className="glass overflow-hidden">
         <div className="panel-head">
-          <span className="panel-title">보유 자산</span>
-          <div className="well flex gap-0.5 p-0.5" role="group" aria-label="주식·선물">
+          <span className="panel-title">{t("보유 자산")}</span>
+          <div className="well flex gap-0.5 p-0.5" role="group" aria-label={t("주식·선물")}>
             {(
               [
-                ["stock", `주식 ${liveHoldings.length}`],
-                ["futures", `선물 ${futuresPositions}`],
-                ["options", `옵션 ${optionPositions.length}`],
+                ["stock", `${t("주식")} ${liveHoldings.length}`],
+                ["futures", `${t("선물")} ${futuresPositions}`],
+                ["options", `${t("옵션")} ${optionPositions.length}`],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -533,11 +553,11 @@ export default function DashboardPage() {
           <OptionHoldings positions={optionPositions} />
         ) : !hasHoldings ? (
           <div className="px-5 py-12 text-center">
-            <p className="text-sm text-ink-muted">보유 종목이 없습니다.</p>
+            <p className="text-sm text-ink-muted">{t("보유 종목이 없습니다.")}</p>
             <p className="mt-1 text-xs text-ink-faint">
-              <span className="max-sm:hidden">위 목록에서 종목을 골라 첫 매수를 해보세요.</span>
+              <span className="max-sm:hidden">{t("위 목록에서 종목을 골라 첫 매수를 해보세요.")}</span>
               <Link href="/market" className="text-sky sm:hidden">
-                증권 탭에서 종목을 골라 첫 매수를 해보세요 →
+                {t("증권 탭에서 종목을 골라 첫 매수를 해보세요 →")}
               </Link>
             </p>
           </div>
@@ -546,7 +566,7 @@ export default function DashboardPage() {
           {/* 폰: 한 줄에 종목·수량 / 평가금액·손익만 보여 주는 목록 */}
           <ul className="divide-y divide-hairline-soft sm:hidden">
             {liveHoldings.map((h) => {
-              const name = symbols.find((s) => s.symbol === h.symbol)?.name ?? h.symbol;
+              const name = names.symbol(h.symbol, symbols.find((s) => s.symbol === h.symbol)?.name ?? h.symbol);
               const tone = h.pnl >= 0 ? "text-up" : "text-down";
               return (
                 <li key={h.symbol}>
@@ -557,7 +577,7 @@ export default function DashboardPage() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-semibold">{name}</span>
                       <span className="num block text-xs text-ink-faint">
-                        {fmt.format(h.qty)}주 · 평단 {fmt.format(Math.round(h.avgCost))}원
+                        {t("{qty}주 · 평단 {avg}", { qty: fmt.format(h.qty), avg: won(Math.round(h.avgCost)) })}
                       </span>
                     </span>
                     <span className="shrink-0 text-right">
@@ -577,13 +597,13 @@ export default function DashboardPage() {
             <table className="tbl tbl-hover">
               <thead>
                 <tr>
-                  <th>종목</th>
-                  <th className="text-right">보유 수량</th>
-                  <th className="text-right">매도 대기</th>
-                  <th className="text-right">평단가</th>
-                  <th className="text-right">현재가</th>
-                  <th className="text-right">평가금액</th>
-                  <th className="text-right">평가손익 (수익률)</th>
+                  <th>{t("종목")}</th>
+                  <th className="text-right">{t("보유 수량")}</th>
+                  <th className="text-right">{t("매도 대기")}</th>
+                  <th className="text-right">{t("평단가")}</th>
+                  <th className="text-right">{t("현재가")}</th>
+                  <th className="text-right">{t("평가금액")}</th>
+                  <th className="text-right">{t("평가손익 (수익률)")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -619,7 +639,7 @@ export default function DashboardPage() {
       <section className="glass overflow-hidden max-sm:hidden">
         <div className="panel-head">
           <span className="panel-title">
-            {selectedIndustry ? selectedIndustry.label : "종목"}
+            {selectedIndustry ? names.industry(selectedIndustry.id, selectedIndustry.label) : t("종목")}
             <span className="num ml-1.5 font-medium text-ink-faint">{shownSymbols.length}</span>
           </span>
           <span className="chip chip-live">
@@ -628,28 +648,28 @@ export default function DashboardPage() {
           </span>
         </div>
         <div className="border-b border-hairline-soft px-4 py-3">
-          <ChipTabs label="산업군" size="sm" items={industryItems} value={industry} onChange={chooseIndustry} />
+          <ChipTabs label={t("산업군")} size="sm" items={industryItems} value={industry} onChange={chooseIndustry} />
         </div>
         <div className="overflow-x-auto">
           <table className="tbl tbl-hover">
             <thead>
               <tr>
-                <SortableTh label="종목" sortKey="symbol" sort={sort} onSort={toggleSort} />
-                <th className="hidden text-right sm:table-cell" title="매일 09:00 KST 이후 첫 체결가 (첫 체결 전에는 직전 체결가)">
-                  기준가(시가)
+                <SortableTh label={t("종목")} sortKey="symbol" sort={sort} onSort={toggleSort} />
+                <th className="hidden text-right sm:table-cell" title={t("매일 09:00 KST 이후 첫 체결가 (첫 체결 전에는 직전 체결가)")}>
+                  {t("기준가(시가)")}
                 </th>
-                <SortableTh label="현재가" sortKey="price" sort={sort} onSort={toggleSort} align="right" />
-                <SortableTh label="등락률" sortKey="change" sort={sort} onSort={toggleSort} align="right" />
+                <SortableTh label={t("현재가")} sortKey="price" sort={sort} onSort={toggleSort} align="right" />
+                <SortableTh label={t("등락률")} sortKey="change" sort={sort} onSort={toggleSort} align="right" />
                 <SortableTh
-                  label="거래대금 (만 원)"
+                  label={t("거래대금 (만 원)")}
                   sortKey="turnover"
                   sort={sort}
                   onSort={toggleSort}
                   align="right"
-                  title="09:00 KST부터의 누적 체결 금액을 만 원 단위로 표시"
+                  title={t("09:00 KST부터의 누적 체결 금액")}
                 />
-                <th className="hidden text-right md:table-cell" title="최근 6시간 5분봉 종가 흐름">
-                  6시간 흐름
+                <th className="hidden text-right md:table-cell" title={t("최근 6시간 5분봉 종가 흐름")}>
+                  {t("6시간 흐름")}
                 </th>
                 <th />
               </tr>
@@ -666,20 +686,20 @@ export default function DashboardPage() {
                         className="flex items-center gap-2.5 transition-colors hover:text-sky"
                       >
                         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] border border-hairline-soft bg-surface-2/70 text-[11px] font-semibold text-ink-muted">
-                          {s.name.slice(0, 2)}
+                          {names.symbol(s.symbol, s.name).slice(0, 2)}
                         </span>
                         <span>
-                          <span className="block font-semibold">{s.name}</span>
+                          <span className="block font-semibold">{names.symbol(s.symbol, s.name)}</span>
                           <span className="num block text-xs text-ink-faint">
                             {s.symbol}
-                            {!selectedIndustry && industryOf(s.symbol) && ` · ${industryOf(s.symbol)!.label}`}
+                            {!selectedIndustry && industryOf(s.symbol) && ` · ${names.industry(industryOf(s.symbol)!.id, industryOf(s.symbol)!.label)}`}
                           </span>
                         </span>
                       </Link>
                     </td>
-                    <td className="num hidden text-right text-ink-muted sm:table-cell">{fmt.format(s.referencePrice)}원</td>
+                    <td className="num hidden text-right text-ink-muted sm:table-cell">{won(s.referencePrice)}</td>
                     <td className={`num text-right font-semibold ${tone}`}>
-                      {fmt.format(s.lastPrice)}원
+                      {won(s.lastPrice)}
                     </td>
                     <td className={`num text-right ${tone}`}>
                       {change > 0 ? "+" : ""}
@@ -691,7 +711,7 @@ export default function DashboardPage() {
                     </td>
                     <td className="text-right">
                       <Link href={`/symbol/${s.symbol}`} className="btn btn-ghost btn-sm">
-                        거래하기
+                        {t("거래하기")}
                       </Link>
                     </td>
                   </tr>
@@ -700,7 +720,7 @@ export default function DashboardPage() {
               {liveSymbols.length === 0 && (
                 <tr>
                   <td colSpan={7} className="py-10 text-center text-sm text-ink-faint">
-                    종목을 불러오는 중…
+                    {t("종목을 불러오는 중…")}
                   </td>
                 </tr>
               )}
@@ -712,8 +732,8 @@ export default function DashboardPage() {
       {/* ── 선물 (1일물) ─────────────────────────────────────────── */}
       <section className="glass overflow-hidden max-sm:hidden">
         <div className="panel-head">
-          <span className="panel-title">선물</span>
-          <span className="text-[11px] text-ink-faint">1일물 · 매일 04:10 현금 정산</span>
+          <span className="panel-title">{t("선물")}</span>
+          <span className="text-[11px] text-ink-faint">{t("1일물 · 매일 04:10 현금 정산")}</span>
         </div>
         <FuturesList />
       </section>
@@ -721,8 +741,8 @@ export default function DashboardPage() {
       {/* ── 원자재·환율 (선물 기초자산) ───────────────────────────── */}
       <section className="glass overflow-hidden max-sm:hidden">
         <div className="panel-head">
-          <span className="panel-title">원자재·환율</span>
-          <span className="text-[11px] text-ink-faint">선물 기초자산 · 가상 지수</span>
+          <span className="panel-title">{t("원자재·환율")}</span>
+          <span className="text-[11px] text-ink-faint">{t("선물 기초자산 · 가상 지수")}</span>
         </div>
         <ReferenceList />
       </section>
@@ -730,12 +750,12 @@ export default function DashboardPage() {
       {/* ── Latest news ────────────────────────────────────────── */}
       <section className="glass overflow-hidden max-sm:hidden">
         <div className="panel-head">
-          <span className="panel-title">최신 뉴스</span>
+          <span className="panel-title">{t("최신 뉴스")}</span>
           <Link href="/news" className="text-[11px] text-ink-muted transition-colors hover:text-sky">
-            전체 보기 →
+            {t("전체 보기 →")}
           </Link>
         </div>
-        <NewsList items={news} emptyLabel="아직 뉴스가 없습니다" />
+        <NewsList items={news} emptyLabel={t("아직 뉴스가 없습니다")} />
       </section>
 
       {/* ── Daily performance (투자자 랭킹은 /ranking으로 옮겼다) ─── */}
@@ -780,12 +800,13 @@ function SortableTh({
 }
 
 function SparkCell({ values, livePrice }: { values: number[] | undefined; livePrice: number }) {
+  const t = useT();
   const series = values && values.length > 0 ? [...values.slice(0, -1), livePrice] : [];
   const first = series[0];
   const tone: "up" | "down" | "flat" =
     series.length < 2 || first == null || livePrice === first ? "flat" : livePrice > first ? "up" : "down";
   return (
-    <span className="inline-block align-middle" title={series.length >= 2 ? `6시간 전 ${fmt.format(first)}원 → 현재 ${fmt.format(livePrice)}원` : undefined}>
+    <span className="inline-block align-middle" title={series.length >= 2 ? t("6시간 전 {from} → 현재 {to}", { from: won(first), to: won(livePrice) }) : undefined}>
       <Sparkline values={series} tone={tone} />
     </span>
   );

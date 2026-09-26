@@ -1,3 +1,6 @@
+import { formatWon, LOCALE_HEADER } from "@mock-kabu/shared";
+import { getLocale, serverText, translate } from "@/lib/i18n";
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4100";
 
 const TOKEN_KEY = "mock-kabu2:token";
@@ -66,14 +69,19 @@ export async function api<T = unknown>(
   path: string,
   options: { method?: string; body?: unknown; auth?: boolean; headers?: Record<string, string> } = {},
 ): Promise<T> {
-  const headers: Record<string, string> = { "content-type": "application/json", ...(options.headers ?? {}) };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    // 오류 메시지·뉴스를 화면 언어로 받는다
+    [LOCALE_HEADER]: getLocale(),
+    ...(options.headers ?? {}),
+  };
   let token: string | null = null;
   if (options.auth !== false) {
     token = getToken();
     if (token) headers.authorization = `Bearer ${token}`;
     // 로그인 전용 경로는 토큰이 없으면 서버가 어차피 401을 준다. 비로그인 방문자가 종목 화면을
     // 열어 둘 때마다 실패할 요청을 주기적으로 보내지 않도록 여기서 같은 결과로 끝낸다.
-    else if (requiresLogin(path)) throw new ApiError(401, "로그인이 필요합니다");
+    else if (requiresLogin(path)) throw new ApiError(401, translate(getLocale(), "로그인이 필요합니다"));
   }
   const res = await fetch(`${API_URL}${path}`, {
     method: options.method ?? "GET",
@@ -85,10 +93,10 @@ export async function api<T = unknown>(
       clearSession();
       window.location.replace("/login");
     }
-    let message = `요청 실패 (${res.status})`;
+    let message = translate(getLocale(), "요청 실패 ({status})", { status: res.status });
     try {
       const body = await res.json();
-      if (body.message) message = Array.isArray(body.message) ? body.message[0] : body.message;
+      if (body.message) message = serverText(Array.isArray(body.message) ? body.message[0] : body.message);
     } catch {
       // ignore
     }
@@ -105,4 +113,5 @@ export function newIdempotencyKey(): string {
 }
 
 export const fmt = new Intl.NumberFormat("ko-KR");
-export const won = (n: number | bigint) => `${fmt.format(n)}원`;
+/** 원화 금액: 1,234원 / ₩1,234 / 1,234ウォン (화면 언어) */
+export const won = (n: number | bigint) => formatWon(fmt.format(n), getLocale());

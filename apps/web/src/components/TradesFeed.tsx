@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, fmt } from "@/lib/api";
 import { formatKstTime, MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
+import { useT } from "@/lib/i18n";
 
 interface Tick {
   tradeId: string;
@@ -68,6 +69,7 @@ function parseLiveTick(data: unknown): Tick | null {
 }
 
 export default function TradesFeed({ symbol }: { symbol: string }) {
+  const tr = useT();
   const [ticks, setTicks] = useState<Tick[]>([]);
 
   useEffect(() => {
@@ -99,7 +101,7 @@ export default function TradesFeed({ symbol }: { symbol: string }) {
   return (
     <div className="glass flex flex-col overflow-hidden">
       <div className="panel-head">
-        <span className="panel-title">실시간 체결</span>
+        <span className="panel-title">{tr("실시간 체결")}</span>
         <span className="chip chip-live">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
           LIVE
@@ -108,9 +110,9 @@ export default function TradesFeed({ symbol }: { symbol: string }) {
       <div
         className={`grid ${tradeGridColumns} gap-x-2 border-b border-hairline-soft px-4 py-1.5 text-[10px] font-semibold tracking-wide text-ink-faint uppercase`}
       >
-        <span>가격</span>
-        <span className="text-right">수량</span>
-        <span className="justify-self-end">일시 ({MARKET_TIME_ZONE_LABEL})</span>
+        <span>{tr("가격")}</span>
+        <span className="text-right">{tr("수량")}</span>
+        <span className="justify-self-end">{tr("시각")} ({MARKET_TIME_ZONE_LABEL})</span>
       </div>
       <ul className="num max-h-72 flex-1 overflow-y-auto text-xs">
         {ticks.map((t) => (
@@ -128,7 +130,7 @@ export default function TradesFeed({ symbol }: { symbol: string }) {
           </li>
         ))}
         {ticks.length === 0 && (
-          <li className="px-4 py-8 text-center text-ink-faint">체결 대기중…</li>
+          <li className="px-4 py-8 text-center text-ink-faint">{tr("체결 대기중…")}</li>
         )}
       </ul>
     </div>

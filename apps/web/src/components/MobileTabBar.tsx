@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useT } from "@/lib/i18n";
 
 /**
  * 폰 전용 하단 탭 (sm 미만). 데스크톱 상단 메뉴와 같은 페이지로 가지만, 폰에서는 증권 앱처럼
@@ -24,12 +25,13 @@ const TABS = [
 const HIDDEN_PREFIXES = ["/symbol/", "/futures/", "/login", "/signup"];
 
 export default function MobileTabBar() {
+  const t = useT();
   const pathname = usePathname();
   if (HIDDEN_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return null;
 
   return (
     <nav
-      aria-label="주요 메뉴"
+      aria-label={t("주요 메뉴")}
       className="fixed inset-x-0 bottom-0 z-40 border-t border-hairline-soft bg-abyss/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-glass sm:hidden"
     >
       <div className="grid grid-cols-5">
@@ -45,7 +47,7 @@ export default function MobileTabBar() {
               }`}
             >
               <Icon active={active} />
-              {label}
+              {t(label)}
             </Link>
           );
         })}

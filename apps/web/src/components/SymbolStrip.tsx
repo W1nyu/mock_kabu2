@@ -6,6 +6,7 @@ import { api, fmt } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { everyVisible } from "@/lib/visible-interval";
+import { useNames, useT } from "@/lib/i18n";
 
 interface SymbolRow {
   symbol: string;
@@ -20,6 +21,8 @@ interface SymbolRow {
  * 클릭으로 바로 옮겨간다. 현재 종목은 강조하고, 나머지는 같은 소켓 구독으로 갱신한다.
  */
 export default function SymbolStrip({ current }: { current: string }) {
+  const t = useT();
+  const names = useNames();
   const [rows, setRows] = useState<SymbolRow[]>([]);
   const [live, setLive] = useState<Record<string, number>>({});
 
@@ -58,7 +61,7 @@ export default function SymbolStrip({ current }: { current: string }) {
   if (rows.length === 0) return null;
 
   return (
-    <nav aria-label="종목 전환" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+    <nav aria-label={t("종목 전환")} className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
       {rows.map((r) => {
         const price = live[r.symbol] ?? r.lastPrice;
         const change = r.referencePrice > 0 ? ((price - r.referencePrice) / r.referencePrice) * 100 : 0;
@@ -75,7 +78,7 @@ export default function SymbolStrip({ current }: { current: string }) {
                 : "border-hairline-soft bg-surface-2/40 text-ink-muted hover:border-hairline hover:text-ink"
             }`}
           >
-            <span className="font-semibold">{r.name}</span>
+            <span className="font-semibold">{names.symbol(r.symbol, r.name)}</span>
             <span className={active ? "text-ink" : ""}>{fmt.format(price)}</span>
             <span className={tone}>
               {change > 0 ? "+" : ""}

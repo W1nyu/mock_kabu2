@@ -31,6 +31,7 @@ import { formatKstHm, formatKstMonthDay, formatKstTime } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 import { chartTheme, useTheme } from "@/lib/theme";
 import { averageAt, type AverageKind } from "@/lib/moving-average";
+import { getLocale, translate, useT } from "@/lib/i18n";
 
 interface CandleDto {
   ts: string;
@@ -200,6 +201,7 @@ const chartPriceFormat: PriceFormatCustom = {
 };
 
 export default function CandleChart({ symbol }: { symbol: string }) {
+  const t = useT();
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -253,7 +255,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
         position: entry.side === "BUY" ? "belowBar" : "aboveBar",
         shape: entry.side === "BUY" ? "arrowUp" : "arrowDown",
         color: entry.side === "BUY" ? chartTheme().up : chartTheme().down,
-        text: `${entry.side === "BUY" ? "매수" : "매도"} ${entry.qty.toLocaleString("ko-KR")}`,
+        text: `${translate(getLocale(), entry.side === "BUY" ? "매수" : "매도")} ${entry.qty.toLocaleString("ko-KR")}`,
         size: 1,
       }));
     if (!markersRef.current) markersRef.current = createSeriesMarkers(s.candle, markers);
@@ -536,7 +538,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
   return (
     <div className="glass flex flex-col overflow-hidden">
       <div className="panel-head flex-wrap gap-y-2">
-        <div className="well flex gap-0.5 p-0.5" role="group" aria-label="봉 간격">
+        <div className="well flex gap-0.5 p-0.5" role="group" aria-label={t("봉 간격")}>
           {CANDLE_INTERVALS.map((timeframe) => (
             <button
               key={timeframe.id}
@@ -549,7 +551,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
                   : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
               }`}
             >
-              {timeframe.label}
+              {t(timeframe.label)}
             </button>
           ))}
         </div>
@@ -564,7 +566,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
                   ? "border-hairline bg-surface-2/70 text-ink"
                   : "border-hairline-soft text-ink-faint hover:text-ink-muted"
               }`}
-              title={`${ind.label} 표시 켜기/끄기`}
+              title={t("{name} 표시 켜기/끄기", { name: t(ind.label) })}
             >
               <span
                 className="inline-block h-2 w-2 rounded-full transition-colors"
@@ -572,7 +574,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
                   backgroundColor: indicators[ind.key] ? ind.color : "rgba(255,255,255,0.16)",
                 }}
               />
-              {ind.label}
+              {t(ind.label)}
             </button>
           ))}
           {/* 폰에서는 이평선 편집 줄이 차트를 아래로 밀어내므로 접어 두고 필요할 때만 연다. */}
@@ -582,38 +584,38 @@ export default function CandleChart({ symbol }: { symbol: string }) {
             aria-expanded={averageEditorOpen}
             className="rounded-full border border-hairline-soft px-2.5 py-0.5 text-[11px] font-medium text-ink-muted lg:hidden"
           >
-            이평선 {averageEditorOpen ? "▴" : "▾"}
+            {t("이평선")} {averageEditorOpen ? "▴" : "▾"}
           </button>
         </div>
       </div>
       <div className={`border-t border-hairline-soft px-3 py-2 ${averageEditorOpen ? "" : "max-lg:hidden"}`}>
-        <div className="flex flex-wrap items-center gap-2" aria-label="이동평균선 설정">
-          <span className="mr-1 text-xs text-ink-muted">이평선</span>
+        <div className="flex flex-wrap items-center gap-2" aria-label={t("이동평균선 설정")}>
+          <span className="mr-1 text-xs text-ink-muted">{t("이평선")}</span>
           {averages.map((item) => (
             <div key={item.id} className="flex items-center gap-1 rounded-lg border border-hairline bg-surface-2/50 px-1.5 py-1 text-xs">
               <button type="button" onClick={() => saveAverages(averages.map((value) => value.id === item.id ? { ...value, visible: !value.visible } : value))}
-                aria-pressed={item.visible} title={`${item.period} ${item.kind} 표시 켜기/끄기`}
+                aria-pressed={item.visible} title={t("{name} 표시 켜기/끄기", { name: `${item.period} ${item.kind}` })}
                 className={item.visible ? "text-ink" : "text-ink-faint line-through"}>
                 {item.period} {item.kind}
               </button>
-              <input type="color" value={item.color} aria-label={`${item.period} ${item.kind} 색상`}
+              <input type="color" value={item.color} aria-label={t("{name} 색상", { name: `${item.period} ${item.kind}` })}
                 onChange={(event) => saveAverages(averages.map((value) => value.id === item.id ? { ...value, color: event.target.value } : value))}
                 className="h-5 w-6 cursor-pointer border-0 bg-transparent p-0" />
-              <button type="button" aria-label={`${item.period} ${item.kind} 삭제`} title="이평선 삭제"
+              <button type="button" aria-label={t("{name} 삭제", { name: `${item.period} ${item.kind}` })} title={t("이평선 삭제")}
                 onClick={() => saveAverages(averages.filter((value) => value.id !== item.id))}
                 className="px-1 text-ink-faint hover:text-up">×</button>
             </div>
           ))}
           <form onSubmit={addAverage} className="flex items-center gap-1.5">
-            <select aria-label="이평선 종류" value={newKind} onChange={(event) => setNewKind(event.target.value as AverageKind)}
+            <select aria-label={t("이평선 종류")} value={newKind} onChange={(event) => setNewKind(event.target.value as AverageKind)}
               className="field h-7 w-20 py-0 text-xs">
               <option value="SMA">SMA</option><option value="EMA">EMA</option><option value="WMA">WMA</option><option value="VWMA">VWMA</option>
             </select>
-            <input aria-label="이평선 기간" type="number" min={1} max={CANDLE_LIMIT} value={newPeriod}
+            <input aria-label={t("이평선 기간")} type="number" min={1} max={CANDLE_LIMIT} value={newPeriod}
               onChange={(event) => setNewPeriod(event.target.value)} className="field num h-7 w-16 py-0 text-xs" />
-            <input aria-label="새 이평선 색상" type="color" value={newColor} onChange={(event) => setNewColor(event.target.value)}
+            <input aria-label={t("새 이평선 색상")} type="color" value={newColor} onChange={(event) => setNewColor(event.target.value)}
               className="h-6 w-7 cursor-pointer border-0 bg-transparent p-0" />
-            <button type="submit" disabled={averages.length >= 12} className="btn btn-sm">+ 추가</button>
+            <button type="submit" disabled={averages.length >= 12} className="btn btn-sm">+ {t("추가")}</button>
           </form>
         </div>
       </div>
@@ -626,11 +628,12 @@ export default function CandleChart({ symbol }: { symbol: string }) {
 }
 
 function OhlcReadout({ candle }: { candle: HoveredCandle }) {
+  const t = useT();
   const values = [
-    { label: "시", value: candle.open },
-    { label: "고", value: candle.high },
-    { label: "저", value: candle.low },
-    { label: "종", value: candle.close },
+    { label: t("시"), value: candle.open },
+    { label: t("고"), value: candle.high },
+    { label: t("저"), value: candle.low },
+    { label: t("종"), value: candle.close },
   ];
 
   return (

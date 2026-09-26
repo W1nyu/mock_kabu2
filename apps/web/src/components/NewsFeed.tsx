@@ -3,6 +3,7 @@
 import { industryById, industryOf, type NewsItemDto } from "@mock-kabu/shared";
 import Link from "next/link";
 import { formatNewsTime } from "@/lib/news";
+import { useNames, useT } from "@/lib/i18n";
 
 export function NewsRow({
   item,
@@ -13,6 +14,8 @@ export function NewsRow({
   showSymbol?: boolean;
   showIndustry?: boolean;
 }) {
+  const t = useT();
+  const names = useNames();
   return (
     <li className="border-b border-hairline-soft px-4 py-3 transition-colors last:border-b-0 hover:bg-surface-3/25">
       <div className="flex items-baseline gap-3">
@@ -25,17 +28,17 @@ export function NewsRow({
                 href={`/symbol/${item.symbol}`}
                 className="shrink-0 text-xs font-semibold text-ink-muted transition-colors hover:text-sky"
               >
-                {item.symbolName ?? item.symbol}
+                {names.symbol(item.symbol, item.symbolName ?? item.symbol)}
               </Link>
               {showIndustry && industryOf(item.symbol) && (
-                <span className="truncate text-[11px] text-ink-faint">{industryOf(item.symbol)!.label}</span>
+                <span className="truncate text-[11px] text-ink-faint">{names.industry(industryOf(item.symbol)!.id, industryOf(item.symbol)!.label)}</span>
               )}
             </span>
           ) : item.industry && industryById(item.industry) ? (
             // 산업군 전체에 대한 기사 — 특정 종목이 아니라 업종 이름을 단다.
-            <span className="chip shrink-0 border-sky/30 text-sky">{industryById(item.industry)!.label}</span>
+            <span className="chip shrink-0 border-sky/30 text-sky">{names.industry(item.industry, industryById(item.industry)!.label)}</span>
           ) : (
-            <span className="chip shrink-0">시장 전체</span>
+            <span className="chip shrink-0">{t("시장 전체")}</span>
           ))}
       </div>
 
@@ -50,7 +53,7 @@ export function NewsList({
   showSymbol = true,
   showIndustry = true,
   loading,
-  emptyLabel = "아직 뉴스가 없습니다",
+  emptyLabel,
 }: {
   items: readonly NewsItemDto[];
   showSymbol?: boolean;
@@ -58,10 +61,11 @@ export function NewsList({
   loading?: boolean;
   emptyLabel?: string;
 }) {
+  const t = useT();
   if (items.length === 0) {
     return (
       <div className="px-4 py-12 text-center text-sm text-ink-faint">
-        {loading ? "뉴스를 불러오는 중…" : emptyLabel}
+        {loading ? t("뉴스를 불러오는 중…") : (emptyLabel ?? t("아직 뉴스가 없습니다"))}
       </div>
     );
   }

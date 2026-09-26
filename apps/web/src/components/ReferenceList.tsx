@@ -4,6 +4,7 @@ import Link from "next/link";
 import Sparkline from "@/components/Sparkline";
 import { formatReference } from "@/lib/reference";
 import { useReferenceRows } from "@/lib/useReferenceRows";
+import { useNames, useT } from "@/lib/i18n";
 
 function toneClass(delta: number | null): string {
   return delta == null ? "text-ink-faint" : delta > 0 ? "text-up" : delta < 0 ? "text-down" : "text-ink-muted";
@@ -13,6 +14,8 @@ function toneClass(delta: number | null): string {
  * 원/달러·원자재 가상 지수 목록(선물 기초자산). `codes`를 주면 그 코드만(원자재 화면), 없으면 전부(대시보드).
  */
 export default function ReferenceList({ codes }: { codes?: readonly string[] } = {}) {
+  const t = useT();
+  const names = useNames();
   const all = useReferenceRows();
   const list = codes ? all.filter((row) => codes.includes(row.code)) : all;
 
@@ -27,7 +30,7 @@ export default function ReferenceList({ codes }: { codes?: readonly string[] } =
               className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-3/30 active:bg-surface-3/45"
             >
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-semibold">{row.name}</span>
+                <span className="block truncate font-semibold">{names.reference(row.code, row.name)}</span>
                 <span className="num block truncate text-xs text-ink-faint">{row.code}</span>
               </span>
               <span className="hidden min-[380px]:block">
@@ -43,7 +46,7 @@ export default function ReferenceList({ codes }: { codes?: readonly string[] } =
           </li>
         );
       })}
-      {list.length === 0 && <li className="py-8 text-center text-sm text-ink-faint">불러오는 중…</li>}
+      {list.length === 0 && <li className="py-8 text-center text-sm text-ink-faint">{t("불러오는 중…")}</li>}
     </ul>
   );
 }

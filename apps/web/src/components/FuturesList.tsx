@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { changePct, fmtFuture, type FutureRow } from "@/lib/futures";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
+import { useNames, useT } from "@/lib/i18n";
 
 function tone(delta: number | null): string {
   return delta == null ? "text-ink-faint" : delta > 0 ? "text-up" : delta < 0 ? "text-down" : "text-ink-muted";
@@ -13,6 +14,8 @@ function tone(delta: number | null): string {
 
 /** 선물 5종 목록 — 이름·티커, 선물가·등락률. 체결은 소켓, 목록은 15초마다 다시 읽는다. */
 export default function FuturesList() {
+  const t = useT();
+  const names = useNames();
   const [rows, setRows] = useState<FutureRow[]>([]);
   const [live, setLive] = useState<Record<string, number>>({});
 
@@ -63,7 +66,7 @@ export default function FuturesList() {
             className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-3/30 active:bg-surface-3/45"
           >
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-semibold">{row.name}</span>
+              <span className="block truncate font-semibold">{names.future(row.symbol, row.name)}</span>
               <span className="num block truncate text-xs text-ink-faint">
                 {row.symbol}
               </span>
@@ -77,7 +80,7 @@ export default function FuturesList() {
           </Link>
         </li>
       ))}
-      {list.length === 0 && <li className="py-8 text-center text-sm text-ink-faint">불러오는 중…</li>}
+      {list.length === 0 && <li className="py-8 text-center text-sm text-ink-faint">{t("불러오는 중…")}</li>}
     </ul>
   );
 }

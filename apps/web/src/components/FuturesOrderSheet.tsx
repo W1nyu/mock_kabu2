@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import FuturesBook from "./FuturesBook";
 import FuturesOrderPanel from "./FuturesOrderPanel";
+import { useT } from "@/lib/i18n";
 
 /**
  * 폰 선물 주문 시트 — 현물 MobileOrderSheet와 같은 모양: 위는 호가(누르면 가격 입력), 아래는 주문창.
@@ -40,11 +41,12 @@ export default function FuturesOrderSheet({
     };
   }, [onClose]);
 
+  const t = useT();
   return (
-    <div className="fixed inset-0 z-[60] lg:hidden" role="dialog" aria-modal="true" aria-label={`${name} 주문`}>
+    <div className="fixed inset-0 z-[60] lg:hidden" role="dialog" aria-modal="true" aria-label={t("{name} 주문", { name })}>
       <button
         type="button"
-        aria-label="주문 창 닫기"
+        aria-label={t("주문 창 닫기")}
         className="absolute inset-0 animate-[sheet-fade_180ms_ease-out] bg-black/55"
         onClick={onClose}
       />
@@ -57,7 +59,7 @@ export default function FuturesOrderSheet({
             </p>
           </div>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
-            닫기
+            {t("닫기")}
           </button>
         </div>
         <div className="max-h-[38%] shrink-0 overflow-y-auto overscroll-contain px-3">

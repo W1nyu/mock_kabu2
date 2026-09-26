@@ -19,6 +19,7 @@ import { COMPACT_TRADE_QUERY, useMediaQuery } from "@/lib/media";
 import { subscribe } from "@/lib/socket";
 import { useMaintenance } from "@/lib/maintenance";
 import { formatKstHm } from "@/lib/time";
+import { serverText, useNames, useT } from "@/lib/i18n";
 
 // 캔들차트(lightweight-charts)는 클라이언트에서만 렌더하고 코드도 따로 싣는다.
 const CandleChart = dynamic(() => import("@/components/CandleChart"), {
@@ -43,6 +44,8 @@ const MOBILE_TABS: { id: MobileTab; label: string }[] = [
 
 export default function SymbolPage({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = use(params);
+  const t = useT();
+  const names = useNames();
   const router = useRouter();
   const [info, setInfo] = useState<SymbolInfo | null>(null);
   // 호가 클릭 → 주문폼·정정 중인 주문의 가격 칸. 방향(매수/매도)은 바꾸지 않는다.
@@ -100,7 +103,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
           href={compact ? "/market" : "/"}
           className="inline-flex shrink-0 items-center gap-1.5 text-[13px] text-ink-muted transition-colors hover:text-sky"
         >
-          <span aria-hidden>←</span> {compact ? "증권" : "대시보드"}
+          <span aria-hidden>←</span> {compact ? t("증권") : t("대시보드")}
         </Link>
         <div className="min-w-0 flex-1">
           <SymbolStrip current={symbol} />
@@ -109,17 +112,16 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
 
       {maintenance?.active ? (
         <section className="glass flex min-h-[24rem] flex-col items-center justify-center gap-4 px-6 py-12 text-center" role="status" aria-live="polite">
-          <span className="rounded-full border border-warn/40 bg-warn/10 px-4 py-1 text-sm font-semibold text-warn">거래 점검 중</span>
-          <h1 className="text-2xl font-bold text-ink">잠시 주식 거래를 멈췄습니다</h1>
+          <span className="rounded-full border border-warn/40 bg-warn/10 px-4 py-1 text-sm font-semibold text-warn">{t("거래 점검 중")}</span>
+          <h1 className="text-2xl font-bold text-ink">{t("잠시 주식 거래를 멈췄습니다")}</h1>
           {maintenance.manual ? (
             <p className="max-w-lg text-sm leading-7 text-ink-muted">
-              {maintenance.message} 기존 주문과 잔고는 유지됩니다.{" "}
-              {formatKstHm(Date.parse(maintenance.endAt))}쯤 다시 이용할 수 있습니다.
+              {serverText(maintenance.message)} {t("기존 주문과 잔고는 유지됩니다.")}{" "}
+              {t("{time}쯤 다시 이용할 수 있습니다.", { time: formatKstHm(Date.parse(maintenance.endAt)) })}
             </p>
           ) : (
             <p className="max-w-lg text-sm leading-7 text-ink-muted">
-              매일 04:10~04:20(한국 시간)에는 주문과 시세 화면을 잠시 멈추고 서버를 정리합니다.
-              기존 주문과 잔고는 유지됩니다. 오전 4시 20분부터 다시 이용할 수 있습니다.
+              {t("매일 04:10~04:20(한국 시간)에는 주문과 시세 화면을 잠시 멈추고 서버를 정리합니다. 기존 주문과 잔고는 유지됩니다. 오전 4시 20분부터 다시 이용할 수 있습니다.")}
             </p>
           )}
         </section>
@@ -127,7 +129,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
       <>
       <QuoteHeader
         symbol={symbol}
-        name={currentInfo?.name}
+        name={currentInfo ? names.symbol(symbol, currentInfo.name) : undefined}
         fallbackPrice={currentInfo?.lastPrice ?? null}
         referencePrice={currentInfo?.referencePrice ?? null}
       />
@@ -167,7 +169,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
 
       {compact === true && (
         <>
-          <div className="well grid grid-cols-3 gap-1 p-1" role="tablist" aria-label="종목 정보">
+          <div className="well grid grid-cols-3 gap-1 p-1" role="tablist" aria-label={t("종목 정보")}>
             {MOBILE_TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -179,7 +181,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
                   mobileTab === tab.id ? "bg-surface-3/70 text-ink shadow-sm" : "text-ink-muted"
                 }`}
               >
-                {tab.label}
+                {t(tab.label)}
               </button>
             ))}
           </div>
@@ -203,7 +205,7 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
             <MobileOrderSheet
               key={currentSheet.seq}
               symbol={symbol}
-              name={currentInfo?.name}
+              name={currentInfo ? names.symbol(symbol, currentInfo.name) : undefined}
               side={currentSheet.side}
               priceHint={currentPriceHint}
               lastPrice={lastPrice}

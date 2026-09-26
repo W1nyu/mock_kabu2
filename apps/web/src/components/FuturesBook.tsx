@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { fmtFuture } from "@/lib/futures";
 import { subscribe } from "@/lib/socket";
+import { useT } from "@/lib/i18n";
 
 interface Level {
   price: number;
@@ -19,6 +20,7 @@ const DEPTH = 5;
 
 /** 선물 호가(한쪽 5단). 가격을 누르면 주문창 가격에 채운다. */
 export default function FuturesBook({ symbol, onPick }: { symbol: string; onPick: (price: number) => void }) {
+  const t = useT();
   const [snap, setSnap] = useState<Snapshot | null>(null);
 
   useEffect(() => {
@@ -63,13 +65,13 @@ export default function FuturesBook({ symbol, onPick }: { symbol: string; onPick
   return (
     <section className="glass overflow-hidden">
       <div className="panel-head">
-        <span className="panel-title">호가</span>
-        <span className="num text-[11px] text-ink-faint">현재가 {fmtFuture(symbol, snap?.lastPrice)}</span>
+        <span className="panel-title">{t("호가")}</span>
+        <span className="num text-[11px] text-ink-faint">{t("현재가")} {fmtFuture(symbol, snap?.lastPrice)}</span>
       </div>
       <ul>{asks.map((l) => row(l, "ask"))}</ul>
       <div className="border-y border-hairline-soft" />
       <ul>{bids.map((l) => row(l, "bid"))}</ul>
-      {!snap && <p className="py-6 text-center text-sm text-ink-faint">불러오는 중…</p>}
+      {!snap && <p className="py-6 text-center text-sm text-ink-faint">{t("불러오는 중…")}</p>}
     </section>
   );
 }

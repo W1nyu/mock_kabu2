@@ -4,6 +4,7 @@ import { futureDef, type ConditionalOrderDto } from "@mock-kabu/shared";
 import { useCallback, useEffect, useState } from "react";
 import { api, newIdempotencyKey } from "@/lib/api";
 import { fmtFuture, toFutureUnits, unitsToInput } from "@/lib/futures";
+import { useT } from "@/lib/i18n";
 
 /**
  * 보유 포지션 관리 — 시장가 전량 청산, 손절·익절(OCO) 예약, 걸려 있는 예약 취소.
@@ -27,6 +28,7 @@ export default function FuturesPositionActions({
   refreshKey: number;
   onChanged: () => void;
 }) {
+  const t = useT();
   const def = futureDef(symbol)!;
   const long = qty > 0;
   const closeSide = long ? "SELL" : "BUY";
@@ -60,7 +62,7 @@ export default function FuturesPositionActions({
       loadWaiting();
       onChanged();
     } catch (error) {
-      setMessage({ ok: false, text: error instanceof Error ? error.message : "요청에 실패했습니다" });
+      setMessage({ ok: false, text: error instanceof Error ? error.message : t("요청에 실패했습니다") });
     } finally {
       setBusy(false);
     }
@@ -79,7 +81,7 @@ export default function FuturesPositionActions({
           headers: { "idempotency-key": newIdempotencyKey() },
           body: { symbol, side: closeSide, type: "MARKET", qty: Math.abs(qty) },
         }),
-      `${Math.abs(qty)}계약 시장가 청산을 접수했습니다`,
+      t("{n}계약 시장가 청산을 접수했습니다", { n: Math.abs(qty) }),
     );
   }
 
@@ -90,7 +92,7 @@ export default function FuturesPositionActions({
   const upper = long ? take : stop;
   const ocoValid =
     (lower != null || upper != null) && (lower == null || lower < markPrice) && (upper == null || upper > markPrice);
-  const legLabel = stop != null && take != null ? "손절·익절" : stop != null ? "손절" : take != null ? "익절" : "손절·익절";
+  const legLabel = stop != null && take != null ? t("손절·익절") : stop != null ? t("손절") : take != null ? t("익절") : t("손절·익절");
 
   function placeOco() {
     if (!ocoValid) return;
@@ -113,7 +115,7 @@ export default function FuturesPositionActions({
                 orderType: "MARKET",
               },
             });
-    void run(request, `${legLabel}을 걸었습니다`);
+    void run(request, t("{leg}을 걸었습니다", { leg: legLabel }));
   }
 
   const tick = unitsToInput(symbol, def.tickUnits);
@@ -125,8 +127,8 @@ export default function FuturesPositionActions({
     if (kind === "stop") setStopText(text);
     else setTakeText(text);
   }
-  const stopHint = long ? "현재가보다 낮게" : "현재가보다 높게";
-  const takeHint = long ? "현재가보다 높게" : "현재가보다 낮게";
+  const stopHint = long ? t("현재가보다 낮게") : t("현재가보다 높게");
+  const takeHint = long ? t("현재가보다 높게") : t("현재가보다 낮게");
 
   return (
     <div className="space-y-3 border-t border-hairline-soft pt-3">
@@ -138,14 +140,14 @@ export default function FuturesPositionActions({
           confirming ? (long ? "bg-down text-white" : "bg-up text-white") : "ring-1 ring-hairline ring-inset"
         }`}
       >
-        {confirming ? "한 번 더 누르면 시장가로 전량 청산" : `${Math.abs(qty)}계약 전량 청산 (시장가)`}
+        {confirming ? t("한 번 더 누르면 시장가로 전량 청산") : t("{n}계약 전량 청산 (시장가)", { n: Math.abs(qty) })}
       </button>
 
       <div>
-        <p className="mb-1.5 text-xs text-ink-muted">손절·익절 (하나만 입력해도 됨 · 둘 다면 한쪽 발동 시 다른 쪽 취소 · 전량 시장가 청산)</p>
+        <p className="mb-1.5 text-xs text-ink-muted">{t("손절·익절 (하나만 입력해도 됨 · 둘 다면 한쪽 발동 시 다른 쪽 취소 · 전량 시장가 청산)")}</p>
         <div className="grid grid-cols-2 gap-2">
           <label className="block">
-            <span className="text-[11px] text-ink-faint">손절가 · {stopHint}</span>
+            <span className="text-[11px] text-ink-faint">{t("손절가")} · {stopHint}</span>
             <input
               inputMode="decimal"
               value={stopText}
@@ -155,7 +157,7 @@ export default function FuturesPositionActions({
             />
           </label>
           <label className="block">
-            <span className="text-[11px] text-ink-faint">익절가 · {takeHint}</span>
+            <span className="text-[11px] text-ink-faint">{t("익절가")} · {takeHint}</span>
             <input
               inputMode="decimal"
               value={takeText}
@@ -174,7 +176,7 @@ export default function FuturesPositionActions({
                   type="button"
                   onClick={() => preset(kind, pct)}
                   className={`num flex-1 rounded-md py-1 ring-1 ring-hairline ring-inset ${kind === "stop" ? "text-down" : "text-up"}`}
-                  title={`평균가 대비 ${kind === "stop" ? "손실" : "이익"} ${pct}%`}
+                  title={kind === "stop" ? t("평균가 대비 손실 {pct}%", { pct }) : t("평균가 대비 이익 {pct}%", { pct })}
                 >
                   {kind === "stop" ? "−" : "+"}
                   {pct}%
@@ -184,7 +186,7 @@ export default function FuturesPositionActions({
           ))}
         </div>
         <button type="button" disabled={busy || !ocoValid} onClick={placeOco} className="btn btn-ghost btn-sm mt-2 w-full">
-          {legLabel} 걸기
+          {t("{leg} 걸기", { leg: legLabel })}
         </button>
       </div>
 
@@ -194,17 +196,17 @@ export default function FuturesPositionActions({
             <li key={row.id} className="num flex items-center justify-between gap-2 text-[12px]">
               <span>
                 <span className="mr-1.5 rounded bg-surface-3/60 px-1.5 py-0.5 text-[10px] font-semibold text-ink-muted">
-                  {(row.direction === "AT_OR_BELOW") === long ? "손절" : "익절"}
+                  {(row.direction === "AT_OR_BELOW") === long ? t("손절") : t("익절")}
                 </span>
-                {fmtFuture(symbol, row.triggerPrice)} {row.direction === "AT_OR_BELOW" ? "이하" : "이상"} · {row.qty}계약
+                {fmtFuture(symbol, row.triggerPrice)} {row.direction === "AT_OR_BELOW" ? t("이하") : t("이상")} · {t("{n}계약", { n: row.qty })}
               </span>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
                 disabled={busy}
-                onClick={() => void run(() => api(`/orders/conditional/${row.id}`, { method: "DELETE" }), "예약을 취소했습니다")}
+                onClick={() => void run(() => api(`/orders/conditional/${row.id}`, { method: "DELETE" }), t("예약을 취소했습니다"))}
               >
-                취소
+                {t("취소|동작")}
               </button>
             </li>
           ))}

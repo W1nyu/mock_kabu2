@@ -16,6 +16,7 @@ import { timeLeft } from "@/lib/options";
 import { COMPACT_TRADE_QUERY, useMediaQuery } from "@/lib/media";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
+import { rich, useNames, useT } from "@/lib/i18n";
 
 /**
  * 선물 거래 화면. PC는 왼쪽 차트·호가, 오른쪽 주문·포지션.
@@ -24,6 +25,8 @@ import { everyVisible } from "@/lib/visible-interval";
 export default function FuturePage({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = use(params);
   const def = futureDef(symbol);
+  const t = useT();
+  const names = useNames();
   const [row, setRow] = useState<FutureRow | null>(null);
   const [last, setLast] = useState<number | null>(null);
   const [priceHint, setPriceHint] = useState<{ price: number; seq: number } | null>(null);
@@ -60,7 +63,7 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
   if (!def) {
     return (
       <div className="mx-auto max-w-3xl py-16 text-center text-sm text-ink-muted">
-        없는 선물입니다. <Link href="/market" className="text-sky">증권으로 돌아가기</Link>
+        {t("없는 선물입니다.")} <Link href="/market" className="text-sky">{t("증권으로 돌아가기")}</Link>
       </div>
     );
   }
@@ -78,9 +81,9 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
           href="/market?kind=futures"
           className="inline-flex shrink-0 items-center gap-1.5 text-[13px] text-ink-muted transition-colors hover:text-sky"
         >
-          <span aria-hidden>←</span> 선물 목록
+          <span aria-hidden>←</span> {t("선물 목록")}
         </Link>
-        <nav aria-label="다른 선물" className="chip-scroller flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
+        <nav aria-label={t("다른 선물")} className="chip-scroller flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
           {FUTURES.map((future) => (
             <Link
               key={future.symbol}
@@ -92,38 +95,38 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
                   : "text-ink-muted ring-1 ring-hairline ring-inset hover:text-ink"
               }`}
             >
-              {future.name.replace(" 선물", "")}
+              {names.future(future.symbol, future.name).replace(/ ?(선물|Futures|先物)$/, "")}
             </Link>
           ))}
         </nav>
       </div>
       <div className="glass p-4 sm:p-5">
         <p className="text-[13px] text-ink-muted">
-          {def.symbol} · 1일물 선물{" "}
+          {def.symbol} · {t("1일물 선물")}{" "}
           <span className="text-ink-faint">
-            · {row?.settlesAt ? `정산까지 ${timeLeft(row.settlesAt)} (04:10 현금 정산)` : "매일 04:10 현금 정산"}
+            · {row?.settlesAt ? t("정산까지 {time} (04:10 현금 정산)", { time: timeLeft(row.settlesAt) }) : t("매일 04:10 현금 정산")}
           </span>
         </p>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">{def.name}</h1>
+        <h1 className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">{names.future(def.symbol, def.name)}</h1>
         <div className="mt-2 flex flex-wrap items-end gap-x-5 gap-y-1">
           <p className="num text-2xl font-semibold tracking-tight sm:text-3xl">{fmtFuture(def.symbol, price)}</p>
           <p className={`num pb-1 text-sm font-medium ${tone}`}>
             {change == null ? "—" : `${change > 0 ? "+" : ""}${change.toFixed(2)}%`}
-            <span className="ml-1 font-normal text-ink-faint">{row?.settlementPrice != null ? "전일 정산가 대비" : "오늘"}</span>
+            <span className="ml-1 font-normal text-ink-faint">{row?.settlementPrice != null ? t("전일 정산가 대비") : t("오늘")}</span>
           </p>
         </div>
         <dl className="num mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-ink-muted">
           <div>
-            기초자산 <span className="text-ink">{fmtFuture(def.symbol, row?.underlying ?? null)}</span>
+            {t("기초자산")} <span className="text-ink">{fmtFuture(def.symbol, row?.underlying ?? null)}</span>
           </div>
           <div>
-            베이시스 <span className="text-ink">{basis == null ? "—" : `${basis > 0 ? "+" : ""}${(basis / def.priceScale).toFixed(def.decimals)}`}</span>
+            {t("베이시스")} <span className="text-ink">{basis == null ? "—" : `${basis > 0 ? "+" : ""}${(basis / def.priceScale).toFixed(def.decimals)}`}</span>
           </div>
-          <div title="등락률의 기준 — 직전 04:10 일일 정산 가격">
-            기준가 <span className="text-ink">{fmtFuture(def.symbol, row?.base ?? null)}</span>
+          <div title={t("등락률의 기준 — 직전 04:10 일일 정산 가격")}>
+            {t("기준가")} <span className="text-ink">{fmtFuture(def.symbol, row?.base ?? null)}</span>
           </div>
-          <div title="이번 계약(직전 정산 이후) 거래량">
-            거래량 <span className="text-ink">{(row?.volume ?? 0).toLocaleString("ko-KR")}계약</span>
+          <div title={t("이번 계약(직전 정산 이후) 거래량")}>
+            {t("거래량")} <span className="text-ink">{t("{n}계약", { n: (row?.volume ?? 0).toLocaleString("ko-KR") })}</span>
           </div>
         </dl>
       </div>
@@ -167,7 +170,7 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
       {/* 주가지수 선물은 시장 전반 기사, 나머지는 그 기초자산을 움직인 기사 */}
       <AssetNews
         reference={def.underlying === "KABU_INDEX" ? "market" : def.underlying}
-        title={def.underlying === "KABU_INDEX" ? "시장 뉴스" : "관련 뉴스"}
+        title={def.underlying === "KABU_INDEX" ? t("시장 뉴스") : t("관련 뉴스")}
       />
 
       {compact && loggedIn && (
@@ -180,14 +183,20 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
       )}
       {compact && !loggedIn && (
         <p className="text-center text-sm text-ink-muted">
-          선물 주문은 <Link href="/login" className="text-sky">로그인</Link> 후 이용할 수 있습니다.
+          {rich(t("선물 주문은 {login} 후 이용할 수 있습니다."), {
+            login: (
+              <Link href="/login" className="text-sky">
+                {t("로그인")}
+              </Link>
+            ),
+          })}
         </p>
       )}
       {compact && sheet && (
         <FuturesOrderSheet
           key={sheet.seq}
           symbol={def.symbol}
-          name={def.name}
+          name={names.future(def.symbol, def.name)}
           side={sheet.side}
           lastPrice={price}
           priceHint={priceHint}

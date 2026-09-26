@@ -10,6 +10,7 @@ import { MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 import { readQueryParam, writeQueryParams } from "@/lib/url-query";
 import { everyVisible } from "@/lib/visible-interval";
+import { useNames, useT } from "@/lib/i18n";
 
 /**
  * 뉴스 — 종목이 15개로 늘어 종목 칩 한 줄이 길어졌으므로 산업군으로 먼저 고르고, 고른 산업군
@@ -45,6 +46,8 @@ function validScope(value: string | null): Scope {
 }
 
 export default function NewsPage() {
+  const t = useT();
+  const names = useNames();
   const [scope, setScope] = useState<Scope>(ALL);
   const [symbol, setSymbol] = useState<string>(SYMBOL_ALL);
   const [items, setItems] = useState<NewsItemDto[]>([]);
@@ -108,11 +111,11 @@ export default function NewsPage() {
     () =>
       industry && industry.symbols.length > 1
         ? [
-            { id: SYMBOL_ALL, label: `${industry.label} 전체` },
-            ...industry.symbols.map((code) => ({ id: code, label: SYMBOL_NAMES.get(code) ?? code })),
+            { id: SYMBOL_ALL, label: t("{name} 전체", { name: names.industry(industry.id, industry.label) }) },
+            ...industry.symbols.map((code) => ({ id: code, label: names.symbol(code, SYMBOL_NAMES.get(code) ?? code) })),
           ]
         : [],
-    [industry],
+    [industry, t, names],
   );
 
   const visible = useMemo(
@@ -122,27 +125,35 @@ export default function NewsPage() {
 
   const title =
     symbol !== SYMBOL_ALL
-      ? (SYMBOL_NAMES.get(symbol) ?? symbol)
+      ? names.symbol(symbol, SYMBOL_NAMES.get(symbol) ?? symbol)
       : scope === ALL
-        ? "전체 뉴스"
+        ? t("전체 뉴스")
         : scope === MARKET
-          ? "시장 전반"
-          : (industry?.label ?? "뉴스");
-  const members = industry ? industry.symbols.map((code) => SYMBOL_NAMES.get(code) ?? code).join(" · ") : null;
+          ? t("시장 전반")
+          : industry
+            ? names.industry(industry.id, industry.label)
+            : t("뉴스");
+  const members = industry
+    ? industry.symbols.map((code) => names.symbol(code, SYMBOL_NAMES.get(code) ?? code)).join(" · ")
+    : null;
+  const scopeItems = useMemo<ChipTabItem[]>(
+    () => SCOPE_ITEMS.map((item) => ({ ...item, label: industryById(item.id) ? names.industry(item.id, item.label) : t(item.label) })),
+    [t, names],
+  );
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 sm:space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">뉴스</h1>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{t("뉴스")}</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          모의 시장에서 발생하는 종목·시장 소식입니다. 각 종목의 수급은 뉴스에 반응합니다.
+          {t("모의 시장에서 발생하는 종목·시장 소식입니다. 각 종목의 수급은 뉴스에 반응합니다.")}
         </p>
       </div>
 
       <div className="space-y-2">
-        <ChipTabs label="산업군" items={SCOPE_ITEMS} value={scope} onChange={chooseScope} />
+        <ChipTabs label={t("산업군")} items={scopeItems} value={scope} onChange={chooseScope} />
         {symbolItems.length > 0 && (
-          <ChipTabs label="종목" size="sm" items={symbolItems} value={symbol} onChange={chooseSymbol} />
+          <ChipTabs label={t("종목")} size="sm" items={symbolItems} value={symbol} onChange={chooseSymbol} />
         )}
       </div>
 
@@ -167,15 +178,15 @@ export default function NewsPage() {
           showIndustry={scope === ALL}
           emptyLabel={
             symbol !== SYMBOL_ALL
-              ? "이 종목의 뉴스가 아직 없습니다"
+              ? t("이 종목의 뉴스가 아직 없습니다")
               : scope === ALL
-                ? "아직 뉴스가 없습니다"
-                : "이 분야의 뉴스가 아직 없습니다"
+                ? t("아직 뉴스가 없습니다")
+                : t("이 분야의 뉴스가 아직 없습니다")
           }
         />
       </section>
 
-      <p className="text-[11px] text-ink-faint">시각은 {MARKET_TIME_ZONE_LABEL} 기준입니다.</p>
+      <p className="text-[11px] text-ink-faint">{t("시각은 {tz} 기준입니다.", { tz: MARKET_TIME_ZONE_LABEL })}</p>
     </div>
   );
 }

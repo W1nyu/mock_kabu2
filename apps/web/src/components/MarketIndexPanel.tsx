@@ -17,6 +17,7 @@ import { indexSessionBase, type IndexPoint } from "@/lib/index-session";
 import { liveIndexLevel, type IndexMeta } from "@/lib/index-meta";
 import { chartTheme, useTheme } from "@/lib/theme";
 import { everyVisible } from "@/lib/visible-interval";
+import { useNames, useT } from "@/lib/i18n";
 
 interface SymbolRow {
   symbol: string;
@@ -68,6 +69,8 @@ function signed(value: number, digits = 2): string {
  * 지수는 상장 기준값을 유지하고, 종목별 등락률은 09:00 KST 기준가를 사용한다.
  */
 export default function MarketIndexPanel() {
+  const tr = useT();
+  const names = useNames();
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState<Range>("1d");
@@ -143,7 +146,7 @@ export default function MarketIndexPanel() {
   const comparisonBase = range === "1d" ? sessionBase : first?.value;
   const rangeDelta = shown && comparisonBase != null ? shown.value - comparisonBase : null;
   const rangeRate = rangeDelta != null && comparisonBase && comparisonBase > 0 ? (rangeDelta / comparisonBase) * 100 : null;
-  const rangeLabel = range === "1d" ? "오늘" : RANGES.find((r) => r.id === range)?.label ?? "";
+  const rangeLabel = tr(range === "1d" ? "오늘" : RANGES.find((r) => r.id === range)?.label ?? "");
 
   useEffect(() => {
     if (!containerRef.current || !series || series.length === 0) return;
@@ -253,7 +256,7 @@ export default function MarketIndexPanel() {
       <div className="glass overflow-hidden">
         <div className="panel-head flex-wrap gap-y-2">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="panel-title">KABU 지수</span>
+            <span className="panel-title">{tr("KABU 지수")}</span>
             {shown && (
               <>
                 <span className="num text-2xl font-semibold tracking-tight">{indexFormatter.format(shown.value)}</span>
@@ -264,28 +267,28 @@ export default function MarketIndexPanel() {
                 )}
                 {baseRate != null && (
                   <span className={`num text-xs whitespace-nowrap ${toneOf(baseRate)}`}>
-                    09:00 기준 {indexFormatter.format(sessionBase!)} 대비 {signed(baseRate)}%
+                    {tr("09:00 기준 {base} 대비 {pct}%", { base: indexFormatter.format(sessionBase!), pct: signed(baseRate) })}
                   </span>
                 )}
                 {hover && <span className="text-[11px] text-ink-faint">{formatKstMonthDay(hover.ts)} {formatKstHm(hover.ts)}</span>}
               </>
             )}
           </div>
-          <div className="well flex gap-0.5 p-0.5" role="group" aria-label="기간">
+          <div className="well flex gap-0.5 p-0.5" role="group" aria-label={tr("기간")}>
             {RANGES.map((r) => (
               <button
                 key={r.id}
                 type="button"
                 onClick={() => selectRange(r.id)}
                 aria-pressed={range === r.id}
-                title={r.hint}
+                title={tr(r.hint)}
                 className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
                   range === r.id
                     ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
                     : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                 }`}
               >
-                {r.label}
+                {tr(r.label)}
               </button>
             ))}
           </div>
@@ -293,25 +296,25 @@ export default function MarketIndexPanel() {
         <div className="relative p-2">
           <div ref={containerRef} className="h-[20rem] w-full lg:h-[24rem]" />
           {series && series.length === 0 && (
-            <p className="absolute inset-0 grid place-items-center text-sm text-ink-faint">아직 봉 데이터가 없습니다</p>
+            <p className="absolute inset-0 grid place-items-center text-sm text-ink-faint">{tr("아직 봉 데이터가 없습니다")}</p>
           )}
         </div>
       </div>
 
       <div className="glass overflow-hidden">
         <div className="panel-head">
-          <span className="panel-title">종목별 기여</span>
-          <span className="text-[11px] text-ink-faint">시가총액 가중 · 등락률·기여는 09:00 KST 기준</span>
+          <span className="panel-title">{tr("종목별 기여")}</span>
+          <span className="text-[11px] text-ink-faint">{tr("시가총액 가중 · 등락률·기여는 09:00 KST 기준")}</span>
         </div>
         <table className="num w-full text-sm">
           <thead className="text-[11px] text-ink-faint">
             <tr className="border-b border-hairline-soft">
-              <th className="px-3 py-2 text-left font-medium sm:px-4">종목</th>
-              <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">오늘 기준가</th>
-              <th className="px-3 py-2 text-right font-medium sm:px-4">현재가</th>
-              <th className="px-3 py-2 text-right font-medium sm:px-4">등락률</th>
-              <th className="px-3 py-2 text-right font-medium sm:px-4" title="현재 시가총액 ÷ 편입 종목 시가총액 합">비중</th>
-              <th className="px-3 py-2 text-right font-medium sm:px-4" title="09:00 기준가 대비 지수 포인트 기여">오늘 기여</th>
+              <th className="px-3 py-2 text-left font-medium sm:px-4">{tr("종목")}</th>
+              <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">{tr("오늘 기준가")}</th>
+              <th className="px-3 py-2 text-right font-medium sm:px-4">{tr("현재가")}</th>
+              <th className="px-3 py-2 text-right font-medium sm:px-4">{tr("등락률")}</th>
+              <th className="px-3 py-2 text-right font-medium sm:px-4" title={tr("현재 시가총액 ÷ 편입 종목 시가총액 합")}>{tr("비중")}</th>
+              <th className="px-3 py-2 text-right font-medium sm:px-4" title={tr("09:00 기준가 대비 지수 포인트 기여")}>{tr("오늘 기여")}</th>
             </tr>
           </thead>
           <tbody>
@@ -321,7 +324,7 @@ export default function MarketIndexPanel() {
                   <Link href={`/symbol/${r.symbol}`} className="font-medium hover:text-sky">
                     {r.symbol}
                   </Link>
-                  <span className="ml-2 hidden text-xs text-ink-faint sm:inline">{r.name}</span>
+                  <span className="ml-2 hidden text-xs text-ink-faint sm:inline">{names.symbol(r.symbol, r.name)}</span>
                 </td>
                 <td className="hidden px-4 py-2 text-right text-ink-muted sm:table-cell">{fmt.format(r.referencePrice)}</td>
                 <td className="px-3 py-2 text-right whitespace-nowrap sm:px-4">{fmt.format(r.price)}</td>
@@ -332,7 +335,7 @@ export default function MarketIndexPanel() {
             ))}
             {contributions.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-ink-faint">종목을 불러오는 중…</td>
+                <td colSpan={6} className="px-4 py-8 text-center text-ink-faint">{tr("종목을 불러오는 중…")}</td>
               </tr>
             )}
           </tbody>

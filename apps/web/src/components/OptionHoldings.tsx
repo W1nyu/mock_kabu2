@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { won } from "@/lib/api";
 import { fmtOption, fmtStrike, optionLabel, type OptionPosition } from "@/lib/options";
+import { useT } from "@/lib/i18n";
 
 function tone(n: number): string {
   return n > 0 ? "text-up" : n < 0 ? "text-down" : "text-ink-muted";
@@ -29,13 +30,14 @@ function RateText({ p }: { p: OptionPosition }) {
  * 선물 탭과 같은 모양. 폰은 한 줄 목록.
  */
 export default function OptionHoldings({ positions }: { positions: OptionPosition[] }) {
+  const t = useT();
   if (positions.length === 0) {
     return (
       <div className="px-5 py-12 text-center">
-        <p className="text-sm text-ink-muted">옵션 포지션이 없습니다.</p>
+        <p className="text-sm text-ink-muted">{t("옵션 포지션이 없습니다.")}</p>
         <p className="mt-1 text-xs text-ink-faint">
           <Link href="/market?kind=futures" className="text-sky">
-            증권 → 선물·옵션의 옵션 체인에서 살 수 있습니다 →
+            {t("증권 → 선물·옵션의 옵션 체인에서 살 수 있습니다 →")}
           </Link>
         </p>
       </div>
@@ -54,7 +56,7 @@ export default function OptionHoldings({ positions }: { positions: OptionPositio
                   {optionLabel(p.symbol, p.strike)}
                 </span>
                 <span className="num block text-xs text-ink-faint">
-                  {p.qty}계약 · 평균 {fmtOption(p.symbol, Math.round(p.avgPrice))} · 현재 {fmtOption(p.symbol, p.lastPrice)}
+                  {t("{n}계약", { n: p.qty })} · {t("평균")} {fmtOption(p.symbol, Math.round(p.avgPrice))} · {t("현재")} {fmtOption(p.symbol, p.lastPrice)}
                 </span>
               </span>
               <span className="shrink-0 text-right">
@@ -62,7 +64,7 @@ export default function OptionHoldings({ positions }: { positions: OptionPositio
                   {p.unrealized > 0 ? "+" : ""}
                   {won(p.unrealized)}
                 </span>
-                <span className="num block text-xs text-ink-faint">평가 {won(p.value)}</span>
+                <span className="num block text-xs text-ink-faint">{t("평가")} {won(p.value)}</span>
               </span>
             </Link>
           </li>
@@ -72,16 +74,16 @@ export default function OptionHoldings({ positions }: { positions: OptionPositio
         <table className="tbl tbl-hover">
           <thead>
             <tr>
-              <th>종목</th>
-              <th className="text-right">행사가</th>
-              <th className="text-right">수량</th>
-              <th className="text-right">평균가</th>
-              <th className="text-right">현재가</th>
-              <th className="text-right" title="블랙-숄즈 이론가 — 호가의 기준">
-                이론가
+              <th>{t("종목")}</th>
+              <th className="text-right">{t("행사가")}</th>
+              <th className="text-right">{t("수량")}</th>
+              <th className="text-right">{t("평균가")}</th>
+              <th className="text-right">{t("현재가")}</th>
+              <th className="text-right" title={t("블랙-숄즈 이론가 — 호가의 기준")}>
+                {t("이론가")}
               </th>
-              <th className="text-right">평가금액</th>
-              <th className="text-right">평가손익</th>
+              <th className="text-right">{t("평가금액")}</th>
+              <th className="text-right">{t("평가손익")}</th>
             </tr>
           </thead>
           <tbody>
@@ -109,7 +111,7 @@ export default function OptionHoldings({ positions }: { positions: OptionPositio
           <tfoot>
             <tr>
               <td colSpan={6} className="text-ink-muted">
-                합계
+                {t("합계")}
               </td>
               <td className="num text-right font-semibold">{won(totalValue)}</td>
               <td className={`num text-right font-semibold ${tone(totalPnl)}`}>
@@ -121,7 +123,7 @@ export default function OptionHoldings({ positions }: { positions: OptionPositio
         </table>
       </div>
       <p className="px-4 py-2 text-[11px] text-ink-faint">
-        1일물 — 매일 04:10 만기에 내가격이면 차액을 현금으로 받고, 외가격이면 소멸합니다.
+        {t("1일물 — 매일 04:10 만기에 내가격이면 차액을 현금으로 받고, 외가격이면 소멸합니다.")}
       </p>
     </>
   );

@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, fmt } from "@/lib/api";
+import { api, fmt, won } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { everyVisible } from "@/lib/visible-interval";
+import { useT } from "@/lib/i18n";
 
 interface SessionStats {
   high: number;
@@ -93,6 +94,7 @@ function parseTick(data: any): TradeTick | null {
  * 하고, 해당 스냅샷 이후의 WebSocket tick만 더해 REST/실시간 갱신의 이중 집계를 막는다.
  */
 export default function QuoteHeader({ symbol, name, fallbackPrice, referencePrice }: QuoteHeaderProps) {
+  const t = useT();
   const [livePrice, setLivePrice] = useState<number | null>(null);
   const [sessionReferencePrice, setSessionReferencePrice] = useState<number | null>(null);
   const [stats, setStats] = useState<SessionStats | null>(null);
@@ -157,7 +159,7 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
   const change = price != null && reference != null && reference > 0 ? price - reference : null;
   const changeRate = change != null && reference != null ? (change / reference) * 100 : null;
   const tone = change == null || change === 0 ? "text-ink" : change > 0 ? "text-up" : "text-down";
-  const direction = change == null || change === 0 ? "보합" : change > 0 ? "▲" : "▼";
+  const direction = change == null || change === 0 ? t("보합") : change > 0 ? "▲" : "▼";
   const executionStrength = stats && stats.sellVolume > 0 ? (stats.buyVolume / stats.sellVolume) * 100 : null;
 
   return (
@@ -170,60 +172,60 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
               {name ?? symbol}
               {name && <span className="num ml-2 text-sm font-normal text-ink-faint">{symbol}</span>}
             </h1>
-            <span className="chip chip-live" title="체결 채널을 구독해 현재가를 갱신합니다">
+            <span className="chip chip-live" title={t("체결 채널을 구독해 현재가를 갱신합니다")}>
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
               LIVE
             </span>
           </div>
           <div className="num mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 max-lg:mt-1.5">
             <p className="text-3xl font-semibold tracking-tight sm:text-5xl">
-              {price != null ? `${fmt.format(price)}원` : "—"}
+              {price != null ? won(price) : "—"}
             </p>
             {change != null && changeRate != null ? (
               <p className={`text-sm font-semibold ${tone}`}>
                 {direction} {change > 0 ? "+" : ""}
-                {fmt.format(change)}원 ({changeRate > 0 ? "+" : ""}
+                {won(change)} ({changeRate > 0 ? "+" : ""}
                 {changeRate.toFixed(2)}%)
               </p>
             ) : (
-              <p className="text-sm text-ink-faint">기준가 대비 —</p>
+              <p className="text-sm text-ink-faint">{t("기준가 대비")} —</p>
             )}
           </div>
         </div>
 
         <dl className="num grid grid-cols-2 gap-x-6 gap-y-4 text-sm max-lg:flex max-lg:gap-x-0 max-lg:overflow-x-auto max-lg:text-[13px] max-lg:whitespace-nowrap sm:grid-cols-3 lg:grid-cols-5">
           <QuoteMetric
-            label="기준가"
-            value={reference != null ? `${fmt.format(reference)}원` : "—"}
-            title="매일 09:00 KST 이후 첫 체결가입니다 (첫 체결 전에는 직전 체결가)"
+            label={t("기준가")}
+            value={reference != null ? won(reference) : "—"}
+            title={t("매일 09:00 KST 이후 첫 체결가 (첫 체결 전에는 직전 체결가)")}
           />
           <QuoteMetric
-            label="당일 고가"
-            value={stats ? `${fmt.format(stats.high)}원` : "—"}
+            label={t("당일 고가")}
+            value={stats ? won(stats.high) : "—"}
             tone="up"
-            title="09:00 KST부터의 체결 기준 최고가입니다"
+            title={t("09:00 KST부터의 체결 기준 최고가입니다")}
           />
           <QuoteMetric
-            label="당일 저가"
-            value={stats ? `${fmt.format(stats.low)}원` : "—"}
+            label={t("당일 저가")}
+            value={stats ? won(stats.low) : "—"}
             tone="down"
-            title="09:00 KST부터의 체결 기준 최저가입니다"
+            title={t("09:00 KST부터의 체결 기준 최저가입니다")}
           />
           <QuoteMetric
-            label="당일 거래량"
-            value={stats ? `${fmt.format(stats.volume)}주` : "—"}
-            title="09:00 KST부터의 누적 체결 수량입니다"
+            label={t("당일 거래량")}
+            value={stats ? t("{n}주", { n: fmt.format(stats.volume) }) : "—"}
+            title={t("09:00 KST부터의 누적 체결 수량입니다")}
           />
           <QuoteMetric
-            label="체결강도"
+            label={t("체결강도")}
             value={executionStrength != null ? `${executionStrength.toFixed(1)}%` : "—"}
             tone={executionStrength == null || executionStrength === 100 ? undefined : executionStrength > 100 ? "up" : "down"}
-            title="09:00 KST부터의 매수 체결량 ÷ 매도 체결량입니다. 100% 초과는 매수 우위, 미만은 매도 우위입니다."
+            title={t("09:00 KST부터의 매수 체결량 ÷ 매도 체결량입니다. 100% 초과는 매수 우위, 미만은 매도 우위입니다.")}
           />
         </dl>
       </div>
       <p className="border-t border-hairline-soft px-5 py-2 text-[11px] text-ink-faint max-lg:hidden sm:px-6">
-        현재가는 체결마다 갱신 · 고가/저가/거래량은 09:00 KST부터의 체결 기준
+        {t("현재가는 체결마다 갱신 · 고가/저가/거래량은 09:00 KST부터의 체결 기준")}
       </p>
     </section>
   );

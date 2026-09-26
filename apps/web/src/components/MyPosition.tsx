@@ -7,6 +7,7 @@ import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { guardSummary } from "@/lib/guards";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
+import { useT, type TFunction } from "@/lib/i18n";
 
 interface HoldingRow {
   symbol: string;
@@ -36,6 +37,7 @@ export default function MyPosition({
   /** OCO 보호 주문이 등록된 직후 호출 — 예약 주문 목록을 즉시 갱신하는 데 쓴다 */
   onProtected?: () => void;
 }) {
+  const tr = useT();
   const [holding, setHolding] = useState<HoldingRow | null>(null);
   const [protecting, setProtecting] = useState(false);
   const [stopPrice, setStopPrice] = useState("");
@@ -109,10 +111,10 @@ export default function MyPosition({
           qty: holding.availableQty,
         },
       });
-      setMessage(`청산 주문 접수: ${fmt.format(holding.availableQty)}주 시장가 매도`);
+      setMessage(tr("청산 주문 접수: {n}주 시장가 매도", { n: fmt.format(holding.availableQty) }));
       refresh();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "청산 실패");
+      setMessage(err instanceof Error ? err.message : tr("청산 실패"));
     } finally {
       setBusy(false);
       setConfirming(false);
@@ -170,15 +172,21 @@ export default function MyPosition({
         });
       }
       setMessage(
-        `${[stop != null ? `손절 ${fmt.format(stop)}` : null, take != null ? `익절 ${fmt.format(take)}` : null]
-          .filter(Boolean)
-          .join(" / ")} 예약 등록 (${fmt.format(Number(protectQty))}주)`,
+        tr("{legs} 예약 등록 ({n}주)", {
+          legs: [
+            stop != null ? `${tr("손절")} ${fmt.format(stop)}` : null,
+            take != null ? `${tr("익절")} ${fmt.format(take)}` : null,
+          ]
+            .filter(Boolean)
+            .join(" / "),
+          n: fmt.format(Number(protectQty)),
+        }),
       );
       setProtecting(false);
       refresh();
       onProtected?.();
     } catch (err) {
-      setProtectError(err instanceof Error ? err.message : "예약 실패");
+      setProtectError(err instanceof Error ? err.message : tr("예약 실패"));
     } finally {
       setProtectBusy(false);
     }
@@ -196,16 +204,16 @@ export default function MyPosition({
   return (
     <div className="glass overflow-hidden">
       <div className="flex flex-wrap items-center gap-x-7 gap-y-3 px-5 py-3.5 text-sm">
-        <span className="panel-title">내 포지션</span>
-        <Item label="보유">
-          {fmt.format(holding.qty)}주
+        <span className="panel-title">{tr("내 포지션")}</span>
+        <Item label={tr("보유")}>
+          {tr("{n}주", { n: fmt.format(holding.qty) })}
           {holding.holdQty > 0 && (
-            <span className="text-ink-faint"> (매도 대기 {fmt.format(holding.holdQty)})</span>
+            <span className="text-ink-faint"> ({tr("매도 대기")} {fmt.format(holding.holdQty)})</span>
           )}
         </Item>
-        <Item label="평단가">{fmt.format(Math.round(holding.avgCost))}</Item>
-        <Item label="현재가">{fmt.format(price)}</Item>
-        <Item label="평가손익">
+        <Item label={tr("평단가")}>{fmt.format(Math.round(holding.avgCost))}</Item>
+        <Item label={tr("현재가")}>{fmt.format(price)}</Item>
+        <Item label={tr("평가손익")}>
           <span className={`font-semibold ${pnlColor}`}>
             {sign}
             {won(pnl)} ({sign}
@@ -213,17 +221,17 @@ export default function MyPosition({
           </span>
         </Item>
         {guards.length > 0 && (
-          <Item label="보호">
-            <span className="text-ink-muted" title="이 종목에 대기 중인 매도 예약 주문">
-              {guardSummary(guards)}
+          <Item label={tr("보호")}>
+            <span className="text-ink-muted" title={tr("이 종목에 대기 중인 매도 예약 주문")}>
+              {guardSummary(guards, tr)}
             </span>
           </Item>
         )}
         {realized != null && (
-          <Item label="실현손익">
+          <Item label={tr("실현손익")}>
             <span
               className={`font-semibold ${realized > 0 ? "text-up" : realized < 0 ? "text-down" : ""}`}
-              title="이 종목의 매도 체결에서 지금까지 확정된 손익 합계"
+              title={tr("이 종목의 매도 체결에서 지금까지 확정된 손익 합계")}
             >
               {realized > 0 ? "+" : ""}
               {won(realized)}
@@ -237,24 +245,24 @@ export default function MyPosition({
             onClick={() => (protecting ? setProtecting(false) : openProtect())}
             disabled={holding.availableQty <= 0}
             aria-pressed={protecting}
-            title="손절가와 익절가를 한 쌍(OCO)으로 예약합니다. 한쪽이 발동하면 다른 쪽은 자동 취소됩니다"
+            title={tr("손절가와 익절가를 한 쌍(OCO)으로 예약합니다. 한쪽이 발동하면 다른 쪽은 자동 취소됩니다")}
             className="btn btn-ghost btn-sm"
           >
-            {protecting ? "닫기" : "손절/익절 설정"}
+            {protecting ? tr("닫기") : tr("손절/익절 설정")}
           </button>
           <button
             onClick={onLiquidateClick}
             disabled={busy || holding.availableQty <= 0}
             title={
               holding.availableQty <= 0
-                ? "매도 대기 중인 수량뿐이라 청산할 수 없습니다"
-                : "보유 수량 전체를 시장가로 매도합니다"
+                ? tr("매도 대기 중인 수량뿐이라 청산할 수 없습니다")
+                : tr("보유 수량 전체를 시장가로 매도합니다")
             }
             className={`btn btn-sm ${
               confirming ? "btn-sell" : "border-down/50 bg-down/10 text-down hover:bg-down/16"
             }`}
           >
-            {confirming ? `${fmt.format(holding.availableQty)}주 전량 매도 확인` : "포지션 청산"}
+            {confirming ? tr("{n}주 전량 매도 확인", { n: fmt.format(holding.availableQty) }) : tr("포지션 청산")}
           </button>
         </div>
       </div>
@@ -265,23 +273,23 @@ export default function MyPosition({
         >
           <ProtectField
             id={`protect-stop-${symbol}`}
-            label="손절가 (이하면 매도)"
+            label={tr("손절가 (이하면 매도)")}
             value={stopPrice}
             onChange={setStopPrice}
             tone="down"
-            hint={pctVsAvg(Number(stopPrice), holding.avgCost)}
+            hint={pctVsAvg(Number(stopPrice), holding.avgCost, tr)}
           />
           <ProtectField
             id={`protect-take-${symbol}`}
-            label="익절가 (이상이면 매도)"
+            label={tr("익절가 (이상이면 매도)")}
             value={takePrice}
             onChange={setTakePrice}
             tone="up"
-            hint={pctVsAvg(Number(takePrice), holding.avgCost)}
+            hint={pctVsAvg(Number(takePrice), holding.avgCost, tr)}
           />
           <ProtectField
             id={`protect-qty-${symbol}`}
-            label={`수량 (최대 ${fmt.format(holding.availableQty)})`}
+            label={tr("수량 (최대 {n})", { n: fmt.format(holding.availableQty) })}
             value={protectQty}
             onChange={setProtectQty}
           />
@@ -295,10 +303,10 @@ export default function MyPosition({
             }
             className="btn btn-primary btn-sm"
           >
-            {protectBusy ? "등록 중…" : Number(stopPrice) > 0 && Number(takePrice) > 0 ? "OCO 예약" : "예약"}
+            {protectBusy ? tr("등록 중…") : Number(stopPrice) > 0 && Number(takePrice) > 0 ? tr("OCO 예약") : tr("예약|동작")}
           </button>
           <span className="text-ink-faint">
-            현재가 {fmt.format(price)} · 한쪽만 입력해도 됩니다 · 둘 다면 한쪽이 발동할 때 다른 쪽은 자동 취소 · 대기 중 홀드 없음
+            {tr("현재가 {price} · 한쪽만 입력해도 됩니다 · 둘 다면 한쪽이 발동할 때 다른 쪽은 자동 취소 · 대기 중 홀드 없음", { price: fmt.format(price) })}
           </span>
           {protectError && <span className="basis-full text-warn">{protectError}</span>}
         </form>
@@ -307,10 +315,10 @@ export default function MyPosition({
   );
 }
 
-function pctVsAvg(target: number, avgCost: number): string | undefined {
+function pctVsAvg(target: number, avgCost: number, tr: TFunction): string | undefined {
   if (!(target > 0) || !(avgCost > 0)) return undefined;
   const pct = ((target - avgCost) / avgCost) * 100;
-  return `평단 대비 ${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
+  return tr("평단 대비 {pct}%", { pct: `${pct > 0 ? "+" : ""}${pct.toFixed(1)}` });
 }
 
 function ProtectField({

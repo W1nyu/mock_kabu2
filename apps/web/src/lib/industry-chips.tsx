@@ -1,4 +1,5 @@
-import { INDUSTRIES } from "@mock-kabu/shared";
+import { INDUSTRIES, localizedIndustryLabel } from "@mock-kabu/shared";
+import { getLocale, translate } from "@/lib/i18n";
 import type { ChipTabItem } from "@/components/ChipTabs";
 
 export const ALL_INDUSTRIES = "all";
@@ -22,8 +23,9 @@ export function industryChipItems(changeBySymbol: ReadonlyMap<string, number>): 
       </span>
     );
   };
+  const locale = getLocale();
   return [
-    { id: ALL_INDUSTRIES, label: "전체" },
-    ...INDUSTRIES.map((def) => ({ id: def.id, label: def.label, hint: hint(def.symbols) })),
+    { id: ALL_INDUSTRIES, label: translate(locale, "전체") },
+    ...INDUSTRIES.map((def) => ({ id: def.id, label: localizedIndustryLabel(def.id, def.label, locale), hint: hint(def.symbols) })),
   ];
 }

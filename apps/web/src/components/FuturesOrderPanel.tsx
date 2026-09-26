@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, getUser, newIdempotencyKey } from "@/lib/api";
 import { everyVisible } from "@/lib/visible-interval";
 import { fmtFuture, krw, LEVERAGE_CHOICES, leverageLabel, toFutureUnits, unitsToInput, type FuturesAccount } from "@/lib/futures";
+import { rich, useT } from "@/lib/i18n";
 
 interface AccountInfo {
   available: number;
@@ -34,6 +35,7 @@ export default function FuturesOrderPanel({
   onPlaced: () => void;
   initialSide?: "BUY" | "SELL";
 }) {
+  const tr = useT();
   const def = futureDef(symbol)!;
   const [side, setSide] = useState<"BUY" | "SELL">(initialSide);
   const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT");
@@ -90,7 +92,7 @@ export default function FuturesOrderPanel({
       await api("/account/futures/leverage", { method: "POST", body: { symbol, leverage: next } });
       refreshAccount();
     } catch (error) {
-      setMessage({ ok: false, text: error instanceof Error ? error.message : "레버리지를 바꾸지 못했습니다" });
+      setMessage({ ok: false, text: error instanceof Error ? error.message : tr("레버리지를 바꾸지 못했습니다") });
     } finally {
       setLeverageBusy(false);
     }
@@ -149,11 +151,14 @@ export default function FuturesOrderPanel({
         headers: { "idempotency-key": newIdempotencyKey() },
         body: { symbol, side, type, qty, ...(type === "LIMIT" ? { price: priceUnits } : {}) },
       });
-      setMessage({ ok: true, text: `${side === "BUY" ? "매수" : "매도"} ${qty}계약 주문을 접수했습니다` });
+      setMessage({
+        ok: true,
+        text: side === "BUY" ? tr("매수 {n}계약 주문을 접수했습니다", { n: qty }) : tr("매도 {n}계약 주문을 접수했습니다", { n: qty }),
+      });
       refreshAccount();
       onPlaced();
     } catch (error) {
-      setMessage({ ok: false, text: error instanceof Error ? error.message : "주문에 실패했습니다" });
+      setMessage({ ok: false, text: error instanceof Error ? error.message : tr("주문에 실패했습니다") });
     } finally {
       setBusy(false);
     }
@@ -163,11 +168,13 @@ export default function FuturesOrderPanel({
   if (!loggedIn) {
     return (
       <div className="glass p-4 text-sm text-ink-muted">
-        선물 주문은{" "}
-        <Link href="/login" className="text-sky">
-          로그인
-        </Link>{" "}
-        후 이용할 수 있습니다.
+        {rich(tr("선물 주문은 {login} 후 이용할 수 있습니다."), {
+          login: (
+            <Link href="/login" className="text-sky">
+              {tr("로그인")}
+            </Link>
+          ),
+        })}
       </div>
     );
   }
@@ -177,10 +184,10 @@ export default function FuturesOrderPanel({
     <div className="glass space-y-3 p-4">
       <div>
         <div className="flex items-center justify-between text-xs text-ink-muted">
-          <span>레버리지</span>
+          <span>{tr("레버리지")}</span>
           <span className="num font-semibold text-ink">{leverageLabel(symbol, leverage)}</span>
         </div>
-        <div className="mt-1.5 flex flex-wrap gap-1" role="group" aria-label="레버리지">
+        <div className="mt-1.5 flex flex-wrap gap-1" role="group" aria-label={tr("레버리지")}>
           <button
             type="button"
             disabled={leverageLocked || leverageBusy}
@@ -192,7 +199,7 @@ export default function FuturesOrderPanel({
                 : "text-ink-muted ring-1 ring-hairline ring-inset"
             }`}
           >
-            기본
+            {tr("기본")}
           </button>
           {LEVERAGE_CHOICES.map((choice) => (
             <button
@@ -211,7 +218,7 @@ export default function FuturesOrderPanel({
             </button>
           ))}
         </div>
-        {leverageLocked && <p className="mt-1 text-[11px] text-ink-faint">포지션·미체결 주문이 없을 때 바꿀 수 있습니다.</p>}
+        {leverageLocked && <p className="mt-1 text-[11px] text-ink-faint">{tr("포지션·미체결 주문이 없을 때 바꿀 수 있습니다.")}</p>}
       </div>
 
       <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-2/60 p-1">
@@ -224,7 +231,7 @@ export default function FuturesOrderPanel({
               side === s ? (s === "BUY" ? "bg-up/15 text-up" : "bg-down/15 text-down") : "text-ink-muted"
             }`}
           >
-            {s === "BUY" ? "매수 (롱)" : "매도 (숏)"}
+            {s === "BUY" ? tr("매수 (롱)") : tr("매도 (숏)")}
           </button>
         ))}
       </div>
@@ -239,7 +246,7 @@ export default function FuturesOrderPanel({
               type === t ? "bg-sky/12 text-sky ring-1 ring-sky/30 ring-inset" : "text-ink-muted"
             }`}
           >
-            {t === "LIMIT" ? "지정가" : "시장가"}
+            {t === "LIMIT" ? tr("지정가") : tr("시장가")}
           </button>
         ))}
       </div>
@@ -247,13 +254,13 @@ export default function FuturesOrderPanel({
       {type === "LIMIT" && (
         <label className="block">
           <span className="text-xs text-ink-muted">
-            가격 ({def.unit}, 호가 단위 {tickText})
+            {tr("가격 ({unit}, 호가 단위 {tick})", { unit: tr(def.unit), tick: tickText })}
           </span>
           <div className="mt-1 flex items-center gap-2">
             <button
               type="button"
               className="btn btn-ghost min-h-10 min-w-10"
-              aria-label="호가 한 단계 내리기"
+              aria-label={tr("호가 한 단계 내리기")}
               onClick={() => stepPrice(-1)}
             >
               −
@@ -269,7 +276,7 @@ export default function FuturesOrderPanel({
             <button
               type="button"
               className="btn btn-ghost min-h-10 min-w-10"
-              aria-label="호가 한 단계 올리기"
+              aria-label={tr("호가 한 단계 올리기")}
               onClick={() => stepPrice(1)}
             >
               +
@@ -279,7 +286,7 @@ export default function FuturesOrderPanel({
       )}
 
       <label className="block">
-        <span className="text-xs text-ink-muted">수량 (계약)</span>
+        <span className="text-xs text-ink-muted">{tr("수량 (계약)")}</span>
         <div className="mt-1 flex items-center gap-2">
           <button type="button" className="btn btn-ghost min-h-10 min-w-10" onClick={() => {
               setActivePct(null);
@@ -311,8 +318,8 @@ export default function FuturesOrderPanel({
 
       <div>
         <div className="mb-1.5 flex items-center justify-between text-[11px] text-ink-faint">
-          <span>{closing ? "보유 포지션 기준 (청산)" : "주문 가능 금액 기준"}</span>
-          <span className="num">최대 {sizingBase.toLocaleString("ko-KR")}계약</span>
+          <span>{closing ? tr("보유 포지션 기준 (청산)") : tr("주문 가능 금액 기준")}</span>
+          <span className="num">{tr("최대 {n}계약", { n: sizingBase.toLocaleString("ko-KR") })}</span>
         </div>
         <div className="grid grid-cols-4 gap-1.5">
           {([0.1, 0.25, 0.5, 1] as const).map((pct) => (
@@ -339,13 +346,17 @@ export default function FuturesOrderPanel({
       <dl className="num space-y-1 text-[13px]">
         <div className="flex justify-between">
           <dt className="text-ink-muted">
-            {closingOnly ? "필요 증거금 (청산 주문)" : `필요 증거금 (${leverageLabel(symbol, leverage)})`}
+            {closingOnly ? tr("필요 증거금 (청산 주문)") : tr("필요 증거금 ({lev})", { lev: leverageLabel(symbol, leverage) })}
           </dt>
-          <dd className="font-semibold">{closingOnly ? "없음" : margin == null ? "—" : krw(margin)}</dd>
+          <dd className="font-semibold">{closingOnly ? tr("없음") : margin == null ? "—" : krw(margin)}</dd>
         </div>
         {expectedRealized != null && (
           <div className="flex justify-between">
-            <dt className="text-ink-muted">예상 실현손익 ({closeQty}계약 청산{type === "MARKET" ? ", 현재가 기준" : ""})</dt>
+            <dt className="text-ink-muted">
+              {type === "MARKET"
+                ? tr("예상 실현손익 ({n}계약 청산, 현재가 기준)", { n: closeQty })
+                : tr("예상 실현손익 ({n}계약 청산)", { n: closeQty })}
+            </dt>
             <dd className={`font-semibold ${expectedRealized > 0 ? "text-up" : expectedRealized < 0 ? "text-down" : ""}`}>
               {expectedRealized > 0 ? "+" : ""}
               {krw(expectedRealized)}
@@ -353,18 +364,18 @@ export default function FuturesOrderPanel({
           </div>
         )}
         {emergencyUnits != null && (
-          <div className="flex justify-between" title="평가손실이 이 포지션 증거금의 90%가 되는 가격 — 여기에 닿으면 즉시 전량 반대매매">
-            <dt className="text-ink-muted">긴급 반대매매가 (예상)</dt>
+          <div className="flex justify-between" title={tr("평가손실이 이 포지션 증거금의 90%가 되는 가격 — 여기에 닿으면 즉시 전량 반대매매")}>
+            <dt className="text-ink-muted">{tr("긴급 반대매매가 (예상)")}</dt>
             <dd className="text-ink-muted">{fmtFuture(symbol, emergencyUnits)}</dd>
           </div>
         )}
         <div className="flex justify-between">
-          <dt className="text-ink-muted">주문 가능 금액</dt>
+          <dt className="text-ink-muted">{tr("주문 가능 금액")}</dt>
           <dd>{available == null ? "—" : krw(available)}</dd>
         </div>
         {type === "MARKET" && (
           <div className="flex justify-between text-ink-faint">
-            <dt>현재가</dt>
+            <dt>{tr("현재가")}</dt>
             <dd>{fmtFuture(symbol, lastPrice)}</dd>
           </div>
         )}
@@ -376,11 +387,11 @@ export default function FuturesOrderPanel({
         onClick={submit}
         className={`min-h-11 w-full rounded-xl text-sm font-semibold disabled:opacity-50 ${sideTone}`}
       >
-        {busy ? "주문 중…" : `${side === "BUY" ? "매수" : "매도"} ${qty}계약`}
+        {busy ? tr("주문 중…") : side === "BUY" ? tr("매수 {n}계약", { n: qty }) : tr("매도 {n}계약", { n: qty })}
       </button>
       {message && <p className={`text-[13px] ${message.ok ? "text-ok" : "text-down"}`}>{message.text}</p>}
       <p className="text-[11px] leading-5 text-ink-faint">
-        1일물 — 매일 04:10 점검 시간에 그 시각 기초자산 가격으로 현금 정산되고 포지션이 사라집니다.
+        {tr("1일물 — 매일 04:10 점검 시간에 그 시각 기초자산 가격으로 현금 정산되고 포지션이 사라집니다.")}
       </p>
     </div>
   );

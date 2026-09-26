@@ -1,4 +1,5 @@
-import type { ReferenceTick } from "@mock-kabu/shared";
+import { formatWon, type ReferenceTick } from "@mock-kabu/shared";
+import { getLocale } from "./i18n";
 
 /** `/market/reference` 한 줄. 값은 모두 실제값 × scale 정수. */
 export interface ReferenceRow {
@@ -20,7 +21,7 @@ export function formatReference(units: number | null | undefined, row: Pick<Refe
     minimumFractionDigits: row.decimals,
     maximumFractionDigits: row.decimals,
   });
-  return row.unit === "원" ? `${text}원` : text;
+  return row.unit === "원" ? formatWon(text, getLocale()) : text;
 }
 
 /** 오늘 등락률(%) — 기준값이 없으면 null */

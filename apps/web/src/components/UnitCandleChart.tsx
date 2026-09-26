@@ -16,6 +16,7 @@ import { api } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { chartTheme, useTheme } from "@/lib/theme";
 import { formatKstHm, formatKstMonthDay, formatKstTime } from "@/lib/time";
+import { useT } from "@/lib/i18n";
 
 /**
  * 정수 단위 가격(실제값 × scale)을 쓰는 봉 차트 — 선물 기초자산(가상 지수)과 선물이 함께 쓴다.
@@ -60,6 +61,7 @@ export default function UnitCandleChart({
   scale: number;
   decimals: number;
 }) {
+  const t = useT();
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const [interval, setChartInterval] = useState("5m");
@@ -145,7 +147,13 @@ export default function UnitCandleChart({
 
   return (
     <div className="space-y-3">
-      <ChipTabs label="봉 간격" size="sm" items={INTERVALS} value={interval} onChange={setChartInterval} />
+      <ChipTabs
+        label={t("봉 간격")}
+        size="sm"
+        items={INTERVALS.map((item) => ({ ...item, label: t(item.label) }))}
+        value={interval}
+        onChange={setChartInterval}
+      />
       <div ref={containerRef} className="h-[320px] w-full sm:h-[420px]" />
     </div>
   );

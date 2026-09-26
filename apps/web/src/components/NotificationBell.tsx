@@ -11,6 +11,7 @@ import {
   type NotificationItem,
 } from "@/lib/notifications";
 import { formatKstTime } from "@/lib/time";
+import { useT } from "@/lib/i18n";
 
 const TONE_DOT: Record<NotificationItem["tone"], string> = {
   up: "bg-up",
@@ -21,6 +22,7 @@ const TONE_DOT: Record<NotificationItem["tone"], string> = {
 
 /** Nav의 종 아이콘. 안 읽은 알림 수를 배지로, 클릭하면 최근 알림 목록을 드롭다운으로 연다. */
 export default function NotificationBell({ accountId }: { accountId: string }) {
+  const t = useT();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [readAt, setReadAt] = useState(0);
   const [open, setOpen] = useState(false);
@@ -67,8 +69,8 @@ export default function NotificationBell({ accountId }: { accountId: string }) {
         onClick={toggle}
         aria-haspopup="true"
         aria-expanded={open}
-        aria-label={unread > 0 ? `알림 ${unread}건 안 읽음` : "알림"}
-        title="알림"
+        aria-label={unread > 0 ? t("알림 {n}건 안 읽음", { n: unread }) : t("알림")}
+        title={t("알림")}
         className={`relative grid h-8 w-8 place-items-center rounded-full border transition-colors ${
           open ? "border-sky/40 bg-sky/10 text-ink" : "border-hairline bg-surface-2/60 text-ink-muted hover:text-ink"
         }`}
@@ -91,14 +93,14 @@ export default function NotificationBell({ accountId }: { accountId: string }) {
           style={{ background: "var(--color-surface)" }}
         >
           <div className="panel-head">
-            <span className="panel-title">알림</span>
+            <span className="panel-title">{t("알림")}</span>
             {items.length > 0 && (
               <button
                 type="button"
                 onClick={() => clearNotifications(accountId)}
                 className="text-[11px] text-ink-faint transition-colors hover:text-ink"
               >
-                모두 지우기
+                {t("모두 지우기")}
               </button>
             )}
           </div>
@@ -129,7 +131,7 @@ export default function NotificationBell({ accountId }: { accountId: string }) {
                 </li>
               );
             })}
-            {items.length === 0 && <li className="px-4 py-8 text-center text-ink-faint">아직 알림이 없습니다</li>}
+            {items.length === 0 && <li className="px-4 py-8 text-center text-ink-faint">{t("아직 알림이 없습니다")}</li>}
           </ul>
         </div>
       )}

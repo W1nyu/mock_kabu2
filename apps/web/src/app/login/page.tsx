@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, saveSession, type SessionUser } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 export default function LoginPage() {
+  const t = useT();
   const router = useRouter();
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
@@ -25,7 +27,7 @@ export default function LoginPage() {
       saveSession(res.token, res.user);
       router.push("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "로그인 실패");
+      setError(err instanceof Error ? err.message : t("로그인 실패"));
     } finally {
       setBusy(false);
     }
@@ -37,18 +39,18 @@ export default function LoginPage() {
         <span className="grid h-11 w-11 place-items-center rounded-xl bg-linear-to-br from-sky to-indigo shadow-glow">
           <span className="h-3.5 w-3.5 rounded-[4px] bg-abyss" />
         </span>
-        <h1 className="mt-5 text-2xl font-semibold tracking-tight">로그인</h1>
-        <p className="mt-1.5 text-sm text-ink-muted">닉네임과 비밀번호로 계속하기</p>
+        <h1 className="mt-5 text-2xl font-semibold tracking-tight">{t("로그인")}</h1>
+        <p className="mt-1.5 text-sm text-ink-muted">{t("닉네임과 비밀번호로 계속하기")}</p>
 
         <form onSubmit={submit} className="mt-6 space-y-4">
           <div>
             <label className="label" htmlFor="login-nickname">
-              닉네임
+              {t("닉네임")}
             </label>
             <input
               id="login-nickname"
               className="field"
-              placeholder="가입할 때 정한 닉네임"
+              placeholder={t("가입할 때 정한 닉네임")}
               autoComplete="username"
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
@@ -56,7 +58,7 @@ export default function LoginPage() {
           </div>
           <div>
             <label className="label" htmlFor="login-password">
-              비밀번호
+              {t("비밀번호")}
             </label>
             <input
               id="login-password"
@@ -76,15 +78,15 @@ export default function LoginPage() {
           )}
 
           <button disabled={busy || !nickname.trim() || !password} className="btn btn-primary btn-block">
-            {busy ? "확인 중…" : "로그인"}
+            {busy ? t("확인 중…") : t("로그인")}
           </button>
         </form>
       </div>
 
       <p className="mt-5 text-center text-sm text-ink-muted">
-        계정이 없나요?{" "}
+        {t("계정이 없나요?")}{" "}
         <Link href="/signup" className="font-medium text-sky hover:underline">
-          가입하고 1,000만원 받기
+          {t("가입하고 1,000만원 받기")}
         </Link>
       </p>
     </div>

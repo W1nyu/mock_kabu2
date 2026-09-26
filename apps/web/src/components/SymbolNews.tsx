@@ -8,6 +8,7 @@ import { mergeNews, parseNewsItem } from "@/lib/news";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
 import { NewsList } from "./NewsFeed";
+import { useNames, useT } from "@/lib/i18n";
 
 type Scope = "all" | "own" | "industry" | "market";
 const SCOPE_STORAGE_KEY = "symbol:news-scope";
@@ -21,6 +22,8 @@ const SCOPE_STORAGE_KEY = "symbol:news-scope";
  * 실시간은 종목 채널(이 종목·산업군·시장 기사)을 받고 탭에 맞는 것만 붙인다. 업종 탭의 다른 종목 기사는 15초 폴링으로 채운다.
  */
 export default function SymbolNews({ symbol }: { symbol: string }) {
+  const t = useT();
+  const names = useNames();
   const industry = industryOf(symbol);
   const [scope, setScope] = useState<Scope>("all");
   const [items, setItems] = useState<NewsItemDto[]>([]);
@@ -47,12 +50,12 @@ export default function SymbolNews({ symbol }: { symbol: string }) {
 
   const tabs = useMemo(
     () => [
-      { id: "all", label: "전체" },
-      { id: "own", label: "이 종목" },
-      ...(industry ? [{ id: "industry", label: industry.label }] : []),
-      { id: "market", label: "시장 전반" },
+      { id: "all", label: t("전체") },
+      { id: "own", label: t("이 종목") },
+      ...(industry ? [{ id: "industry", label: names.industry(industry.id, industry.label) }] : []),
+      { id: "market", label: t("시장 전반") },
     ],
-    [industry],
+    [industry, t, names],
   );
   const effectiveScope: Scope = scope === "industry" && !industry ? "all" : scope;
 
@@ -104,24 +107,24 @@ export default function SymbolNews({ symbol }: { symbol: string }) {
 
   const emptyLabel =
     effectiveScope === "own"
-      ? "이 종목을 다룬 뉴스가 아직 없습니다"
+      ? t("이 종목을 다룬 뉴스가 아직 없습니다")
       : effectiveScope === "industry"
-        ? `${industry?.label ?? "업종"} 뉴스가 아직 없습니다`
+        ? t("{name} 뉴스가 아직 없습니다", { name: industry ? names.industry(industry.id, industry.label) : t("업종") })
         : effectiveScope === "market"
-          ? "시장 전반 뉴스가 아직 없습니다"
-          : "이 종목의 뉴스가 아직 없습니다";
+          ? t("시장 전반 뉴스가 아직 없습니다")
+          : t("이 종목의 뉴스가 아직 없습니다");
 
   return (
     <section className="glass overflow-hidden">
       <div className="panel-head">
-        <span className="panel-title">뉴스</span>
+        <span className="panel-title">{t("뉴스")}</span>
         <span className="chip chip-live">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
           LIVE
         </span>
       </div>
       <div className="border-b border-hairline-soft px-3 py-2">
-        <ChipTabs label="뉴스 범위" size="sm" items={tabs} value={effectiveScope} onChange={chooseScope} />
+        <ChipTabs label={t("뉴스 범위")} size="sm" items={tabs} value={effectiveScope} onChange={chooseScope} />
       </div>
 
       <div className="max-h-96 overflow-y-auto">

@@ -16,6 +16,7 @@ import { api, fmt, getUser, newIdempotencyKey, won } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { everyVisible } from "@/lib/visible-interval";
+import { useT } from "@/lib/i18n";
 
 interface AccountInfo {
   balance: number;
@@ -44,6 +45,7 @@ export default function OrderForm({
   /** 폰 거래 화면의 매수/매도 버튼으로 열 때 처음 선택될 방향. */
   initialSide?: "BUY" | "SELL";
 }) {
+  const tr = useT();
   const [side, setSide] = useState<"BUY" | "SELL">(initialSide);
   const [type, setType] = useState<"LIMIT" | "MARKET" | "STOP">("LIMIT");
   const [price, setPrice] = useState("");
@@ -127,9 +129,10 @@ export default function OrderForm({
         });
         setMessage({
           ok: true,
-          text: `트레일링 예약 등록: ${side === "SELL" ? "고점" : "저점"} 대비 ${trailPct}% ${
-            side === "SELL" ? "하락" : "반등"
-          } 시 ${fmt.format(Number(qty))}주 시장가 ${side === "BUY" ? "매수" : "매도"}`,
+          text:
+            side === "SELL"
+              ? tr("트레일링 예약 등록: 고점 대비 {pct}% 하락 시 {qty}주 시장가 매도", { pct: trailPct, qty: fmt.format(Number(qty)) })
+              : tr("트레일링 예약 등록: 저점 대비 {pct}% 반등 시 {qty}주 시장가 매수", { pct: trailPct, qty: fmt.format(Number(qty)) }),
         });
       } else if (type === "STOP") {
         await api("/orders/conditional", {
@@ -146,11 +149,17 @@ export default function OrderForm({
         });
         setMessage({
           ok: true,
-          text: `예약 주문 등록: ${fmt.format(Number(triggerPrice))}원 ${
-            triggerDirection === "AT_OR_ABOVE" ? "이상" : "이하"
-          }이면 ${fmt.format(Number(qty))}주 ${
-            stopExec === "LIMIT" ? `${fmt.format(Number(stopLimitPrice))}원 지정가` : "시장가"
-          } ${side === "BUY" ? "매수" : "매도"}`,
+          text: tr(
+            triggerDirection === "AT_OR_ABOVE"
+              ? "예약 주문 등록: {trigger} 이상이면 {qty}주 {exec} {side}"
+              : "예약 주문 등록: {trigger} 이하이면 {qty}주 {exec} {side}",
+            {
+              trigger: won(Number(triggerPrice)),
+              qty: fmt.format(Number(qty)),
+              exec: stopExec === "LIMIT" ? tr("{price} 지정가", { price: won(Number(stopLimitPrice)) }) : tr("시장가"),
+              side: side === "BUY" ? tr("매수") : tr("매도"),
+            },
+          ),
         });
       } else {
         await api("/orders", {
@@ -168,13 +177,15 @@ export default function OrderForm({
         setMessage({
           ok: true,
           text: bracketActive
-            ? `주문 접수 · 체결되면 ${[
-                bracketStopBps != null ? `손절 −${bracketStopPct}%` : null,
-                bracketTakeBps != null ? `익절 +${bracketTakePct}%` : null,
-              ]
-                .filter(Boolean)
-                .join(" / ")}를 자동 등록합니다`
-            : "주문이 접수되었습니다",
+            ? tr("주문 접수 · 체결되면 {legs}를 자동 등록합니다", {
+                legs: [
+                  bracketStopBps != null ? tr("손절 −{pct}%", { pct: bracketStopPct }) : null,
+                  bracketTakeBps != null ? tr("익절 +{pct}%", { pct: bracketTakePct }) : null,
+                ]
+                  .filter(Boolean)
+                  .join(" / "),
+              })
+            : tr("주문이 접수되었습니다"),
         });
       }
       setQty("");
@@ -182,7 +193,7 @@ export default function OrderForm({
       refreshLimits();
       onPlaced?.();
     } catch (err) {
-      setMessage({ ok: false, text: err instanceof Error ? err.message : "주문 실패" });
+      setMessage({ ok: false, text: err instanceof Error ? err.message : tr("주문 실패") });
     } finally {
       setBusy(false);
     }
@@ -269,8 +280,8 @@ export default function OrderForm({
       setActivePct(null);
       setSizingNote(
         side === "BUY"
-          ? "주문 가능 현금으로는 현재 기준가의 1주를 매수할 수 없습니다."
-          : "매도 가능한 보유 수량이 없습니다.",
+          ? tr("주문 가능 현금으로는 현재 기준가의 1주를 매수할 수 없습니다.")
+          : tr("매도 가능한 보유 수량이 없습니다."),
       );
       return;
     }
@@ -287,7 +298,7 @@ export default function OrderForm({
   return (
     <form onSubmit={submit} className="glass overflow-hidden">
       <div className="panel-head">
-        <span className="panel-title">주문</span>
+        <span className="panel-title">{tr("주문")}</span>
         <span className="num text-[11px] text-ink-faint">{symbol}</span>
       </div>
 
@@ -313,7 +324,7 @@ export default function OrderForm({
                     : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                 }`}
               >
-                {s === "BUY" ? "매수" : "매도"}
+                {s === "BUY" ? tr("매수") : tr("매도")}
               </button>
             );
           })}
@@ -336,14 +347,14 @@ export default function OrderForm({
                   : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
               }`}
             >
-              {t === "LIMIT" ? "지정가" : t === "MARKET" ? "시장가" : "조건부"}
+              {t === "LIMIT" ? tr("지정가") : t === "MARKET" ? tr("시장가") : tr("조건부")}
             </button>
           ))}
         </div>
 
         {type === "STOP" && (
           <div className="space-y-3">
-            <div className="well grid grid-cols-2 gap-1 p-1" role="group" aria-label="조건 방식">
+            <div className="well grid grid-cols-2 gap-1 p-1" role="group" aria-label={tr("조건 방식")}>
               {(["FIXED", "TRAIL"] as const).map((m) => (
                 <button
                   key={m}
@@ -352,10 +363,10 @@ export default function OrderForm({
                   aria-pressed={stopMode === m}
                   title={
                     m === "FIXED"
-                      ? "정해둔 가격에 닿으면 발동"
+                      ? tr("정해둔 가격에 닿으면 발동")
                       : side === "SELL"
-                        ? "등록 후 고점에서 정한 비율만큼 내려오면 발동 — 오를수록 손절선도 따라 올라갑니다"
-                        : "등록 후 저점에서 정한 비율만큼 반등하면 발동"
+                        ? tr("등록 후 고점에서 정한 비율만큼 내려오면 발동 — 오를수록 손절선도 따라 올라갑니다")
+                        : tr("등록 후 저점에서 정한 비율만큼 반등하면 발동")
                   }
                   className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
                     stopMode === m
@@ -363,14 +374,14 @@ export default function OrderForm({
                       : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                   }`}
                 >
-                  {m === "FIXED" ? "고정 가격" : "트레일링"}
+                  {m === "FIXED" ? tr("고정 가격") : tr("트레일링")}
                 </button>
               ))}
             </div>
             {stopMode === "TRAIL" ? (
               <div>
                 <label className="label" htmlFor={`order-trail-${symbol}`}>
-                  {side === "SELL" ? "고점 대비 하락률 (%)" : "저점 대비 반등률 (%)"}
+                  {side === "SELL" ? tr("고점 대비 하락률 (%)") : tr("저점 대비 반등률 (%)")}
                 </label>
                 <input
                   id={`order-trail-${symbol}`}
@@ -383,17 +394,17 @@ export default function OrderForm({
                 <p className="mt-1.5 text-[11px] text-ink-faint">
                   {validTrail
                     ? trailPreview != null
-                      ? `지금 등록하면 트리거 ${fmt.format(trailPreview)}원부터 시작 · ${
-                          side === "SELL" ? "새 고점마다" : "새 저점마다"
-                        } 자동으로 따라갑니다`
-                      : "현재가를 기준으로 트리거가 정해집니다"
-                    : `${TRAIL_BPS_MIN / 100}%~${TRAIL_BPS_MAX / 100}% 사이로 입력하세요`}
+                      ? side === "SELL"
+                        ? tr("지금 등록하면 트리거 {price}부터 시작 · 새 고점마다 자동으로 따라갑니다", { price: won(trailPreview) })
+                        : tr("지금 등록하면 트리거 {price}부터 시작 · 새 저점마다 자동으로 따라갑니다", { price: won(trailPreview) })
+                      : tr("현재가를 기준으로 트리거가 정해집니다")
+                    : tr("{min}%~{max}% 사이로 입력하세요", { min: TRAIL_BPS_MIN / 100, max: TRAIL_BPS_MAX / 100 })}
                 </p>
               </div>
             ) : (
               <div>
                 <label className="label" htmlFor={`order-trigger-${symbol}`}>
-                  트리거 가격
+                  {tr("트리거 가격")}
                 </label>
                 <input
                   id={`order-trigger-${symbol}`}
@@ -404,12 +415,12 @@ export default function OrderForm({
                     setTriggerPrice(e.target.value.replace(/[^0-9]/g, ""));
                     setDirectionOverride(null);
                   }}
-                  placeholder="호가를 클릭해도 입력됩니다"
+                  placeholder={tr("호가를 클릭해도 입력됩니다")}
                 />
               </div>
             )}
             {stopMode === "FIXED" && (
-              <div className="well grid grid-cols-2 gap-1 p-1" role="group" aria-label="발동 조건">
+              <div className="well grid grid-cols-2 gap-1 p-1" role="group" aria-label={tr("발동 조건")}>
                 {(["AT_OR_BELOW", "AT_OR_ABOVE"] as const).map((d) => (
                   <button
                     key={d}
@@ -422,7 +433,7 @@ export default function OrderForm({
                         : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                     }`}
                   >
-                    {d === "AT_OR_BELOW" ? "이하가 되면" : "이상이 되면"}
+                    {d === "AT_OR_BELOW" ? tr("이하가 되면") : tr("이상이 되면")}
                   </button>
                 ))}
               </div>
@@ -432,7 +443,7 @@ export default function OrderForm({
                 <div
                   className="well grid grid-cols-2 gap-1 p-1"
                   role="group"
-                  aria-label="발동 시 주문 유형"
+                  aria-label={tr("발동 시 주문 유형")}
                 >
                   {(["MARKET", "LIMIT"] as const).map((m) => (
                     <button
@@ -442,8 +453,8 @@ export default function OrderForm({
                       aria-pressed={stopExec === m}
                       title={
                         m === "MARKET"
-                          ? "발동 즉시 시장가로 체결 — 확실히 나가지만 급락장에선 미끄러질 수 있습니다"
-                          : "발동 후 지정가를 겁니다 — 슬리피지를 막지만 가격이 지나가면 미체결로 남습니다"
+                          ? tr("발동 즉시 시장가로 체결 — 확실히 나가지만 급락장에선 미끄러질 수 있습니다")
+                          : tr("발동 후 지정가를 겁니다 — 슬리피지를 막지만 가격이 지나가면 미체결로 남습니다")
                       }
                       className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
                         stopExec === m
@@ -451,17 +462,17 @@ export default function OrderForm({
                           : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                       }`}
                     >
-                      {m === "MARKET" ? "발동 시 시장가" : "발동 시 지정가"}
+                      {m === "MARKET" ? tr("발동 시 시장가") : tr("발동 시 지정가")}
                     </button>
                   ))}
                 </div>
                 {stopExec === "LIMIT" && (
                   <div>
                     <label className="label" htmlFor={`order-stop-limit-${symbol}`}>
-                      발동 후 지정가
+                      {tr("발동 후 지정가")}
                       {tickSize != null && (
                         <span className="ml-1.5 font-normal text-ink-faint">
-                          호가 단위 {fmt.format(tickSize)}원
+                          {tr("호가 단위 {tick}", { tick: won(tickSize) })}
                         </span>
                       )}
                     </label>
@@ -471,7 +482,7 @@ export default function OrderForm({
                       inputMode="numeric"
                       value={stopLimitPrice}
                       onChange={(e) => setStopLimitPrice(e.target.value.replace(/[^0-9]/g, ""))}
-                      placeholder={validTrigger ? String(parsedTrigger) : "예: 트리거 가격"}
+                      placeholder={validTrigger ? String(parsedTrigger) : tr("예: 트리거 가격")}
                     />
                   </div>
                 )}
@@ -480,14 +491,13 @@ export default function OrderForm({
             <p className="text-[11px] text-ink-faint">
               {stopMode === "TRAIL"
                 ? side === "SELL"
-                  ? "트레일링 손절"
-                  : "트레일링 매수"
-                : describeCondition(triggerDirection, side)}{" "}
-              · 조건 충족 시{" "}
-              <span className="text-ink-muted">
-                {stopMode === "FIXED" && stopExec === "LIMIT" ? "지정가" : "시장가"}
-              </span>
-              로 접수됩니다. 대기 중에는 현금·수량을 홀드하지 않습니다.
+                  ? tr("트레일링 손절")
+                  : tr("트레일링 매수")
+                : tr(describeCondition(triggerDirection, side))}{" "}
+              ·{" "}
+              {tr("조건 충족 시 {exec}로 접수됩니다. 대기 중에는 현금·수량을 홀드하지 않습니다.", {
+                exec: stopMode === "FIXED" && stopExec === "LIMIT" ? tr("지정가") : tr("시장가"),
+              })}
             </p>
           </div>
         )}
@@ -495,10 +505,10 @@ export default function OrderForm({
         {type === "LIMIT" && (
           <div>
             <label className="label" htmlFor={`order-price-${symbol}`}>
-              가격
+              {tr("가격")}
               {tickSize != null && (
                 <span className="ml-1.5 font-normal text-ink-faint">
-                  호가 단위 {fmt.format(tickSize)}원
+                  {tr("호가 단위 {tick}", { tick: won(tickSize) })}
                 </span>
               )}
             </label>
@@ -511,14 +521,14 @@ export default function OrderForm({
                 setPrice(e.target.value.replace(/[^0-9]/g, ""));
                 resetSizing();
               }}
-              placeholder="호가를 클릭해도 입력됩니다"
+              placeholder={tr("호가를 클릭해도 입력됩니다")}
             />
           </div>
         )}
 
         <div>
           <label className="label" htmlFor={`order-qty-${symbol}`}>
-            수량
+            {tr("수량")}
           </label>
           <input
             id={`order-qty-${symbol}`}
@@ -536,10 +546,10 @@ export default function OrderForm({
         {/* Quick sizing */}
         <div>
           <div className="mb-1.5 flex items-center justify-between text-[11px] text-ink-faint">
-            <span>{side === "BUY" ? "주문 가능 현금 기준" : "매도 가능 수량 기준"}</span>
+            <span>{side === "BUY" ? tr("주문 가능 현금 기준") : tr("매도 가능 수량 기준")}</span>
             {side === "BUY" && buyRefPrice != null && (
               <span className="num">
-                {type === "LIMIT" ? "지정가" : "최근가 110%"} {won(buyRefPrice)}
+                {type === "LIMIT" ? tr("지정가") : tr("최근가 110%")} {won(buyRefPrice)}
               </span>
             )}
           </div>
@@ -554,9 +564,9 @@ export default function OrderForm({
                 title={
                   side === "BUY"
                     ? type === "LIMIT"
-                      ? "주문 가능 현금 대비 (가격 입력 필요)"
-                      : "주문 가능 현금 대비 (최근가 110% 기준)"
-                    : "매도 가능 수량 대비"
+                      ? tr("주문 가능 현금 대비 (가격 입력 필요)")
+                      : tr("주문 가능 현금 대비 (최근가 110% 기준)")
+                    : tr("매도 가능 수량 대비")
                 }
                 className={`num rounded-lg border py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${
                   activePct === pct
@@ -566,7 +576,7 @@ export default function OrderForm({
                     : "border-hairline-soft bg-surface-2/50 text-ink-muted hover:border-hairline hover:text-ink"
                 }`}
               >
-                {pct === 1 ? "최대" : `${pct * 100}%`}
+                {pct === 1 ? tr("최대") : `${pct * 100}%`}
               </button>
             ))}
           </div>
@@ -581,36 +591,35 @@ export default function OrderForm({
                 onChange={(e) => setBracketOn(e.target.checked)}
                 className="accent-sky"
               />
-              <span className="font-medium">체결 후 손절/익절 자동 등록</span>
-              <span className="text-ink-faint">(하나만 입력해도 됨)</span>
+              <span className="font-medium">{tr("체결 후 손절/익절 자동 등록")}</span>
+              <span className="text-ink-faint">{tr("(하나만 입력해도 됨)")}</span>
             </label>
             {bracketOn && (
               <div className="num mt-2 grid grid-cols-2 gap-2">
                 <label className="flex items-center gap-1.5">
-                  <span className="text-down">손절 −</span>
+                  <span className="text-down">{tr("손절")} −</span>
                   <input
                     className="field w-16 py-1 text-xs"
                     inputMode="decimal"
                     value={bracketStopPct}
-                    placeholder="없음"
+                    placeholder={tr("없음")}
                     onChange={(e) => setBracketStopPct(e.target.value.replace(/[^0-9.]/g, ""))}
                   />
                   <span className="text-ink-faint">%</span>
                 </label>
                 <label className="flex items-center gap-1.5">
-                  <span className="text-up">익절 +</span>
+                  <span className="text-up">{tr("익절")} +</span>
                   <input
                     className="field w-16 py-1 text-xs"
                     inputMode="decimal"
                     value={bracketTakePct}
-                    placeholder="없음"
+                    placeholder={tr("없음")}
                     onChange={(e) => setBracketTakePct(e.target.value.replace(/[^0-9.]/g, ""))}
                   />
                   <span className="text-ink-faint">%</span>
                 </label>
                 <p className="col-span-2 text-[11px] text-ink-faint">
-                  체결 평균가 기준으로 계산합니다. 한쪽을 비우면 그쪽은 걸지 않습니다. 부분 체결이면
-                  체결된 수량만 보호하고, 등록 전에 이미 선을 넘었으면 즉시 시장가로 정리합니다.
+                  {tr("체결 평균가 기준으로 계산합니다. 한쪽을 비우면 그쪽은 걸지 않습니다. 부분 체결이면 체결된 수량만 보호하고, 등록 전에 이미 선을 넘었으면 즉시 시장가로 정리합니다.")}
                 </p>
               </div>
             )}
@@ -622,40 +631,40 @@ export default function OrderForm({
           {side === "BUY" ? (
             <>
               <p className="flex items-baseline justify-between gap-2">
-                <span className="text-ink-muted">주문 가능 현금</span>
+                <span className="text-ink-muted">{tr("주문 가능 현금")}</span>
                 <span className="font-semibold">
-                  {account ? won(account.available) : "불러오는 중"}
+                  {account ? won(account.available) : tr("불러오는 중")}
                 </span>
               </p>
               {account && (
                 <p className="flex items-baseline justify-between gap-2 text-ink-faint">
-                  <span>예수금</span>
+                  <span>{tr("예수금")}</span>
                   <span>
                     {won(account.balance)}
-                    {account.holdAmount > 0 && ` · 대기 ${won(account.holdAmount)} 제외`}
+                    {account.holdAmount > 0 && ` · ${tr("대기 {amount} 제외", { amount: won(account.holdAmount) })}`}
                   </span>
                 </p>
               )}
               {maxBuyQty != null && (
                 <p className="flex items-baseline justify-between gap-2 text-ink-faint">
-                  <span>최대 매수 가능</span>
-                  <span>{fmt.format(maxBuyQty)}주</span>
+                  <span>{tr("최대 매수 가능")}</span>
+                  <span>{tr("{n}주", { n: fmt.format(maxBuyQty) })}</span>
                 </p>
               )}
             </>
           ) : (
             <>
               <p className="flex items-baseline justify-between gap-2">
-                <span className="text-ink-muted">매도 가능 수량</span>
-                <span className="font-semibold">{fmt.format(availableQty)}주</span>
+                <span className="text-ink-muted">{tr("매도 가능 수량")}</span>
+                <span className="font-semibold">{tr("{n}주", { n: fmt.format(availableQty) })}</span>
               </p>
               <p className="flex items-baseline justify-between gap-2 text-ink-faint">
-                <span>보유</span>
+                <span>{tr("보유")}</span>
                 <span>
-                  {fmt.format(holding?.qty ?? 0)}주
+                  {tr("{n}주", { n: fmt.format(holding?.qty ?? 0) })}
                   {holding &&
                     holding.holdQty > 0 &&
-                    ` · 대기 ${fmt.format(holding.holdQty)}주 제외`}
+                    ` · ${tr("대기 {amount} 제외", { amount: tr("{n}주", { n: fmt.format(holding.holdQty) }) })}`}
                 </span>
               </p>
             </>
@@ -663,7 +672,7 @@ export default function OrderForm({
           {estimate != null && (
             <p className="flex items-baseline justify-between gap-2 border-t border-hairline-soft pt-1.5">
               <span className="text-ink-muted">
-                {side === "BUY" && type !== "LIMIT" ? "예상 최대 홀드" : "예상 주문금액"}
+                {side === "BUY" && type !== "LIMIT" ? tr("예상 최대 홀드") : tr("예상 주문금액")}
               </span>
               <span className="font-semibold text-sky">{won(estimate)}</span>
             </p>
@@ -673,34 +682,34 @@ export default function OrderForm({
         {/* Advisories */}
         <div className="space-y-1 text-xs">
           {type === "MARKET" && side === "BUY" && (
-            <p className="text-ink-faint">시장가 매수는 최근가의 110%까지 증거금이 홀드됩니다</p>
+            <p className="text-ink-faint">{tr("시장가 매수는 최근가의 110%까지 증거금이 홀드됩니다")}</p>
           )}
           {type === "STOP" && stopMode === "FIXED" && triggerAlreadyMet && (
             <p className="text-warn">
-              현재가가 이미 조건을 만족합니다. 바로 체결하려면 시장가 주문을 이용하세요.
+              {tr("현재가가 이미 조건을 만족합니다. 바로 체결하려면 시장가 주문을 이용하세요.")}
             </p>
           )}
           {sizingNote && <p className="text-warn">{sizingNote}</p>}
           {type === "LIMIT" && offTick && nearestTick != null && (
             <p className="text-warn">
-              호가 단위 {fmt.format(tickSize!)}원에 맞지 않습니다.{" "}
+              {tr("호가 단위 {tick}에 맞지 않습니다.", { tick: won(tickSize!) })}{" "}
               <button
                 type="button"
                 className="underline underline-offset-2 hover:text-ink"
                 onClick={() => setPrice(String(nearestTick))}
               >
-                {fmt.format(nearestTick)}원으로 맞추기
+                {tr("{price}으로 맞추기", { price: won(nearestTick) })}
               </button>
             </p>
           )}
           {exceedsAvailableCash && (
             <p className="text-warn">
-              입력 수량이 현재 주문 가능 현금을 초과합니다. 접수 시 다시 확인됩니다.
+              {tr("입력 수량이 현재 주문 가능 현금을 초과합니다. 접수 시 다시 확인됩니다.")}
             </p>
           )}
           {exceedsAvailableShares && (
             <p className="text-warn">
-              입력 수량이 현재 매도 가능 수량을 초과합니다. 접수 시 다시 확인됩니다.
+              {tr("입력 수량이 현재 매도 가능 수량을 초과합니다. 접수 시 다시 확인됩니다.")}
             </p>
           )}
         </div>
@@ -729,10 +738,14 @@ export default function OrderForm({
           className={`btn btn-block ${side === "BUY" ? "btn-buy" : "btn-sell"}`}
         >
           {busy
-            ? "접수 중…"
+            ? tr("접수 중…")
             : type === "STOP"
-              ? `${side === "BUY" ? "매수" : "매도"} 예약`
-              : `${side === "BUY" ? "매수" : "매도"} 주문`}
+              ? side === "BUY"
+                ? tr("매수 예약")
+                : tr("매도 예약")
+              : side === "BUY"
+                ? tr("매수 주문")
+                : tr("매도 주문")}
         </button>
       </div>
     </form>

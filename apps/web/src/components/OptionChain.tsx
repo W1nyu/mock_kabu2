@@ -7,12 +7,15 @@ import { api } from "@/lib/api";
 import { fmtOption, fmtStrike, timeLeft, type OptionRow } from "@/lib/options";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
+import { useNames, useT } from "@/lib/i18n";
 
 /**
  * 옵션 체인 — 기초자산(주가지수·원/달러)마다 행사가 5줄, 왼쪽 콜·오른쪽 풋의 최근가(이론가).
  * 칸을 누르면 그 옵션 거래 화면으로. 이론가는 10초마다, 체결가는 소켓으로 갱신한다.
  */
 export default function OptionChain() {
+  const t = useT();
+  const names = useNames();
   const [rows, setRows] = useState<OptionRow[]>([]);
   const [live, setLive] = useState<Record<string, number>>({});
   const [family, setFamily] = useState<string>(OPTION_FAMILIES[0].code);
@@ -72,7 +75,7 @@ export default function OptionChain() {
           }`}
         >
           <span className="num block font-semibold">{fmtOption(row.symbol, price)}</span>
-          <span className="num block text-[11px] text-ink-faint">이론 {fmtOption(row.symbol, row.theo)}</span>
+          <span className="num block text-[11px] text-ink-faint">{t("이론")} {fmtOption(row.symbol, row.theo)}</span>
         </Link>
       </td>
     );
@@ -81,7 +84,7 @@ export default function OptionChain() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3">
-        <div className="well flex gap-0.5 p-0.5" role="group" aria-label="기초자산">
+        <div className="well flex gap-0.5 p-0.5" role="group" aria-label={t("기초자산")}>
           {OPTION_FAMILIES.map((f) => (
             <button
               key={f.code}
@@ -92,23 +95,23 @@ export default function OptionChain() {
                 family === f.code ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35" : "text-ink-muted hover:text-ink"
               }`}
             >
-              {f.name}
+              {names.optionFamily(f.code, f.name)}
             </button>
           ))}
         </div>
         {head && (
           <p className="num text-[12px] text-ink-muted">
-            기초자산 <span className="font-semibold text-ink">{fmtOption(head.symbol, head.underlying)}</span>
-            <span className="text-ink-faint"> · 만기까지 {timeLeft(head.expiresAt)}</span>
+            {t("기초자산")} <span className="font-semibold text-ink">{fmtOption(head.symbol, head.underlying)}</span>
+            <span className="text-ink-faint"> · {t("만기까지 {time}", { time: timeLeft(head.expiresAt) })}</span>
           </p>
         )}
       </div>
       <table className="tbl mt-1 w-full table-fixed">
         <thead>
           <tr>
-            <th className="text-left text-up">콜</th>
-            <th className="text-center">행사가</th>
-            <th className="text-right text-down">풋</th>
+            <th className="text-left text-up">{t("콜")}</th>
+            <th className="text-center">{t("행사가")}</th>
+            <th className="text-right text-down">{t("풋")}</th>
           </tr>
         </thead>
         <tbody>
@@ -123,7 +126,7 @@ export default function OptionChain() {
                 <td className={callItm ? "bg-up/5" : undefined}>{cell(s.call, "left")}</td>
                 <td className={`num text-center ${atm ? "font-semibold text-sky" : "text-ink-muted"}`}>
                   {s.call ? fmtStrike(s.call.symbol, s.strike) : "—"}
-                  {atm && <span className="block text-[10px] font-normal text-ink-faint">등가격</span>}
+                  {atm && <span className="block text-[10px] font-normal text-ink-faint">{t("등가격")}</span>}
                 </td>
                 <td className={putItm ? "bg-down/5" : undefined}>{cell(s.put, "right")}</td>
               </tr>
@@ -132,14 +135,14 @@ export default function OptionChain() {
           {strikes.length === 0 && (
             <tr>
               <td colSpan={3} className="py-8 text-center text-sm text-ink-faint">
-                불러오는 중…
+                {t("불러오는 중…")}
               </td>
             </tr>
           )}
         </tbody>
       </table>
       <p className="px-4 pb-3 pt-2 text-[11px] leading-5 text-ink-faint">
-        1일물 유럽형 — 매일 04:10 기초자산 가격으로 내가격이면 차액을 현금으로 받고, 외가격이면 소멸합니다. 매수와 보유분 매도만 할 수 있습니다.
+        {t("1일물 유럽형 — 매일 04:10 기초자산 가격으로 내가격이면 차액을 현금으로 받고, 외가격이면 소멸합니다. 매수와 보유분 매도만 할 수 있습니다.")}
       </p>
     </div>
   );

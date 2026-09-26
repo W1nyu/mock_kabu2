@@ -10,6 +10,7 @@ import { fmtFuture } from "@/lib/futures";
 import { formatKstTime, MARKET_TIME_ZONE_LABEL } from "@/lib/time";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
+import { getLocale, translate, useT } from "@/lib/i18n";
 
 interface OrderRow {
   id: string;
@@ -91,17 +92,18 @@ function priceOf(symbol: string, price: number): string {
 
 /** 체결 내역을 CSV로 내려받는다. */
 function downloadFillsCsv(fills: FillRow[]) {
-  const header = ["시각(KST)", "종목", "구분", "체결가", "수량", "체결금액", "실현손익", "차감원가", "테이커"];
+  const tr = (ko: string) => translate(getLocale(), ko);
+  const header = ["시각(KST)", "종목", "구분", "체결가", "수량", "체결금액", "실현손익", "차감원가", "테이커"].map(tr);
   const rows = fills.map((f) => [
     new Date(f.ts).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false }),
     f.symbol,
-    SIDE_LABEL[f.side],
+    tr(SIDE_LABEL[f.side]),
     priceOf(f.symbol, f.price),
     f.qty,
     f.amount,
     f.realized,
     f.costBasis,
-    f.taker ? "테이커" : "메이커",
+    f.taker ? tr("테이커") : tr("메이커"),
   ]);
   const blob = new Blob([toCsv(header, rows)], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -113,6 +115,7 @@ function downloadFillsCsv(fills: FillRow[]) {
 }
 
 export default function OrdersPage() {
+  const t = useT();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("orders");
   const [orders, setOrders] = useState<OrderRow[]>([]);
@@ -177,29 +180,29 @@ export default function OrdersPage() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{current.title}</h1>
-          <p className="mt-1 text-sm text-ink-muted">{current.hint}</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{t(current.title)}</h1>
+          <p className="mt-1 text-sm text-ink-muted">{t(current.hint)}</p>
         </div>
         {tab === "fills" && fills.length > 0 && (
           <button type="button" onClick={() => downloadFillsCsv(fills)} className="btn btn-ghost btn-sm">
-            CSV 내려받기
+            {t("CSV 내려받기")}
           </button>
         )}
-        <div className="well flex gap-0.5 p-0.5" role="tablist" aria-label="내역 종류">
-          {TABS.map((t) => (
+        <div className="well flex gap-0.5 p-0.5" role="tablist" aria-label={t("내역 종류")}>
+          {TABS.map((item) => (
             <button
-              key={t.id}
+              key={item.id}
               type="button"
               role="tab"
-              aria-selected={tab === t.id}
-              onClick={() => selectTab(t.id)}
+              aria-selected={tab === item.id}
+              onClick={() => selectTab(item.id)}
               className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
-                tab === t.id
+                tab === item.id
                   ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
                   : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
               }`}
             >
-              {t.label}
+              {t(item.label)}
             </button>
           ))}
         </div>
@@ -221,16 +224,17 @@ export default function OrdersPage() {
 }
 
 function OrdersTable({ orders }: { orders: OrderRow[] }) {
+  const t = useT();
   return (
     <table className="tbl tbl-hover">
       <thead>
         <tr>
-          <th>시각 ({MARKET_TIME_ZONE_LABEL})</th>
-          <th>종목</th>
-          <th>구분</th>
-          <th className="text-right">가격</th>
-          <th className="text-right">체결/수량</th>
-          <th className="text-right">상태</th>
+          <th>{t("시각")} ({MARKET_TIME_ZONE_LABEL})</th>
+          <th>{t("종목")}</th>
+          <th>{t("구분")}</th>
+          <th className="text-right">{t("가격")}</th>
+          <th className="text-right">{t("체결/수량")}</th>
+          <th className="text-right">{t("상태")}</th>
         </tr>
       </thead>
       <tbody>
@@ -242,10 +246,10 @@ function OrdersTable({ orders }: { orders: OrderRow[] }) {
             <td className="font-semibold">{o.symbol}</td>
             <td>
               <span className={`font-medium ${o.side === "BUY" ? "text-up" : "text-down"}`}>
-                {o.side === "BUY" ? "매수" : "매도"}
+                {o.side === "BUY" ? t("매수") : t("매도")}
               </span>
               <span className="ml-1.5 text-xs text-ink-faint">
-                {o.type === "LIMIT" ? "지정가" : "시장가"}
+                {o.type === "LIMIT" ? t("지정가") : t("시장가")}
               </span>
             </td>
             <td className="num text-right">{o.price != null ? priceOf(o.symbol, o.price) : "—"}</td>
@@ -255,7 +259,7 @@ function OrdersTable({ orders }: { orders: OrderRow[] }) {
             </td>
             <td className="text-right">
               <span className={`chip ${STATUS_TONE[o.status] ?? ""}`}>
-                {STATUS_LABEL[o.status] ?? o.status}
+                {STATUS_LABEL[o.status] ? t(STATUS_LABEL[o.status]) : o.status}
               </span>
             </td>
           </tr>
@@ -263,7 +267,7 @@ function OrdersTable({ orders }: { orders: OrderRow[] }) {
         {orders.length === 0 && (
           <tr>
             <td colSpan={6} className="py-14 text-center text-sm text-ink-faint">
-              주문 내역이 없습니다
+              {t("주문 내역이 없습니다")}
             </td>
           </tr>
         )}
@@ -275,18 +279,19 @@ function OrdersTable({ orders }: { orders: OrderRow[] }) {
 const SIDE_LABEL: Record<FillRow["side"], string> = { BUY: "매수", SELL: "매도", SELF: "자전" };
 
 function FillsTable({ fills }: { fills: FillRow[] }) {
+  const t = useT();
   return (
     <table className="tbl tbl-hover">
       <thead>
         <tr>
-          <th>시각 ({MARKET_TIME_ZONE_LABEL})</th>
-          <th>종목</th>
-          <th>구분</th>
-          <th className="text-right">체결가</th>
-          <th className="text-right">수량</th>
-          <th className="text-right">체결금액</th>
-          <th className="text-right" title="주식은 매도 체결의 평단가 대비 손익, 선물·옵션은 포지션을 줄인 체결의 손익">
-            실현손익
+          <th>{t("시각")} ({MARKET_TIME_ZONE_LABEL})</th>
+          <th>{t("종목")}</th>
+          <th>{t("구분")}</th>
+          <th className="text-right">{t("체결가")}</th>
+          <th className="text-right">{t("수량")}</th>
+          <th className="text-right">{t("체결금액")}</th>
+          <th className="text-right" title={t("주식은 매도 체결의 평단가 대비 손익, 선물·옵션은 포지션을 줄인 체결의 손익")}>
+            {t("실현손익")}
           </th>
         </tr>
       </thead>
@@ -298,12 +303,12 @@ function FillsTable({ fills }: { fills: FillRow[] }) {
               <td className="num whitespace-nowrap text-ink-muted">{formatKstTime(f.ts)}</td>
               <td className="font-semibold">{f.symbol}</td>
               <td>
-                <span className={`font-medium ${sideTone}`}>{SIDE_LABEL[f.side]}</span>
+                <span className={`font-medium ${sideTone}`}>{t(SIDE_LABEL[f.side])}</span>
                 <span
                   className="ml-1.5 text-xs text-ink-faint"
-                  title={f.taker ? "내 주문이 기존 호가를 체결시켰습니다" : "내 호가에 상대 주문이 체결됐습니다"}
+                  title={f.taker ? t("내 주문이 기존 호가를 체결시켰습니다") : t("내 호가에 상대 주문이 체결됐습니다")}
                 >
-                  {f.taker ? "테이커" : "메이커"}
+                  {f.taker ? t("테이커") : t("메이커")}
                 </span>
               </td>
               <td className="num text-right">{priceOf(f.symbol, f.price)}</td>
@@ -322,7 +327,7 @@ function FillsTable({ fills }: { fills: FillRow[] }) {
         {fills.length === 0 && (
           <tr>
             <td colSpan={7} className="py-14 text-center text-sm text-ink-faint">
-              체결 내역이 없습니다
+              {t("체결 내역이 없습니다")}
             </td>
           </tr>
         )}
@@ -338,19 +343,20 @@ function ConditionalTable({
   rows: ConditionalOrderDto[];
   onCancel: (id: string) => void;
 }) {
+  const t = useT();
   return (
     <table className="tbl tbl-hover">
       <thead>
         <tr>
-          <th>등록 ({MARKET_TIME_ZONE_LABEL})</th>
-          <th>종목</th>
-          <th>조건</th>
-          <th className="text-right">트리거</th>
-          <th className="text-right">수량</th>
-          <th className="text-right" title="발동을 일으킨 체결가">
-            발동가
+          <th>{t("등록")} ({MARKET_TIME_ZONE_LABEL})</th>
+          <th>{t("종목")}</th>
+          <th>{t("조건")}</th>
+          <th className="text-right">{t("트리거")}</th>
+          <th className="text-right">{t("수량")}</th>
+          <th className="text-right" title={t("발동을 일으킨 체결가")}>
+            {t("발동가")}
           </th>
-          <th className="text-right">상태</th>
+          <th className="text-right">{t("상태")}</th>
           <th />
         </tr>
       </thead>
@@ -364,20 +370,20 @@ function ConditionalTable({
             <td>
               <span className={`font-medium ${r.side === "BUY" ? "text-up" : "text-down"}`}>
                 {r.trailBps != null
-                  ? `${r.side === "SELL" ? "트레일링 손절" : "트레일링 매수"} ${(r.trailBps / 100).toFixed(
+                  ? `${r.side === "SELL" ? t("트레일링 손절") : t("트레일링 매수")} ${(r.trailBps / 100).toFixed(
                       r.trailBps % 100 === 0 ? 0 : 1,
                     )}%`
-                  : describeCondition(r.direction, r.side)}
+                  : t(describeCondition(r.direction, r.side))}
               </span>
               {r.ocoGroupId && (
-                <span className="chip ml-1.5" title="OCO — 짝 주문이 발동하면 자동 취소">
+                <span className="chip ml-1.5" title={t("OCO — 짝 주문이 발동하면 자동 취소")}>
                   OCO
                 </span>
               )}
             </td>
             <td className="num text-right">
               {priceOf(r.symbol, r.triggerPrice)}
-              <span className="text-ink-faint">{r.direction === "AT_OR_ABOVE" ? " 이상" : " 이하"}</span>
+              <span className="text-ink-faint">{r.direction === "AT_OR_ABOVE" ? ` ${t("이상")}` : ` ${t("이하")}`}</span>
             </td>
             <td className="num text-right">{fmt.format(r.qty)}</td>
             <td className="num text-right text-ink-muted">
@@ -385,7 +391,7 @@ function ConditionalTable({
             </td>
             <td className="text-right">
               <span className={`chip ${CONDITIONAL_STATUS_TONE[r.status]}`}>
-                {CONDITIONAL_STATUS_LABEL[r.status]}
+                {t(CONDITIONAL_STATUS_LABEL[r.status])}
               </span>
               {r.failReason && r.status !== "WAITING" && (
                 <span className="ml-1.5 text-[11px] text-ink-faint">{r.failReason}</span>
@@ -394,7 +400,7 @@ function ConditionalTable({
             <td className="text-right">
               {r.status === "WAITING" && (
                 <button onClick={() => onCancel(r.id)} className="btn btn-ghost btn-sm">
-                  취소
+                  {t("취소|동작")}
                 </button>
               )}
             </td>
@@ -403,7 +409,7 @@ function ConditionalTable({
         {rows.length === 0 && (
           <tr>
             <td colSpan={8} className="py-14 text-center text-sm text-ink-faint">
-              예약 주문이 없습니다
+              {t("예약 주문이 없습니다")}
             </td>
           </tr>
         )}

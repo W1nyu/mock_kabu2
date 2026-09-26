@@ -13,6 +13,7 @@ import { api, getToken, won } from "@/lib/api";
 import { formatKstHm, formatKstMonthDay, formatKstTime } from "@/lib/time";
 import { chartTheme, useTheme } from "@/lib/theme";
 import { everyVisible } from "@/lib/visible-interval";
+import { useT } from "@/lib/i18n";
 
 interface EquityPoint {
   ts: number;
@@ -53,6 +54,7 @@ function tickMark(time: UTCTimestamp, type: TickMarkType): string {
  * 면적 차트로 그린다. 첫 점 대비 증감이 색을 정한다(상승=빨강, 하락=파랑).
  */
 export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
+  const tr = useT();
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState<Range>("1d");
@@ -187,7 +189,7 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
     <section className="glass overflow-hidden">
       <div className="panel-head flex-wrap gap-y-2">
         <div className="flex items-baseline gap-3">
-          <span className="panel-title">자산 추이</span>
+          <span className="panel-title">{tr("자산 추이")}</span>
           {shown && (
             <span className="num text-xs text-ink-muted">
               <span className="font-semibold text-ink">{won(shown.equity)}</span>
@@ -199,28 +201,28 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
                 </span>
               )}
               <span className="ml-2 hidden text-ink-faint sm:inline">
-                {hover ? formatKstTime(hover.ts).slice(0, 5) : "현재"} · 현금 {won(shown.cash)} ·
-                주식 {won(shown.stockValue)}
+                {hover ? formatKstTime(hover.ts).slice(0, 5) : tr("현재")} · {tr("현금")} {won(shown.cash)} · {tr("주식")}{" "}
+                {won(shown.stockValue)}
               </span>
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <div className="well flex gap-0.5 p-0.5" role="group" aria-label="조회 구간">
+          <div className="well flex gap-0.5 p-0.5" role="group" aria-label={tr("조회 구간")}>
             {RANGES.map((r) => (
               <button
                 key={r.id}
                 type="button"
                 onClick={() => selectRange(r.id)}
                 aria-pressed={range === r.id}
-                title={r.hint}
+                title={tr(r.hint)}
                 className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
                   range === r.id
                     ? "bg-sky/15 text-sky ring-1 ring-inset ring-sky/35"
                     : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                 }`}
               >
-                {r.label}
+                {tr(r.label)}
               </button>
             ))}
           </div>
@@ -233,8 +235,8 @@ export default function EquityChart({ refreshKey }: { refreshKey?: number }) {
           <div className="grid h-44 place-items-center text-center sm:h-52">
             <p className="text-sm text-ink-faint">
               {points == null
-                ? "자산 추이를 불러오는 중…"
-                : "아직 스냅샷이 쌓이지 않았습니다. 매 분 자동으로 기록됩니다."}
+                ? tr("자산 추이를 불러오는 중…")
+                : tr("아직 스냅샷이 쌓이지 않았습니다. 매 분 자동으로 기록됩니다.")}
             </p>
           </div>
         )}

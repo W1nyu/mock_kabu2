@@ -7,6 +7,7 @@ import { mergeNews, parseNewsItem } from "@/lib/news";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
 import { NewsList } from "./NewsFeed";
+import { useT } from "@/lib/i18n";
 
 /**
  * 선물·원자재·환율 화면의 관련 뉴스.
@@ -17,7 +18,8 @@ import { NewsList } from "./NewsFeed";
  */
 const COMMODITY_CODES: readonly string[] = REFERENCE_ASSETS.map((asset) => asset.code as string).filter((code) => code !== "USDKRW");
 
-export default function AssetNews({ reference, title = "관련 뉴스" }: { reference: string | "market" | "commodity"; title?: string }) {
+export default function AssetNews({ reference, title }: { reference: string | "market" | "commodity"; title?: string }) {
+  const t = useT();
   const [items, setItems] = useState<NewsItemDto[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -60,7 +62,7 @@ export default function AssetNews({ reference, title = "관련 뉴스" }: { refe
   return (
     <section className="glass overflow-hidden">
       <div className="panel-head">
-        <span className="panel-title">{title}</span>
+        <span className="panel-title">{title ?? t("관련 뉴스")}</span>
         <span className="chip chip-live">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
           LIVE
@@ -71,7 +73,7 @@ export default function AssetNews({ reference, title = "관련 뉴스" }: { refe
           items={items}
           showSymbol={false}
           loading={loading}
-          emptyLabel={reference === "market" ? "시장 전반 뉴스가 아직 없습니다" : "이 자산을 다룬 뉴스가 아직 없습니다"}
+          emptyLabel={reference === "market" ? t("시장 전반 뉴스가 아직 없습니다") : t("이 자산을 다룬 뉴스가 아직 없습니다")}
         />
       </div>
     </section>

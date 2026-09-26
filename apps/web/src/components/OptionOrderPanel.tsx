@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { api, getUser, newIdempotencyKey } from "@/lib/api";
 import { krw } from "@/lib/futures";
 import { fmtOption, type OptionPosition } from "@/lib/options";
+import { rich, useT } from "@/lib/i18n";
 
 /** 입력한 가격(실제값) → 정수 단위, 호가 단위에 맞지 않으면 null */
 function toUnits(symbol: string, text: string): number | null {
@@ -43,6 +44,7 @@ export default function OptionOrderPanel({
   priceHint: { price: number; seq: number } | null;
   onPlaced: () => void;
 }) {
+  const tr = useT();
   const def = optionDef(symbol)!;
   const held = Math.max(0, position?.qty ?? 0);
   const [side, setSide] = useState<"BUY" | "SELL">(retired ? "SELL" : "BUY");
@@ -91,10 +93,13 @@ export default function OptionOrderPanel({
         headers: { "idempotency-key": newIdempotencyKey() },
         body: { symbol, side, type, qty, ...(type === "LIMIT" ? { price: priceUnits } : {}) },
       });
-      setMessage({ ok: true, text: `${side === "BUY" ? "매수" : "매도"} ${qty}계약 주문을 접수했습니다` });
+      setMessage({
+        ok: true,
+        text: side === "BUY" ? tr("매수 {n}계약 주문을 접수했습니다", { n: qty }) : tr("매도 {n}계약 주문을 접수했습니다", { n: qty }),
+      });
       onPlaced();
     } catch (error) {
-      setMessage({ ok: false, text: error instanceof Error ? error.message : "주문에 실패했습니다" });
+      setMessage({ ok: false, text: error instanceof Error ? error.message : tr("주문에 실패했습니다") });
     } finally {
       setBusy(false);
     }
@@ -104,11 +109,13 @@ export default function OptionOrderPanel({
   if (!loggedIn) {
     return (
       <div className="glass p-4 text-sm text-ink-muted">
-        옵션 주문은{" "}
-        <Link href="/login" className="text-sky">
-          로그인
-        </Link>{" "}
-        후 이용할 수 있습니다.
+        {rich(tr("옵션 주문은 {login} 후 이용할 수 있습니다."), {
+          login: (
+            <Link href="/login" className="text-sky">
+              {tr("로그인")}
+            </Link>
+          ),
+        })}
       </div>
     );
   }
@@ -129,7 +136,7 @@ export default function OptionOrderPanel({
               side === s ? (s === "BUY" ? "bg-up/15 text-up" : "bg-down/15 text-down") : "text-ink-muted"
             }`}
           >
-            {s === "BUY" ? "매수" : `매도 (보유 ${held})`}
+            {s === "BUY" ? tr("매수") : tr("매도 (보유 {n})", { n: held })}
           </button>
         ))}
       </div>
@@ -144,7 +151,7 @@ export default function OptionOrderPanel({
               type === t ? "bg-sky/12 text-sky ring-1 ring-sky/30 ring-inset" : "text-ink-muted"
             }`}
           >
-            {t === "LIMIT" ? "지정가" : "시장가"}
+            {t === "LIMIT" ? tr("지정가") : tr("시장가")}
           </button>
         ))}
       </div>
@@ -152,10 +159,10 @@ export default function OptionOrderPanel({
       {type === "LIMIT" && (
         <label className="block">
           <span className="text-xs text-ink-muted">
-            가격 ({def.unit}, 호가 단위 {toInput(symbol, def.tickUnits)})
+            {tr("가격 ({unit}, 호가 단위 {tick})", { unit: tr(def.unit), tick: toInput(symbol, def.tickUnits) })}
           </span>
           <div className="mt-1 flex items-center gap-2">
-            <button type="button" className="btn btn-ghost min-h-10 min-w-10" aria-label="호가 한 단계 내리기" onClick={() => stepPrice(-1)}>
+            <button type="button" className="btn btn-ghost min-h-10 min-w-10" aria-label={tr("호가 한 단계 내리기")} onClick={() => stepPrice(-1)}>
               −
             </button>
             <input
@@ -164,7 +171,7 @@ export default function OptionOrderPanel({
               onChange={(e) => setPriceText(e.target.value)}
               className={`num w-full rounded-lg border bg-surface-2/60 px-3 py-2 text-right ${invalidPrice ? "border-down/60" : "border-hairline"}`}
             />
-            <button type="button" className="btn btn-ghost min-h-10 min-w-10" aria-label="호가 한 단계 올리기" onClick={() => stepPrice(1)}>
+            <button type="button" className="btn btn-ghost min-h-10 min-w-10" aria-label={tr("호가 한 단계 올리기")} onClick={() => stepPrice(1)}>
               +
             </button>
           </div>
@@ -172,7 +179,7 @@ export default function OptionOrderPanel({
       )}
 
       <label className="block">
-        <span className="text-xs text-ink-muted">수량 (계약)</span>
+        <span className="text-xs text-ink-muted">{tr("수량 (계약)")}</span>
         <div className="mt-1 flex items-center gap-2">
           <button type="button" className="btn btn-ghost min-h-10 min-w-10" onClick={() => setQty((q) => Math.max(1, q - 1))}>
             −
@@ -191,22 +198,22 @@ export default function OptionOrderPanel({
 
       <dl className="num space-y-1 text-[13px]">
         <div className="flex justify-between">
-          <dt className="text-ink-muted">{side === "BUY" ? "프리미엄 (낼 금액)" : "프리미엄 (받을 금액)"}</dt>
-          <dd className="font-semibold">{premium == null ? "—" : `${type === "MARKET" ? "약 " : ""}${krw(premium)}`}</dd>
+          <dt className="text-ink-muted">{side === "BUY" ? tr("프리미엄 (낼 금액)") : tr("프리미엄 (받을 금액)")}</dt>
+          <dd className="font-semibold">{premium == null ? "—" : type === "MARKET" ? tr("약 {amount}", { amount: krw(premium) }) : krw(premium)}</dd>
         </div>
         {side === "BUY" && type === "MARKET" && (
           <div className="flex justify-between text-ink-faint">
-            <dt>주문 때 묶는 금액 (체결 상한)</dt>
+            <dt>{tr("주문 때 묶는 금액 (체결 상한)")}</dt>
             <dd>{hold == null ? "—" : krw(hold)}</dd>
           </div>
         )}
         <div className="flex justify-between">
-          <dt className="text-ink-muted">주문 가능 금액</dt>
+          <dt className="text-ink-muted">{tr("주문 가능 금액")}</dt>
           <dd>{available == null ? "—" : krw(available)}</dd>
         </div>
         {type === "MARKET" && (
           <div className="flex justify-between text-ink-faint">
-            <dt>현재가</dt>
+            <dt>{tr("현재가")}</dt>
             <dd>{fmtOption(symbol, lastPrice)}</dd>
           </div>
         )}
@@ -218,12 +225,14 @@ export default function OptionOrderPanel({
         onClick={submit}
         className={`min-h-11 w-full rounded-xl text-sm font-semibold text-white disabled:opacity-50 ${side === "BUY" ? "bg-up" : "bg-down"}`}
       >
-        {busy ? "주문 중…" : `${side === "BUY" ? "매수" : "매도"} ${qty}계약`}
+        {busy ? tr("주문 중…") : side === "BUY" ? tr("매수 {n}계약", { n: qty }) : tr("매도 {n}계약", { n: qty })}
       </button>
       {message && <p className={`text-[13px] ${message.ok ? "text-ok" : "text-down"}`}>{message.text}</p>}
       <p className="text-[11px] leading-5 text-ink-faint">
-        1계약 = 가격 1{def.unit === "원" ? "원" : "pt"} × {(def.unitValue * def.priceScale).toLocaleString("ko-KR")}원. 최대 손실은 낸
-        프리미엄까지입니다.
+        {tr("1계약 = 가격 1{unit} × {value}. 최대 손실은 낸 프리미엄까지입니다.", {
+          unit: tr(def.unit),
+          value: krw(def.unitValue * def.priceScale),
+        })}
       </p>
     </div>
   );

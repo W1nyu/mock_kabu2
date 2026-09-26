@@ -1,4 +1,5 @@
-import { futureDef, formatFuturePrice, standardLeverage } from "@mock-kabu/shared";
+import { formatWon, futureDef, standardLeverage } from "@mock-kabu/shared";
+import { getLocale, translate } from "./i18n";
 import { fmtOption, type OptionPosition } from "./options";
 
 /** `/market/futures` 한 줄 (가격은 모두 정수 단위 = 실제 × priceScale) */
@@ -59,7 +60,11 @@ export function fmtFuture(symbol: string, units: number | null | undefined): str
   // 옵션도 같은 호가창·체결 표시를 쓰므로 선물이 아니면 옵션 표기로 넘긴다.
   if (!def) return fmtOption(symbol, units);
   if (units == null || !Number.isFinite(units)) return "—";
-  return formatFuturePrice(def, units);
+  const text = (units / def.priceScale).toLocaleString("ko-KR", {
+    minimumFractionDigits: def.decimals,
+    maximumFractionDigits: def.decimals,
+  });
+  return def.unit === "원" ? formatWon(text, getLocale()) : text;
 }
 
 export function changePct(value: number | null | undefined, base: number | null | undefined): number | null {
@@ -81,13 +86,13 @@ export function unitsToInput(symbol: string, units: number): string {
   return def ? (units / def.priceScale).toFixed(def.decimals) : String(units);
 }
 
-export const krw = (n: number) => `${Math.round(n).toLocaleString("ko-KR")}원`;
+export const krw = (n: number) => formatWon(Math.round(n).toLocaleString("ko-KR"), getLocale());
 
 /** 레버리지 표시: 설정값 "20배", 없으면 거래소 기준 "4.6배(기본)" */
 export function leverageLabel(symbol: string, leverage: number | null | undefined): string {
-  if (leverage != null) return `${leverage}배`;
+  if (leverage != null) return translate(getLocale(), "{n}배", { n: leverage });
   const def = futureDef(symbol);
-  return def ? `${standardLeverage(def).toFixed(1)}배(기본)` : "—";
+  return def ? translate(getLocale(), "{n}배(기본)", { n: standardLeverage(def).toFixed(1) }) : "—";
 }
 
 /** 레버리지 선택지 */

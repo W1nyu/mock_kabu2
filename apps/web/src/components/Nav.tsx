@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import { clearSession, getUser, onSessionChange, type SessionUser } from "@/lib/api";
 import { loadSavedTheme, setTheme, useTheme } from "@/lib/theme";
 import NotificationBell from "./NotificationBell";
+import { useT } from "@/lib/i18n";
+import LanguageSelect from "./LanguageSelect";
 
 /**
  * Primary customer navigation is deliberately limited to these flows.
@@ -34,6 +36,7 @@ const PRIMARY_NAV_LINKS = [
 ] as const;
 
 export default function Nav() {
+  const t = useT();
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -74,22 +77,23 @@ export default function Nav() {
                     : "text-ink-muted hover:bg-surface-3/45 hover:text-ink"
                 }`}
               >
-                {l.label}
+                {t(l.label)}
               </Link>
             );
           })}
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <LanguageSelect compact />
           <button
             type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            aria-label={theme === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
-            title={theme === "dark" ? "라이트 모드" : "다크 모드"}
+            aria-label={theme === "dark" ? t("라이트 모드로 전환") : t("다크 모드로 전환")}
+            title={theme === "dark" ? t("라이트 모드") : t("다크 모드")}
           >
             <span aria-hidden="true">{theme === "dark" ? "☀" : "☾"}</span>
-            <span className="hidden sm:inline">{theme === "dark" ? "라이트" : "다크"}</span>
+            <span className="hidden sm:inline">{theme === "dark" ? t("라이트") : t("다크")}</span>
           </button>
           {user ? (
             <>
@@ -97,7 +101,7 @@ export default function Nav() {
               {/* 사용자 칩은 계정 설정으로 가는 유일한 입구다 — 기본 메뉴 목록은 늘리지 않는다. */}
               <Link
                 href="/settings"
-                title="계정 설정 (닉네임·비밀번호)"
+                title={t("계정 설정 (닉네임·비밀번호)")}
                 aria-current={pathname === "/settings" ? "page" : undefined}
                 className={`flex items-center gap-2 rounded-full border py-1 pr-1 pl-1 transition-colors sm:pr-3 ${
                   pathname === "/settings"
@@ -117,12 +121,12 @@ export default function Nav() {
                   router.push("/login");
                 }}
               >
-                로그아웃
+                {t("로그아웃")}
               </button>
             </>
           ) : (
             <Link href="/login" className="btn btn-primary btn-sm">
-              로그인
+              {t("로그인")}
             </Link>
           )}
         </div>

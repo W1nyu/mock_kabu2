@@ -8,7 +8,7 @@ import FuturesList from "@/components/FuturesList";
 import OptionChain from "@/components/OptionChain";
 import ReferenceCards from "@/components/ReferenceCards";
 import Sparkline from "@/components/Sparkline";
-import { api, fmt } from "@/lib/api";
+import { api, fmt, won } from "@/lib/api";
 import { indexSessionBase, type IndexPoint } from "@/lib/index-session";
 import { cleanSparks } from "@/lib/sparks";
 import { ALL_INDUSTRIES, INDUSTRY_STORAGE_KEY, industryChipItems } from "@/lib/industry-chips";
@@ -17,6 +17,7 @@ import { subscribe } from "@/lib/socket";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { readQueryParam, writeQueryParams } from "@/lib/url-query";
 import { everyVisible } from "@/lib/visible-interval";
+import { useNames, useT } from "@/lib/i18n";
 
 /**
  * 증권 탭 — 폰 하단 탭의 두 번째 칸. 지수 요약 카드(누르면 `/market-index`)와 전 종목 목록을
@@ -63,6 +64,8 @@ function sparkTone(values: number[]): "up" | "down" | "flat" {
 }
 
 export default function MarketPage() {
+  const tr = useT();
+  const names = useNames();
   const [rows, setRows] = useState<OverviewRow[]>([]);
   const [live, setLive] = useState<Record<string, number>>({});
   const [indexSeries, setIndexSeries] = useState<IndexPoint[] | null>(null);
@@ -221,14 +224,15 @@ export default function MarketPage() {
     );
   }, [rows, live, sort]);
 
-  const industryItems = useMemo(() => industryChipItems(new Map(list.map((row) => [row.symbol, row.change]))), [list]);
+  // 언어가 바뀌면 칩 이름도 다시 만든다(tr이 언어마다 새로 만들어진다).
+  const industryItems = useMemo(() => industryChipItems(new Map(list.map((row) => [row.symbol, row.change]))), [list, tr]);
 
   const selectedIndustry = industryById(industry);
   const shown = selectedIndustry ? list.filter((row) => selectedIndustry.symbols.includes(row.symbol)) : list;
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">증권</h1>
+      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{tr("증권")}</h1>
 
       {/* ── 지수 요약 ─────────────────────────────────────────── */}
       <Link
@@ -236,7 +240,7 @@ export default function MarketPage() {
         className="glass flex items-center gap-4 p-4 transition-colors active:bg-surface-3/40 sm:p-5"
       >
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] text-ink-muted">KABU 지수</p>
+          <p className="text-[13px] text-ink-muted">{tr("KABU 지수")}</p>
           <p className="num mt-1 text-2xl font-semibold tracking-tight">
             {indexNow != null ? indexFormatter.format(indexNow) : "—"}
           </p>
@@ -244,7 +248,7 @@ export default function MarketPage() {
             className={`num mt-0.5 text-[13px] font-medium ${indexDelta != null ? toneClass(indexDelta) : "text-ink-faint"}`}
           >
             {indexDelta != null && indexRate != null
-              ? `${indexDelta > 0 ? "+" : ""}${indexDelta.toFixed(2)} (${indexRate > 0 ? "+" : ""}${indexRate.toFixed(2)}%) 오늘`
+              ? `${indexDelta > 0 ? "+" : ""}${indexDelta.toFixed(2)} (${indexRate > 0 ? "+" : ""}${indexRate.toFixed(2)}%) ${tr("오늘")}`
               : "—"}
           </p>
         </div>
@@ -258,7 +262,7 @@ export default function MarketPage() {
       <ReferenceCards />
 
       {/* ── 현물 | 선물·옵션 전환 ─────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-2/60 p-1" role="tablist" aria-label="시장 구분">
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-2/60 p-1" role="tablist" aria-label={tr("시장 구분")}>
         {KINDS.map((k) => (
           <button
             key={k.id}
@@ -270,7 +274,7 @@ export default function MarketPage() {
               kind === k.id ? "bg-surface-3 text-ink shadow-sm" : "text-ink-muted"
             }`}
           >
-            {k.label}
+            {tr(k.label)}
           </button>
         ))}
       </div>
@@ -278,16 +282,16 @@ export default function MarketPage() {
       {kind === "stock" && (
         <>
           {/* ── 산업군 태그 ───────────────────────────────────────── */}
-          <ChipTabs label="산업군" items={industryItems} value={industry} onChange={chooseIndustry} />
+          <ChipTabs label={tr("산업군")} items={industryItems} value={industry} onChange={chooseIndustry} />
 
           {/* ── 종목 목록 ─────────────────────────────────────────── */}
           <section className="glass overflow-hidden">
             <div className="panel-head">
               <span className="panel-title">
-                {selectedIndustry ? selectedIndustry.label : "전체 종목"}
+                {selectedIndustry ? names.industry(selectedIndustry.id, selectedIndustry.label) : tr("전체 종목")}
                 <span className="num ml-1.5 font-medium text-ink-faint">{shown.length}</span>
               </span>
-              <div className="flex gap-1" role="group" aria-label="정렬">
+              <div className="flex gap-1" role="group" aria-label={tr("정렬")}>
                 {SORTS.map((s) => (
                   <button
                     key={s.id}
@@ -298,7 +302,7 @@ export default function MarketPage() {
                       sort === s.id ? "bg-sky/12 text-sky ring-1 ring-inset ring-sky/30" : "text-ink-muted"
                     }`}
                   >
-                    {s.label}
+                    {tr(s.label)}
                   </button>
                 ))}
               </div>
@@ -314,19 +318,19 @@ export default function MarketPage() {
                       className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-3/30 active:bg-surface-3/45"
                     >
                       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-hairline-soft bg-surface-2/70 text-[12px] font-semibold text-ink-muted">
-                        {s.name.slice(0, 2)}
+                        {names.symbol(s.symbol, s.name).slice(0, 2)}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate font-semibold">{s.name}</span>
+                        <span className="block truncate font-semibold">{names.symbol(s.symbol, s.name)}</span>
                         <span className="num block truncate text-xs text-ink-faint">
                           {s.symbol}
                           {!selectedIndustry && industryOf(s.symbol) && (
-                            <span className="hidden sm:inline"> · {industryOf(s.symbol)!.label}</span>
+                            <span className="hidden sm:inline"> · {names.industry(industryOf(s.symbol)!.id, industryOf(s.symbol)!.label)}</span>
                           )}
                           {/* 폰은 폭이 좁아 거래대금을 빼고 종목 코드만 둔다. */}
                           <span className="hidden sm:inline">
                             {" "}
-                            · {fmt.format(Math.round(s.turnover / 10_000))}만 원
+                            · {tr("{n}만 원", { n: fmt.format(Math.round(s.turnover / 10_000)) })}
                           </span>
                         </span>
                       </span>
@@ -334,7 +338,7 @@ export default function MarketPage() {
                         <Sparkline values={series} tone={sparkTone(series)} width={64} height={28} />
                       </span>
                       <span className="w-[5.5rem] shrink-0 text-right">
-                        <span className="num block font-semibold">{fmt.format(s.lastPrice)}원</span>
+                        <span className="num block font-semibold">{won(s.lastPrice)}</span>
                         <span className={`num block text-xs font-medium ${toneClass(s.change)}`}>
                           {s.change > 0 ? "+" : ""}
                           {s.change.toFixed(2)}%
@@ -344,7 +348,7 @@ export default function MarketPage() {
                   </li>
                 );
               })}
-              {list.length === 0 && <li className="py-10 text-center text-sm text-ink-faint">종목을 불러오는 중…</li>}
+              {list.length === 0 && <li className="py-10 text-center text-sm text-ink-faint">{tr("종목을 불러오는 중…")}</li>}
             </ul>
           </section>
         </>
@@ -355,8 +359,8 @@ export default function MarketPage() {
           {/* ── 선물 (1일물) ─────────────────────────────────────────── */}
           <section className="glass overflow-hidden">
             <div className="panel-head">
-              <span className="panel-title">선물</span>
-              <span className="text-[11px] text-ink-faint">1일물 · 매일 04:10 현금 정산</span>
+              <span className="panel-title">{tr("선물")}</span>
+              <span className="text-[11px] text-ink-faint">{tr("1일물 · 매일 04:10 현금 정산")}</span>
             </div>
             <FuturesList />
           </section>
@@ -364,8 +368,8 @@ export default function MarketPage() {
           {/* ── 옵션 (1일물, 주가지수·원/달러) ───────────────────────── */}
           <section className="glass overflow-hidden">
             <div className="panel-head">
-              <span className="panel-title">옵션</span>
-              <span className="text-[11px] text-ink-faint">1일물 · 매일 04:10 만기 정산</span>
+              <span className="panel-title">{tr("옵션")}</span>
+              <span className="text-[11px] text-ink-faint">{tr("1일물 · 매일 04:10 만기 정산")}</span>
             </div>
             <OptionChain />
           </section>

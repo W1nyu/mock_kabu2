@@ -10,6 +10,7 @@ import { formatReference, parseReferenceTick, referenceChange, type ReferenceRow
 import { subscribe } from "@/lib/socket";
 import { FX_CODE } from "@/lib/useReferenceRows";
 import { everyVisible } from "@/lib/visible-interval";
+import { rich, useNames, useT } from "@/lib/i18n";
 
 /** 어떤 뉴스가 이 가격을 움직이는지 — 사용자가 뉴스와 가격을 이어서 볼 수 있게 적어 둔다. */
 const DRIVERS: Record<string, string> = {
@@ -26,6 +27,8 @@ const FUTURE_OF: Record<string, string> = { USDKRW: "USDF", OIL: "OILF", GAS: "G
 export default function ReferencePage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
   const def = referenceAsset(code);
+  const t = useT();
+  const names = useNames();
   const [row, setRow] = useState<ReferenceRow | null>(null);
   const [value, setValue] = useState<number | null>(null);
 
@@ -58,7 +61,7 @@ export default function ReferencePage({ params }: { params: Promise<{ code: stri
   if (!def) {
     return (
       <div className="mx-auto max-w-3xl py-16 text-center text-sm text-ink-muted">
-        없는 기초자산입니다. <Link href="/market" className="text-sky">증권으로 돌아가기</Link>
+        {t("없는 기초자산입니다.")} <Link href="/market" className="text-sky">{t("증권으로 돌아가기")}</Link>
       </div>
     );
   }
@@ -73,16 +76,16 @@ export default function ReferencePage({ params }: { params: Promise<{ code: stri
         href={def.code === FX_CODE ? "/market" : "/commodities"}
         className="inline-flex items-center gap-1.5 text-[13px] text-ink-muted transition-colors hover:text-sky"
       >
-        <span aria-hidden>←</span> {def.code === FX_CODE ? "증권" : "원자재"}
+        <span aria-hidden>←</span> {def.code === FX_CODE ? t("증권") : t("원자재")}
       </Link>
       <div className="glass p-4 sm:p-5">
         <p className="text-[13px] text-ink-muted">
-          {def.code} · {def.code === FX_CODE ? "환율" : "원자재"} <span className="text-ink-faint">(가상 지수)</span>
+          {def.code} · {def.code === FX_CODE ? t("환율") : t("원자재")} <span className="text-ink-faint">({t("가상 지수")})</span>
         </p>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">{def.name}</h1>
+        <h1 className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">{names.reference(def.code, def.name)}</h1>
         <p className="num mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">{formatReference(shown, def)}</p>
         <p className={`num mt-0.5 text-sm font-medium ${tone}`}>
-          {change == null ? "—" : `${change > 0 ? "+" : ""}${change.toFixed(2)}% 오늘`}
+          {change == null ? "—" : `${change > 0 ? "+" : ""}${change.toFixed(2)}% ${t("오늘")}`}
         </p>
       </div>
 
@@ -92,15 +95,16 @@ export default function ReferencePage({ params }: { params: Promise<{ code: stri
       <AssetNews reference={def.code} />
 
       <p className="px-1 text-[13px] leading-6 text-ink-muted">
-        {DRIVERS[def.code]} 이 가격은 모의 시장이 만드는 가상 지수이며,{" "}
-        {FUTURE_OF[def.code] ? (
-          <Link href={`/futures/${FUTURE_OF[def.code]}`} className="text-sky">
-            {FUTURE_OF[def.code]} 선물
-          </Link>
-        ) : (
-          "같은 이름 선물"
-        )}
-        의 정산 기준입니다.
+        {rich(t("{drivers} 이 가격은 모의 시장이 만드는 가상 지수이며, {future}의 정산 기준입니다."), {
+          drivers: DRIVERS[def.code] ? t(DRIVERS[def.code]) : "",
+          future: FUTURE_OF[def.code] ? (
+            <Link href={`/futures/${FUTURE_OF[def.code]}`} className="text-sky">
+              {t("{symbol} 선물", { symbol: FUTURE_OF[def.code] })}
+            </Link>
+          ) : (
+            t("같은 이름 선물")
+          ),
+        })}
       </p>
     </div>
   );

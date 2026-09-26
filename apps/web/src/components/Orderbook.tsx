@@ -6,6 +6,7 @@ import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { everyVisible } from "@/lib/visible-interval";
+import { useT } from "@/lib/i18n";
 
 interface Level {
   price: number;
@@ -133,6 +134,7 @@ export default function Orderbook({
   /** 가격과 함께 그 단계의 방향(ask/bid)을 알려 준다 — 매도호가 클릭은 매수, 매수호가 클릭은 매도 의도가 보통이다. */
   onPriceClick?: (price: number, side: "ask" | "bid") => void;
 }) {
+  const tr = useT();
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [executionStats, setExecutionStats] = useState<SessionExecutionStats | null>(null);
   const [depthChanges, setDepthChanges] = useState<Record<string, DepthChange>>({});
@@ -279,12 +281,12 @@ export default function Orderbook({
   return (
     <div className="glass flex flex-col overflow-hidden">
       <div className="panel-head">
-        <span className="panel-title">호가창</span>
+        <span className="panel-title">{tr("호가창")}</span>
         <span
           className={`num text-[11px] font-semibold ${executionStrengthTone}`}
-          title="체결강도 = (09:00 KST부터의 매수 체결량 ÷ 매도 체결량) × 100입니다. 100% 초과는 매수 우위, 미만은 매도 우위입니다."
+          title={tr("09:00 KST부터의 매수 체결량 ÷ 매도 체결량입니다. 100% 초과는 매수 우위, 미만은 매도 우위입니다.")}
         >
-          체결강도 {executionStrength != null ? `${executionStrength.toFixed(1)}%` : "—"}
+          {tr("체결강도")} {executionStrength != null ? `${executionStrength.toFixed(1)}%` : "—"}
         </span>
       </div>
 
@@ -309,7 +311,7 @@ export default function Orderbook({
         </div>
 
         <div className="my-1 flex items-baseline justify-center gap-2 border-y border-hairline-soft bg-surface-3/20 px-4 py-2">
-          <span className="text-[10px] tracking-wide text-ink-faint uppercase">체결가</span>
+          <span className="text-[10px] tracking-wide text-ink-faint uppercase">{tr("체결가")}</span>
           <span className="text-base font-semibold">
             {snap?.lastPrice != null ? fmt.format(snap.lastPrice) : "—"}
           </span>
@@ -337,14 +339,14 @@ export default function Orderbook({
       {bidShare != null && (
         <div
           className="num border-t border-hairline-soft px-4 py-2 text-[11px]"
-          title="보이는 호가 10단의 매수 잔량 대 매도 잔량 비율입니다. 대기 중인 힘의 균형이며, 체결강도(이미 체결된 양)와는 다릅니다."
+          title={tr("보이는 호가 10단의 매수 잔량 대 매도 잔량 비율입니다. 대기 중인 힘의 균형이며, 체결강도(이미 체결된 양)와는 다릅니다.")}
         >
           <div className="flex items-center justify-between text-ink-muted">
-            <span className="text-up">매수 잔량 {fmt.format(bidDepth)}</span>
+            <span className="text-up">{tr("매수 잔량")} {fmt.format(bidDepth)}</span>
             <span className={bidShare > 0.55 ? "text-up" : bidShare < 0.45 ? "text-down" : "text-ink-faint"}>
-              호가 균형 {(bidShare * 100).toFixed(0)} : {(100 - bidShare * 100).toFixed(0)}
+              {tr("호가 균형")} {(bidShare * 100).toFixed(0)} : {(100 - bidShare * 100).toFixed(0)}
             </span>
-            <span className="text-down">매도 잔량 {fmt.format(askDepth)}</span>
+            <span className="text-down">{tr("매도 잔량")} {fmt.format(askDepth)}</span>
           </div>
           <div className="mt-1 flex h-1 w-full overflow-hidden rounded-full bg-surface-3/35">
             <div className="bg-up/70 transition-[width] duration-300" style={{ width: `${bidShare * 100}%` }} />
@@ -353,8 +355,8 @@ export default function Orderbook({
         </div>
       )}
       {Object.keys(myDepth).length > 0 && (
-        <p className="border-t border-hairline-soft px-4 py-2 text-[11px] text-sky" title="내 미체결 지정가가 있는 호가 단계">
-          ● 내 주문
+        <p className="border-t border-hairline-soft px-4 py-2 text-[11px] text-sky" title={tr("내 미체결 지정가가 있는 호가 단계")}>
+          ● {tr("내 주문")}
         </p>
       )}
     </div>
@@ -381,6 +383,7 @@ function Row({
   mine?: number;
   onClick?: (price: number) => void;
 }) {
+  const tr = useT();
   const width = Math.max(2, (level.qty / maxQty) * 100);
   return (
     <button
@@ -388,12 +391,12 @@ function Row({
         change === "decrease" ? "bg-warn/12" : change === "increase" ? "bg-ok/10" : ""
       }`}
       onClick={() => onClick?.(level.price)}
-      title={mine ? `내 미체결 ${fmt.format(mine)}주 · 클릭하면 주문 가격에 입력됩니다` : "클릭하면 주문 가격에 입력됩니다"}
+      title={mine ? tr("내 미체결 {n}주 · 클릭하면 주문 가격에 입력됩니다", { n: fmt.format(mine) }) : tr("클릭하면 주문 가격에 입력됩니다")}
     >
       {mine != null && mine > 0 && (
         <span
           className="absolute top-1/2 left-1 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-sky shadow-[0_0_6px_rgba(56,189,248,0.8)]"
-          aria-label={`내 미체결 ${mine}주`}
+          aria-label={tr("내 미체결 {n}주", { n: mine })}
         />
       )}
       <span

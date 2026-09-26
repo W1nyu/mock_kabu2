@@ -12,6 +12,7 @@ import type { FuturesAccount } from "@/lib/futures";
 import { fmtOption, fmtStrike, optionLabel, timeLeft, type OptionRow } from "@/lib/options";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
+import { useT } from "@/lib/i18n";
 
 function tone(n: number): string {
   return n > 0 ? "text-up" : n < 0 ? "text-down" : "text-ink-muted";
@@ -24,6 +25,7 @@ function tone(n: number): string {
 export default function OptionPage({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = use(params);
   const def = optionDef(symbol);
+  const t = useT();
   const [rows, setRows] = useState<OptionRow[]>([]);
   const [last, setLast] = useState<number | null>(null);
   const [account, setAccount] = useState<FuturesAccount | null>(null);
@@ -67,7 +69,7 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
   if (!def) {
     return (
       <div className="mx-auto max-w-3xl py-16 text-center text-sm text-ink-muted">
-        없는 옵션입니다. <Link href="/market?kind=futures" className="text-sky">증권으로 돌아가기</Link>
+        {t("없는 옵션입니다.")} <Link href="/market?kind=futures" className="text-sky">{t("증권으로 돌아가기")}</Link>
       </div>
     );
   }
@@ -90,9 +92,9 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
           href="/market?kind=futures"
           className="inline-flex shrink-0 items-center gap-1.5 text-[13px] text-ink-muted transition-colors hover:text-sky"
         >
-          <span aria-hidden>←</span> 옵션 목록
+          <span aria-hidden>←</span> {t("옵션 목록")}
         </Link>
-        <nav aria-label="같은 기초자산의 다른 옵션" className="chip-scroller flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
+        <nav aria-label={t("같은 기초자산의 다른 옵션")} className="chip-scroller flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
           {siblings.map((o) => (
             <Link
               key={o.symbol}
@@ -104,7 +106,7 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
                   : "text-ink-muted ring-1 ring-hairline ring-inset hover:text-ink"
               }`}
             >
-              {o.type === "CALL" ? "콜" : "풋"} {fmtStrike(o.symbol, strikeOf(o.symbol))}
+              {o.type === "CALL" ? t("콜") : t("풋")} {fmtStrike(o.symbol, strikeOf(o.symbol))}
             </Link>
           ))}
         </nav>
@@ -112,25 +114,27 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
 
       <div className="glass p-4 sm:p-5">
         <p className="text-[13px] text-ink-muted">
-          {def.symbol} · 1일물 유럽형 옵션{" "}
-          <span className="text-ink-faint">· 만기까지 {row ? timeLeft(row.expiresAt) : "—"} (04:10 현금 정산)</span>
+          {def.symbol} · {t("1일물 유럽형 옵션")}{" "}
+          <span className="text-ink-faint">
+            · {t("만기까지 {time}", { time: row ? timeLeft(row.expiresAt) : "—" })} ({t("04:10 현금 정산")})
+          </span>
         </p>
         <h1 className={`mt-1 text-xl font-semibold tracking-tight sm:text-2xl ${def.type === "CALL" ? "text-up" : "text-down"}`}>
           {optionLabel(def.symbol, row?.strike)}
         </h1>
         <div className="mt-2 flex flex-wrap items-end gap-x-5 gap-y-1">
           <p className="num text-2xl font-semibold tracking-tight sm:text-3xl">{fmtOption(def.symbol, price)}</p>
-          <p className="num pb-1 text-sm text-ink-muted">이론가 {fmtOption(def.symbol, row?.theo)}</p>
+          <p className="num pb-1 text-sm text-ink-muted">{t("이론가")} {fmtOption(def.symbol, row?.theo)}</p>
         </div>
         <dl className="num mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-ink-muted">
           <div>
-            기초자산 <span className="text-ink">{fmtOption(def.symbol, row?.underlying)}</span>
+            {t("기초자산")} <span className="text-ink">{fmtOption(def.symbol, row?.underlying)}</span>
           </div>
           <div>
-            행사가 <span className="text-ink">{fmtStrike(def.symbol, row?.strike)}</span>
+            {t("행사가")} <span className="text-ink">{fmtStrike(def.symbol, row?.strike)}</span>
           </div>
-          <div title="지금 만기라면 받을 금액(계약당 가격 단위)">
-            내재가치 <span className="text-ink">{fmtOption(def.symbol, intrinsic)}</span>
+          <div title={t("지금 만기라면 받을 금액(계약당 가격 단위)")}>
+            {t("내재가치")} <span className="text-ink">{fmtOption(def.symbol, intrinsic)}</span>
           </div>
         </dl>
       </div>
@@ -155,7 +159,7 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
         <div className="space-y-4 max-lg:order-1 lg:col-start-2 lg:row-span-2 lg:row-start-1">
           {retired && (
             <p role="note" className="glass p-3 text-[13px] leading-5 text-warn">
-              거래가 끝난 옵션입니다. 새로 살 수 없고, 보유분은 매도하거나 다음 04:10 만기에 현금 정산됩니다.
+              {t("거래가 끝난 옵션입니다. 새로 살 수 없고, 보유분은 매도하거나 다음 04:10 만기에 현금 정산됩니다.")}
             </p>
           )}
           <OptionOrderPanel
@@ -169,15 +173,15 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
           />
           {position && (
             <section className="glass p-4">
-              <p className="panel-title">내 포지션</p>
+              <p className="panel-title">{t("내 포지션")}</p>
               <dl className="num mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[13px]">
-                <dt className="text-ink-muted">보유</dt>
-                <dd className="text-right font-semibold">{position.qty}계약</dd>
-                <dt className="text-ink-muted">평균 매수가</dt>
+                <dt className="text-ink-muted">{t("보유")}</dt>
+                <dd className="text-right font-semibold">{t("{n}계약", { n: position.qty })}</dd>
+                <dt className="text-ink-muted">{t("평균 매수가")}</dt>
                 <dd className="text-right">{fmtOption(def.symbol, Math.round(position.avgPrice))}</dd>
-                <dt className="text-ink-muted">평가금액</dt>
+                <dt className="text-ink-muted">{t("평가금액")}</dt>
                 <dd className="text-right">{won(position.value)}</dd>
-                <dt className="text-ink-muted">평가손익</dt>
+                <dt className="text-ink-muted">{t("평가손익")}</dt>
                 <dd className={`text-right font-semibold ${tone(position.unrealized)}`}>
                   {position.unrealized > 0 ? "+" : ""}
                   {won(position.unrealized)}
@@ -193,7 +197,7 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
 
       <AssetNews
         reference={def.family.code === "K" ? "market" : def.family.code === "KCOM" ? "commodity" : "USDKRW"}
-        title={def.family.code === "K" ? "시장 뉴스" : def.family.code === "KCOM" ? "원자재 뉴스" : "관련 뉴스"}
+        title={def.family.code === "K" ? t("시장 뉴스") : def.family.code === "KCOM" ? t("원자재 뉴스") : t("관련 뉴스")}
       />
     </div>
   );

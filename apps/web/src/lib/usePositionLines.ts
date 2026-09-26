@@ -6,6 +6,7 @@ import { api, getToken, getUser } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { everyVisible } from "@/lib/visible-interval";
+import { getLocale, translate } from "@/lib/i18n";
 
 export interface PositionLine {
   id: string;
@@ -102,27 +103,32 @@ export function usePositionLines(symbol: string): PositionLine[] {
             id: "avg",
             price: Math.round(holding.avgCost),
             color: AVG_COLOR,
-            title: "평단",
+            title: translate(getLocale(), "평단"),
             style: 2,
           });
         }
         for (const row of conditional) {
           const trailing = row.trailBps != null;
           const sell = row.side === "SELL";
-          const label = trailing
-            ? `트레일링 ${sell ? "손절" : "매수"}`
-            : sell
-              ? row.direction === "AT_OR_BELOW"
-                ? "손절"
-                : "익절"
-              : row.direction === "AT_OR_ABOVE"
-                ? "돌파 매수"
-                : "눌림 매수";
+          const label = translate(
+            getLocale(),
+            trailing
+              ? sell
+                ? "트레일링 손절"
+                : "트레일링 매수"
+              : sell
+                ? row.direction === "AT_OR_BELOW"
+                  ? "손절"
+                  : "익절"
+                : row.direction === "AT_OR_ABOVE"
+                  ? "돌파 매수"
+                  : "눌림 매수",
+          );
           next.push({
             id: row.id,
             price: row.triggerPrice,
             color: trailing ? TRAIL_COLOR : row.direction === "AT_OR_BELOW" ? STOP_COLOR : TAKE_COLOR,
-            title: `${label} ${row.qty.toLocaleString("ko-KR")}주`,
+            title: `${label} ${translate(getLocale(), "{n}주", { n: row.qty.toLocaleString("ko-KR") })}`,
             style: 1,
           });
         }

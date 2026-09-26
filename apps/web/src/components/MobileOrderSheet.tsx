@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import OrderForm from "./OrderForm";
 import Orderbook from "./Orderbook";
+import { useT } from "@/lib/i18n";
 
 type Side = "BUY" | "SELL";
 
@@ -11,14 +12,15 @@ type Side = "BUY" | "SELL";
  * 매수(빨강)가 왼쪽, 매도(파랑)가 오른쪽 — 주문폼의 매수/매도 순서와 같다.
  */
 export function MobileTradeBar({ onOpen }: { onOpen: (side: Side) => void }) {
+  const t = useT();
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t border-hairline-soft bg-abyss/90 px-4 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] backdrop-blur-glass lg:hidden">
       <div className="mx-auto grid max-w-xl grid-cols-2 gap-2">
         <button type="button" className="btn btn-buy h-12 text-[15px]" onClick={() => onOpen("BUY")}>
-          매수
+          {t("매수")}
         </button>
         <button type="button" className="btn btn-sell h-12 text-[15px]" onClick={() => onOpen("SELL")}>
-          매도
+          {t("매도")}
         </button>
       </div>
     </div>
@@ -48,6 +50,7 @@ export default function MobileOrderSheet({
   onPlaced: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const bookRef = useRef<HTMLDivElement>(null);
 
   // 시트가 열린 동안 뒤 페이지가 같이 스크롤되지 않게 하고, Esc로 닫는다.
@@ -74,10 +77,10 @@ export default function MobileOrderSheet({
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[60] lg:hidden" role="dialog" aria-modal="true" aria-label={`${name ?? symbol} 주문`}>
+    <div className="fixed inset-0 z-[60] lg:hidden" role="dialog" aria-modal="true" aria-label={t("{name} 주문", { name: name ?? symbol })}>
       <button
         type="button"
-        aria-label="주문 창 닫기"
+        aria-label={t("주문 창 닫기")}
         className="absolute inset-0 animate-[sheet-fade_180ms_ease-out] bg-black/55"
         onClick={onClose}
       />
@@ -90,7 +93,7 @@ export default function MobileOrderSheet({
             </p>
           </div>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
-            닫기
+            {t("닫기")}
           </button>
         </div>
 

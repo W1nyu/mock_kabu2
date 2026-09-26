@@ -3,10 +3,11 @@
 import { isFuture, isOption } from "@mock-kabu/shared";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { fmt, getUser } from "@/lib/api";
+import { fmt, getUser, won } from "@/lib/api";
 import { fmtFuture, krw } from "@/lib/futures";
 import { pushNotification, showDesktopNotification } from "@/lib/notifications";
 import { subscribe } from "@/lib/socket";
+import { getLocale, serverText, translate, type Vars } from "@/lib/i18n";
 
 interface Toast {
   id: string;
@@ -45,6 +46,8 @@ export default function Toaster() {
     const user = getUser();
     if (!user) return;
     const pending = pendingRef.current;
+    // 알림 문구는 받은 순간의 화면 언어로 만든다(알림함에도 그대로 남는다).
+    const tr = (ko: string, vars?: Vars) => translate(getLocale(), ko, vars);
 
     const push = (toast: Toast) => {
       // 토스트는 사라지지만 알림함에는 남는다. 탭이 가려져 있으면 시스템 알림도 띄운다(설정에서 켠 경우).
@@ -66,8 +69,12 @@ export default function Toaster() {
           id: `fill:${key}:${Date.now()}`,
           href: `/${isOption(fill.symbol) ? "options" : "futures"}/${fill.symbol}`,
           tone: fill.side === "BUY" ? "up" : "down",
-          title: `${fill.symbol} ${fill.side === "BUY" ? "매수" : "매도"} 체결 ${fmt.format(fill.qty)}계약`,
-          detail: fill.count > 1 ? `${fill.count}건 · 평균 ${fmtFuture(fill.symbol, avg)}` : fmtFuture(fill.symbol, avg),
+          title: tr(fill.side === "BUY" ? "{symbol} 매수 체결 {n}계약" : "{symbol} 매도 체결 {n}계약", {
+            symbol: fill.symbol,
+            n: fmt.format(fill.qty),
+          }),
+          detail:
+            fill.count > 1 ? tr("{count}건 · 평균 {price}", { count: fill.count, price: fmtFuture(fill.symbol, avg) }) : fmtFuture(fill.symbol, avg),
         });
         return;
       }
@@ -75,11 +82,11 @@ export default function Toaster() {
         id: `fill:${key}:${Date.now()}`,
         href: `/symbol/${fill.symbol}`,
         tone: fill.side === "BUY" ? "up" : "down",
-        title: `${fill.symbol} ${fill.side === "BUY" ? "매수" : "매도"} 체결 ${fmt.format(fill.qty)}주`,
-        detail:
-          fill.count > 1
-            ? `${fill.count}건 · 평균 ${fmt.format(avg)}원`
-            : `${fmt.format(avg)}원`,
+        title: tr(fill.side === "BUY" ? "{symbol} 매수 체결 {n}주" : "{symbol} 매도 체결 {n}주", {
+          symbol: fill.symbol,
+          n: fmt.format(fill.qty),
+        }),
+        detail: fill.count > 1 ? tr("{count}건 · 평균 {price}", { count: fill.count, price: won(avg) }) : won(avg),
       });
     };
 
@@ -125,8 +132,11 @@ export default function Toaster() {
           id: `futures-settled:${data.symbol}:${data.tradingDay}`,
           href: `/${isOption(data.symbol) ? "options" : "futures"}/${data.symbol}`,
           tone: realized > 0 ? "up" : realized < 0 ? "down" : "info",
-          title: `${data.symbol} ${isOption(data.symbol) ? "만기 정산" : "일일 정산"}`,
-          detail: `${isOption(data.symbol) ? "내재가치" : "결제가"} ${fmtFuture(data.symbol, Number(data.price))} · 정산손익 ${realized > 0 ? "+" : ""}${krw(realized || 0)}`,
+          title: tr(isOption(data.symbol) ? "{symbol} 만기 정산" : "{symbol} 일일 정산", { symbol: data.symbol }),
+          detail: tr(isOption(data.symbol) ? "내재가치 {price} · 정산손익 {pnl}" : "결제가 {price} · 정산손익 {pnl}", {
+            price: fmtFuture(data.symbol, Number(data.price)),
+            pnl: `${realized > 0 ? "+" : ""}${krw(realized || 0)}`,
+          }),
         });
         return;
       }
@@ -138,20 +148,25 @@ export default function Toaster() {
             id: `margin-call:${at}`,
             href: "/market?kind=futures",
             tone: "warn",
-            title: "선물 추가증거금 발생",
-            detail: `${krw(Number(data.required))} · ${deadline.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" })}까지 채우지 않으면 반대매매`,
+            title: tr("선물 추가증거금 발생"),
+            detail: tr("{amount} · {time}까지 채우지 않으면 반대매매", {
+              amount: krw(Number(data.required)),
+              time: deadline.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" }),
+            }),
           });
         } else if (data.status === "RESOLVED") {
-          push({ id: `margin-call:${at}`, tone: "info", title: "선물 추가증거금 해소", detail: "위탁증거금 수준을 회복했습니다" });
+          push({ id: `margin-call:${at}`, tone: "info", title: tr("선물 추가증거금 해소"), detail: tr("위탁증거금 수준을 회복했습니다") });
         } else if (data.status === "LIQUIDATED" || data.status === "EMERGENCY") {
           push({
             id: `margin-call:${at}`,
             tone: "down",
-            title: data.status === "EMERGENCY" ? "선물 긴급 반대매매" : "선물 반대매매",
+            title: data.status === "EMERGENCY" ? tr("선물 긴급 반대매매") : tr("선물 반대매매"),
             detail:
               data.status === "EMERGENCY"
-                ? `평가손실이 증거금의 90%에 닿아 ${Array.isArray(data.symbols) ? data.symbols.join(", ") : ""} 포지션을 시장가로 청산합니다`
-                : "추가증거금 기한이 지나 포지션 일부를 시장가로 청산합니다",
+                ? tr("평가손실이 증거금의 90%에 닿아 {symbols} 포지션을 시장가로 청산합니다", {
+                    symbols: Array.isArray(data.symbols) ? data.symbols.join(", ") : "",
+                  })
+                : tr("추가증거금 기한이 지나 포지션 일부를 시장가로 청산합니다"),
           });
         }
         return;
@@ -161,8 +176,12 @@ export default function Toaster() {
           id: `bracket:${data.id}`,
           href: `/symbol/${data.symbol}`,
           tone: "info",
-          title: `${data.symbol} 손절/익절 자동 등록`,
-          detail: `체결 ${fmt.format(Number(data.qty))}주 · 평균 ${fmt.format(Number(data.avgFillPrice))}원 · ${String(data.note ?? "")}`,
+          title: tr("{symbol} 손절/익절 자동 등록", { symbol: data.symbol }),
+          detail: tr("체결 {n}주 · 평균 {price} · {note}", {
+            n: fmt.format(Number(data.qty)),
+            price: won(Number(data.avgFillPrice)),
+            note: serverText(String(data.note ?? "")),
+          }),
         });
         return;
       }
@@ -171,21 +190,24 @@ export default function Toaster() {
         const future = isFuture(symbol);
         const href = future ? `/futures/${symbol}` : `/symbol/${symbol}`;
         if (data.status === "TRIGGERED") {
-          const price = future ? fmtFuture(symbol, Number(data.triggerPrice)) : `${fmt.format(Number(data.triggerPrice))}원`;
+          const price = future ? fmtFuture(symbol, Number(data.triggerPrice)) : won(Number(data.triggerPrice));
           push({
             id: `cond:${data.id}`,
             href,
             tone: "info",
-            title: `${data.symbol} ${data.label} 발동`,
-            detail: `${price} 도달 · ${fmt.format(Number(data.qty))}${future ? "계약" : "주"} 시장가 접수`,
+            title: tr("{symbol} {label} 발동", { symbol: data.symbol, label: tr(data.label) }),
+            detail: tr(future ? "{price} 도달 · {n}계약 시장가 접수" : "{price} 도달 · {n}주 시장가 접수", {
+              price,
+              n: fmt.format(Number(data.qty)),
+            }),
           });
         } else if (data.status === "FAILED") {
           push({
             id: `cond:${data.id}`,
             href,
             tone: "warn",
-            title: `${data.symbol} ${data.label} 발동했지만 접수 실패`,
-            detail: String(data.failReason ?? "사유 없음"),
+            title: tr("{symbol} {label} 발동했지만 접수 실패", { symbol: data.symbol, label: tr(data.label) }),
+            detail: data.failReason ? serverText(String(data.failReason)) : tr("사유 없음"),
           });
         }
       }
