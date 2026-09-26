@@ -58,7 +58,7 @@ export default function Nav() {
           <span className="grid h-7 w-7 place-items-center rounded-[9px] bg-linear-to-br from-sky to-indigo shadow-glow transition-transform group-active:scale-95">
             <span className="h-2.5 w-2.5 rounded-[3px] bg-abyss" />
           </span>
-          <span className="text-[15px] font-semibold tracking-tight">
+          <span className="text-[15px] font-semibold tracking-tight max-[380px]:hidden">
             mock<span className="text-ink-muted"> kabu</span>
           </span>
         </Link>
@@ -125,9 +125,14 @@ export default function Nav() {
               </button>
             </>
           ) : (
-            <Link href="/login" className="btn btn-primary btn-sm">
-              {t("로그인")}
-            </Link>
+            <>
+              <Link href="/login" className="btn btn-primary btn-sm">
+                {t("로그인")}
+              </Link>
+              <Link href="/signup" className="btn btn-primary btn-sm">
+                {t("가입하기")}
+              </Link>
+            </>
           )}
         </div>
       </nav>

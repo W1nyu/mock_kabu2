@@ -34,8 +34,14 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, view
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await requestLocale();
   return (
-    <html lang={locale} data-theme="dark" suppressHydrationWarning>
+    <html lang={locale} data-theme="light" suppressHydrationWarning>
       <body>
+        {/* 첫 화면을 그리기 전에 저장된 테마를 적용한다 — 다크를 고른 사람에게 라이트가 번쩍이지 않게. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem("mock-kabu2:theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}`,
+          }}
+        />
         {/* The glass theme is specified on Inter, which has no Hangul coverage —
             Pretendard carries the Korean text. React hoists these into <head>;
             both degrade to the system stack if the CDN is unreachable. */}
