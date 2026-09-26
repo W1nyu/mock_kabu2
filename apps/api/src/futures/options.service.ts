@@ -3,6 +3,7 @@ import type { PrismaClient } from "@mock-kabu/db";
 import {
   ALL_OPTIONS,
   atmStrike,
+  extendStrikeLadder,
   futuresTradingDay,
   nextFuturesSettlementAt,
   OPTION_FAMILIES,
@@ -29,6 +30,8 @@ export interface OptionRow {
   familyName: string;
   /** 거래 종료(보유분 매도·만기 정산만) — 체인·봇 호가에서 뺀다 */
   retired: boolean;
+  /** 거래 종료 옵션의 마지막 만기가 지났다 — 더는 주문을 받지 않는다 */
+  expired: boolean;
   type: "CALL" | "PUT";
   slot: number;
   name: string;
@@ -71,17 +74,50 @@ export class OptionsService implements OnModuleInit {
     void this.ensureSeries().catch((error) => console.warn("[options] ensure series failed", error));
   }
 
-  /** 행사가가 없는 옵션 계열에 지금 기초자산 기준으로 행사가를 깐다. */
+  /**
+   * 행사가가 빠진 종목을 채운다.
+   *  - 계열에 오늘 거래일의 행사가가 하나도 없으면(처음 배포·만기 뒤 다시 깔기 실패) 지금 기초자산으로 전부 깐다.
+   *  - 오늘 행사가가 이미 있는데 종목만 늘었으면(행사가 개수 확대) 포지션이 걸린 기존 행사가는 그대로 두고,
+   *    빈 종목에 사다리 바깥쪽 행사가를 붙인다. 다음 만기 뒤에는 정상 배치(가운데가 등가격)로 깐다.
+   */
   async ensureSeries(now = Date.now()): Promise<void> {
     const rows = await this.prisma.optionSeries.findMany();
-    const have = new Set(rows.map((row) => row.symbol));
-    const missing = OPTION_FAMILIES.filter((family) => OPTIONS.some((o) => o.family.code === family.code && !have.has(o.symbol)));
-    if (missing.length === 0) return;
-    await this.restrike(await this.futures.underlyingUnits(), now, missing);
+    const tradingDay = futuresTradingDay(nextFuturesSettlementAt(now));
+    const bySymbol = new Map(rows.map((row) => [row.symbol, row]));
+    const restrikeAll: OptionFamilyDef[] = [];
+    let underlying: Map<string, number> | null = null;
+    for (const family of OPTION_FAMILIES) {
+      const series = OPTIONS.filter((o) => o.family.code === family.code);
+      const missing = series.filter((o) => !bySymbol.has(o.symbol));
+      if (missing.length === 0) continue;
+      const current = series
+        .map((o) => bySymbol.get(o.symbol))
+        .filter((row): row is NonNullable<typeof row> => row != null && row.tradingDay === tradingDay);
+      if (current.length === 0) {
+        restrikeAll.push(family);
+        continue;
+      }
+      underlying ??= await this.futures.underlyingUnits();
+      const s = optionUnderlyingUnits(family, underlying);
+      if (s == null) continue;
+      const missingSlots = [...new Set(missing.map((o) => o.slot))].sort((a, b) => a - b);
+      const added = extendStrikeLadder(family, [...new Set(current.map((row) => row.strike))], missingSlots.length);
+      const days = daysToExpiry(now);
+      for (const [index, slot] of missingSlots.entries()) {
+        const strike = added[index];
+        for (const option of series.filter((o) => o.slot === slot && !bySymbol.has(o.symbol))) {
+          const theo = roundPremium(option, optionTheoretical({ type: option.type, underlying: s, strike, days, dailyVol: family.dailyVol }));
+          await this.prisma.optionSeries.create({ data: { symbol: option.symbol, strike, tradingDay } });
+          await this.prisma.marketSymbol.update({ where: { symbol: option.symbol }, data: { lastPrice: theo } });
+        }
+      }
+      this.cache.invalidate("options:");
+    }
+    if (restrikeAll.length > 0) await this.restrike(underlying ?? (await this.futures.underlyingUnits()), now, restrikeAll);
   }
 
   /**
-   * 계열마다 기초자산 기준 등가격 ±2 행사가를 깔고, 종목 최근가를 새 이론가로 둔다.
+   * 계열마다 기초자산 기준 등가격 ±(행사가 개수/2) 행사가를 깔고, 종목 최근가를 새 이론가로 둔다.
    * prices는 선물 심볼 → 기초자산(또는 결제가) 정수 단위 — 계열 기초자산은 구성 선물 값의 평균(optionUnderlyingUnits).
    * 매일 04:11 옵션 만기 정산 직후와 처음 배포 때 부른다.
    */
@@ -135,6 +171,8 @@ export class OptionsService implements OnModuleInit {
         void this.ensureSeries(now).catch((error) => console.warn("[options] ensure series retry failed", error));
       }
       const strikeBySymbol = new Map(series.map((row) => [row.symbol, row.strike]));
+      const dayBySymbol = new Map(series.map((row) => [row.symbol, row.tradingDay]));
+      const currentDay = futuresTradingDay(nextFuturesSettlementAt(now));
       const lastBySymbol = new Map(symbols.map((row) => [row.symbol, row.lastPrice]));
       const days = daysToExpiry(now);
       const expiresAt = nextFuturesSettlementAt(now);
@@ -150,6 +188,7 @@ export class OptionsService implements OnModuleInit {
           family: option.family.code,
           familyName: option.family.name,
           retired: option.family.retired === true,
+          expired: option.family.retired === true && (dayBySymbol.get(option.symbol) ?? "") < currentDay,
           type: option.type,
           slot: option.slot,
           name: option.name,

@@ -40,8 +40,8 @@ PostgreSQL, Redis, API, settlement, matching-engine, bots, web에는 호스트 �
    docker compose -f deploy/production/compose.production.yml run --rm api prune-history            # dry-run
    docker compose -f deploy/production/compose.production.yml run --rm api prune-history --apply --compact-bot-ledger
    ```
-   봇 계정의 7일 지난 종결 주문, 30일 지난 봇↔봇 체결(그 실현손익·정산 claim 포함), 30일 지난 뉴스를
-   지우고 봇 원장을 계정당 한 행으로 압축한다. 주문 종료(`order.closed`) 정산 claim은 30일 뒤 정리한다.
+   봇 계정의 3일 지난 종결 주문, 14일 지난 봇↔봇 체결(그 실현손익·정산 claim 포함), 30일 지난 뉴스를
+   지우고 봇 원장(3일 이전)을 계정당 한 행으로 압축한다(GCP 타이머 인자, 2026-09-26 단축). 주문 종료(`order.closed`) 정산 claim은 14일 뒤 정리한다.
    체결 행의 정산 claim과 사용자 주문·체결·원장은 보존한다.
    실행 뒤 `run --rm api consistency`로 확인한다. 공간 회수는 autovacuum이 하며, 즉시 필요하면
    `VACUUM (FULL, ANALYZE)`를 해당 테이블에 실행한다(락 걸림 — 조용한 시간에).

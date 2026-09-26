@@ -29,7 +29,7 @@ describe("OrderService.myOrders", () => {
         status: { in: ["OPEN", "PARTIAL"] },
       },
       orderBy: { createdAt: "desc" },
-      take: 200,
+      take: 500,
     });
   });
 });

@@ -184,11 +184,27 @@ export class ApiClient {
     return this.request("GET", "/account/futures") as Promise<{ positions: { symbol: string; qty: number }[] }>;
   }
 
-  /** 옵션 20종목 시세(행사가·이론가). API 2초 캐시. */
+  /** 옵션 시세(행사가·기초자산·이론가·거래 종료 여부). API 2초 캐시. */
   optionsOverview() {
     return this.request("GET", "/market/options") as Promise<
-      { symbol: string; family: string; strike: number | null; theo: number | null; lastPrice: number; tickUnits: number }[]
+      {
+        symbol: string;
+        family: string;
+        type: "CALL" | "PUT";
+        strike: number | null;
+        underlying: number | null;
+        theo: number | null;
+        lastPrice: number;
+        tickUnits: number;
+        retired?: boolean;
+        expired?: boolean;
+      }[]
     >;
+  }
+
+  /** 이 계정의 살아 있는 주문 전부(종목 구분 없이, 최대 500) — 여러 종목을 맡은 마켓메이커가 한 번에 맞춘다. */
+  liveOrdersAll() {
+    return this.request("GET", "/orders?status=live&limit=500") as Promise<LiveOrder[]>;
   }
 
   /** 내 옵션 포지션(/account/futures의 options) */

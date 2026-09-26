@@ -1,5 +1,5 @@
 import { UnprocessableEntityException } from "@nestjs/common";
-import { futureMarginPerContract, optionWriterMarginPerContract, type FutureDef, type OptionDef, type OrderSide } from "@mock-kabu/shared";
+import { futureMarginPerContract, futuresTradingDay, nextFuturesSettlementAt, optionWriterMarginPerContract, type FutureDef, type OptionDef, type OrderSide } from "@mock-kabu/shared";
 
 /**
  * 선물 때문에 쓸 수 없는 현금(원) = 포지션 위탁증거금 합계 + 미수금.
@@ -95,6 +95,13 @@ export async function optionOrderHoldPerUnit(
   qty: number,
   priceUnits: number,
 ): Promise<bigint> {
+  if (def.family.retired) {
+    // 마지막 만기가 지난 거래 종료 옵션은 누구의 주문도 받지 않는다(남은 포지션이 없다).
+    const series = (await db.optionSeries.findUnique({ where: { symbol: def.symbol } })) as { tradingDay: string } | null;
+    if (!series || series.tradingDay < futuresTradingDay(nextFuturesSettlementAt(Date.now()))) {
+      throw new UnprocessableEntityException("만기가 지난 옵션입니다");
+    }
+  }
   if (def.family.retired && side === "BUY" && !(await isBotAccount(db, accountId))) {
     // 거래를 끝낸 옵션은 새로 사지 못한다. 봇(마켓메이커)의 매수 호가는 보유자가 팔 수 있게 남긴다.
     throw new UnprocessableEntityException("거래가 끝난 옵션입니다. 보유분 매도만 할 수 있습니다");

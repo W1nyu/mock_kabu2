@@ -76,6 +76,7 @@ export const SERVER_MESSAGES: readonly ServerMessage[] = [
   ["거래가 끝난 옵션입니다. 보유분 매도만 할 수 있습니다", "This option has been retired. You can only sell what you hold", "取引が終了したオプションです。保有分の売却のみ可能です"],
   ["옵션은 보유한 수량만 매도(청산)할 수 있습니다", "You can only sell (close) options you hold", "オプションは保有数量のみ売却（決済）できます"],
   ["거래가 끝난 옵션은 새로 쓸 수 없습니다", "Retired options can't be written", "取引が終了したオプションは新規に売り建てできません"],
+  ["만기가 지난 옵션입니다", "This option has expired", "満期を過ぎたオプションです"],
   ["오늘의 행사가가 아직 정해지지 않았습니다", "Today's strikes haven't been set yet", "本日の権利行使価格はまだ決まっていません"],
   ["자동 손절/익절은 매수 주문에만 붙일 수 있습니다", "Automatic stop / take profit can only be attached to buy orders", "自動損切り・利確は買い注文にのみ付けられます"],
   ["같은 멱등 키의 주문이 아직 처리 중입니다. 잠시 후 다시 조회하세요", "An order with the same idempotency key is still being processed. Check again shortly", "同じ冪等キーの注文がまだ処理中です。しばらくしてから再度確認してください"],

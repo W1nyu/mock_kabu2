@@ -1,7 +1,8 @@
 /**
  * 1일물 옵션 — 원자재지수(KCOM) 옵션·원/달러 옵션 (설계 docs/superpowers/specs/2026-09-26-options-design.md).
  *
- * 종목 이름은 고정(`KCOMC3` = 원자재지수 콜 3번)이고 행사가만 매일 04:11 정산 뒤 등가격 기준으로 다시 깐다.
+ * 종목 이름은 고정(`KCOMC6` = 원자재지수 콜 6번 = 등가격)이고 행사가만 매일 04:11 정산 뒤 등가격 기준으로 다시 깐다.
+ * 행사가는 계열마다 `strikes`개(홀수) — 가운데가 등가격. 2026-09-26 5개 → 11개(등가격 ±5).
  * 가격은 모두 기초자산과 같은 정수 단위(실제 × priceScale)다. 1계약의 원화 가치 = 가격 단위 × unitValue.
  *
  * 주가지수 옵션(K, `KC1`~`KP5`)은 2026-09-26 거래를 끝냈다(retired): 새 매수·쓰기는 받지 않고 보유분 매도와
@@ -35,6 +36,8 @@ export interface OptionFamilyDef {
   reserve: string;
   /** 거래 종료 — 보유분 매도·만기 정산만(새 매수·쓰기 불가), 목록에 보이지 않는다 */
   retired?: boolean;
+  /** 행사가 개수(홀수, 가운데가 등가격) — 종목 번호 1..strikes */
+  strikes: number;
 }
 
 /** KCOM 구성 원자재 선물(동일 가중, 환율 제외). 모두 기준값 100(anchor)이라 평균이 곧 지수 수준이다. */
@@ -57,6 +60,7 @@ export const OPTION_FAMILIES: readonly OptionFamilyDef[] = [
     dailyVol: 0.011,
     writerMarginBps: 400,
     reserve: "OPT_KCOM",
+    strikes: 11,
   },
   {
     code: "U",
@@ -71,6 +75,7 @@ export const OPTION_FAMILIES: readonly OptionFamilyDef[] = [
     dailyVol: 0.005,
     writerMarginBps: 300,
     reserve: "OPT_USD",
+    strikes: 11,
   },
 ];
 
@@ -90,14 +95,21 @@ export const RETIRED_OPTION_FAMILIES: readonly OptionFamilyDef[] = [
     writerMarginBps: 800,
     reserve: "OPT_KABU",
     retired: true,
+    strikes: 5,
   },
 ];
 
 export const ALL_OPTION_FAMILIES: readonly OptionFamilyDef[] = [...OPTION_FAMILIES, ...RETIRED_OPTION_FAMILIES];
 
-/** 행사가 자리: 3이 등가격, 1·2는 아래, 4·5는 위 */
-export const OPTION_SLOTS = [1, 2, 3, 4, 5] as const;
-export const OPTION_ATM_SLOT = 3;
+/** 계열의 등가격 자리(가운데). 11개면 6, 5개면 3. */
+export function atmSlot(family: Pick<OptionFamilyDef, "strikes">): number {
+  return (family.strikes + 1) / 2;
+}
+
+/** 계열의 자리 번호 1..strikes */
+export function familySlots(family: Pick<OptionFamilyDef, "strikes">): number[] {
+  return Array.from({ length: family.strikes }, (_, index) => index + 1);
+}
 
 export interface OptionDef {
   symbol: string;
@@ -115,7 +127,7 @@ export interface OptionDef {
 
 function seriesOf(family: OptionFamilyDef): OptionDef[] {
   return (["CALL", "PUT"] as const).flatMap((type) =>
-    OPTION_SLOTS.map((slot) => ({
+    familySlots(family).map((slot) => ({
       symbol: `${family.code}${type === "CALL" ? "C" : "P"}${slot}`,
       family,
       type,
@@ -172,7 +184,35 @@ export function atmStrike(family: OptionFamilyDef, underlyingUnits: number): num
 
 /** 자리별 행사가(정수 단위) */
 export function strikeForSlot(family: OptionFamilyDef, atm: number, slot: number): number {
-  return Math.max(family.strikeStepUnits, atm + (slot - OPTION_ATM_SLOT) * family.strikeStepUnits);
+  return Math.max(family.strikeStepUnits, atm + (slot - atmSlot(family)) * family.strikeStepUnits);
+}
+
+/**
+ * 이미 깔린 행사가 사다리를 바깥으로 넓혀 빈 자리(새 종목)에 줄 행사가를 정한다 — 장중에 행사가 개수를 늘릴 때,
+ * 포지션이 걸린 기존 행사가는 그대로 두고 아래·위로 번갈아 한 칸씩 붙인다. 겹치지 않는다.
+ */
+export function extendStrikeLadder(family: OptionFamilyDef, existing: readonly number[], count: number): number[] {
+  const taken = new Set(existing);
+  if (existing.length === 0 || count <= 0) return [];
+  let low = Math.min(...existing);
+  let high = Math.max(...existing);
+  const out: number[] = [];
+  let below = true;
+  while (out.length < count) {
+    const next = below ? low - family.strikeStepUnits : high + family.strikeStepUnits;
+    if (below && next < family.strikeStepUnits) {
+      below = false;
+      continue;
+    }
+    if (below) low = next;
+    else high = next;
+    if (!taken.has(next)) {
+      out.push(next);
+      taken.add(next);
+    }
+    below = !below;
+  }
+  return out;
 }
 
 /** 내재가치(정수 단위): 콜 max(S−K, 0), 풋 max(K−S, 0) */

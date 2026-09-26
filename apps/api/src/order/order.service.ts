@@ -321,7 +321,8 @@ export class OrderService {
         ...(filter.liveOnly ? { status: { in: LIVE_ORDER_STATUSES } } : {}),
       },
       orderBy: { createdAt: "desc" },
-      take: Math.min(limit, 200),
+      // 마켓메이커는 계정의 살아 있는 주문 전부를 한 번에 읽는다(옵션 44종목 × 호가 여러 단).
+      take: Math.min(limit, filter.liveOnly ? 500 : 200),
     });
   }
 

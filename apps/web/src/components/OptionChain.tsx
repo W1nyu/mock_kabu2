@@ -51,17 +51,28 @@ export default function OptionChain() {
   }, [symbols]);
 
   const familyRows = useMemo(() => rows.filter((row) => row.family === family), [rows, family]);
+  // 행사가별 한 줄(높은 행사가가 위). 종목 번호가 아니라 행사가로 묶는다 — 장중에 행사가 개수를 늘린 날은
+  // 번호와 행사가 순서가 다를 수 있다.
   const strikes = useMemo(() => {
-    const bySlot = new Map<number, { strike: number | null; call?: OptionRow; put?: OptionRow }>();
+    const byStrike = new Map<number, { strike: number | null; call?: OptionRow; put?: OptionRow }>();
     for (const row of familyRows) {
-      const entry = bySlot.get(row.slot) ?? { strike: row.strike };
+      const key = row.strike ?? -row.slot;
+      const entry = byStrike.get(key) ?? { strike: row.strike };
       if (row.type === "CALL") entry.call = row;
       else entry.put = row;
-      bySlot.set(row.slot, entry);
+      byStrike.set(key, entry);
     }
-    return [...bySlot.entries()].sort(([a], [b]) => b - a).map(([slot, entry]) => ({ slot, ...entry }));
+    return [...byStrike.entries()].sort(([a], [b]) => b - a).map(([key, entry]) => ({ key, ...entry }));
   }, [familyRows]);
   const head = familyRows[0];
+  // 등가격 = 기초자산에 가장 가까운 행사가
+  const atmStrike = useMemo(() => {
+    const u = head?.underlying;
+    if (u == null) return null;
+    let best: number | null = null;
+    for (const s of strikes) if (s.strike != null && (best == null || Math.abs(s.strike - u) < Math.abs(best - u))) best = s.strike;
+    return best;
+  }, [strikes, head]);
 
   const cell = (row: OptionRow | undefined, align: "left" | "right") => {
     if (!row) return <td />;
@@ -116,13 +127,13 @@ export default function OptionChain() {
         </thead>
         <tbody>
           {strikes.map((s) => {
-            const atm = s.slot === 3;
+            const atm = s.strike != null && s.strike === atmStrike;
             // 내가격 쪽은 살짝 칠한다: 콜은 행사가 < 기초자산, 풋은 행사가 > 기초자산.
             const u = head?.underlying ?? null;
             const callItm = u != null && s.strike != null && s.strike < u;
             const putItm = u != null && s.strike != null && s.strike > u;
             return (
-              <tr key={s.slot}>
+              <tr key={s.key}>
                 <td className={callItm ? "bg-up/5" : undefined}>{cell(s.call, "left")}</td>
                 <td className={`num text-center ${atm ? "font-semibold text-sky" : "text-ink-muted"}`}>
                   {s.call ? fmtStrike(s.call.symbol, s.strike) : "—"}

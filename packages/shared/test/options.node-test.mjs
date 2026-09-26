@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   atmStrike,
+  extendStrikeLadder,
   isOption,
   liquidityReserveBotNumber,
   normCdf,
@@ -19,8 +20,9 @@ import {
   TRADABLE_SYMBOLS,
 } from "../dist/index.js";
 
-test("20 live option series (KCOM·USD) plus the retired index options, all tradable", () => {
-  assert.equal(OPTIONS.length, 20);
+test("44 live option series (KCOM·USD × call/put × 11 strikes) plus the retired index options, all tradable", () => {
+  assert.equal(OPTIONS.length, 44);
+  assert.ok(isOption("KCOMC11") && isOption("UP11") && !isOption("KC6"));
   assert.deepEqual([...new Set(OPTIONS.map((o) => o.family.code))], ["KCOM", "U"]);
   assert.ok(isOption("KCOMC3") && isOption("UP5") && !isOption("KABUF"));
   assert.equal(optionDef("KCOMC3").name, "원자재지수 콜 3");
@@ -46,6 +48,16 @@ test("KCOM = equal-weight average of the five commodity values, FX excluded; inc
   assert.equal(optionUnderlyingUnits(kcom, prices), null);
   assert.equal(optionUnderlyingUnits(optionFamily("U"), prices), 14_000);
   assert.equal(atmStrike(kcom, 10_073), 10_050); // 0.5pt 간격
+  // 11개 — 6번이 등가격, 등가격 ±5
+  assert.deepEqual([1, 6, 11].map((slot) => strikeForSlot(kcom, 10_050, slot)), [9_800, 10_050, 10_300]);
+});
+
+test("widening today's ladder keeps existing strikes and adds new ones outside them", () => {
+  const kcom = optionFamily("KCOM");
+  const existing = [9_950, 10_000, 10_050, 10_100, 10_150];
+  const added = extendStrikeLadder(kcom, existing, 6);
+  assert.deepEqual([...added].sort((a, b) => a - b), [9_800, 9_850, 9_900, 10_200, 10_250, 10_300]);
+  assert.deepEqual(extendStrikeLadder(kcom, [], 3), []);
 });
 
 test("strikes center on the rounded underlying, one step apart", () => {

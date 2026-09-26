@@ -1,5 +1,19 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-26 — 옵션 행사가 5개 → 11개, 옵션 봇 부하 감소, 디스크 보존 정책 단축 (미배포)
+
+- **행사가 11개**: shared `OptionFamilyDef.strikes`(KCOM·원/달러 11, 종료된 K 5), `atmSlot()`(11개면 6번), `familySlots()`. 종목 `KCOMC1~11`·`KCOMP1~11`·`UC1~11`·`UP1~11`(거래 44종목). `OPTION_SLOTS`·`OPTION_ATM_SLOT` 삭제.
+- **장중 확대**: `ensureSeries`는 계열에 오늘 거래일 행사가가 있으면 기존 행사가(포지션이 걸린)를 그대로 두고 빈 종목에 사다리 바깥쪽 행사가를 붙인다(`extendStrikeLadder`, 최근가 = 이론가). 오늘 행사가가 없으면 전부 다시 깐다. 다음 04:11 만기 뒤에는 6번이 등가격인 정상 배치.
+- **만기 지난 종료 옵션**: `/market/options` `expired`, 주문 422 "만기가 지난 옵션입니다", 옵션 화면은 주문창 대신 안내. MM은 그 종목 호가를 모두 취소.
+- **옵션 MM 부하**: 루프마다 `/orders?status=live&limit=500` 한 번(종목별 호출 제거, API `liveOnly`면 take 500), 등가격에서 3.5칸 넘게 먼 행사가는 호가 2단. 테이커 봇은 등가격 기준 거리(`pickStrikeOffset`)로 고른다.
+- **웹**: 옵션 체인은 행사가 내림차순·기초자산에 가장 가까운 행사가를 등가격 표시, 옵션 화면의 형제 종목 칩은 콜 → 풋, 행사가 순.
+- **디스크**(운영 77G/145G, 54% — 당장 위험하진 않음. 늘어난 원인: 롤백 이미지 태그 약 40개 24GB 중 21GB 회수 가능, 빌드 캐시 31GB 중 18GB 회수 가능, pgBackRest 15GB(diff 한 개 약 1.9GB × 6), DB 6.2GB(orders 1.8GB/336만 행, trades 838MB, processed_events 766MB)):
+  - 정리 타이머 인자 `--orders-days 3 --trades-days 14 --ledger-days 3`, 비체결 claim 30 → 14일(체결 claim은 체결이 남아 있는 한 보존 — 불변식 그대로).
+  - pgBackRest `repo1-retention-diff` 6 → 3(파일 bind mount라 운영에서는 제자리 수정 — inode 유지).
+  - `mock-kabu-build-cache-prune`에 `scripts/ops/prune-rollback-images.sh 8` — 롤백 태그 `pre-*`는 최근 8개만.
+  - 지운 행의 공간은 Postgres가 재사용(파일은 줄지 않음 — 증가만 멈춘다). 줄이려면 점검 중 `VACUUM FULL`.
+- 배포: 마이그레이션 없음. **seed 필요**(옵션 새 24종목) → api·web·matching-engine·settlement·bots. systemd 유닛 재설치(`install -m 0644 deploy/gcp/systemd/* /etc/systemd/system/ && systemctl daemon-reload`), pgbackrest.conf 제자리 반영.
+
 ## 2026-09-26 16:26 KST — 영어·일본어 지원·bot7 수정 운영 적용 (a621241)
 
 - 사용자 "배포해". 미리 빌드 → 16:21 예고 → 16:26~16:31 점검: 봇 정지 → pgBackRest diff `20260925-183002F_20260926-072645D` → migrate(`20260926140000_news_translations`) → api·web·matching-engine·settlement → 점검 해제 → 봇.

@@ -1,9 +1,10 @@
 [Unit]
-Description=Prune unused mock-kabu build cache and dangling images
+Description=Prune unused mock-kabu build cache, old rollback tags and dangling images
 After=docker.service
 Requires=docker.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/docker builder prune -af --reserved-space 2GB
-ExecStartPost=/usr/bin/docker image prune -f
+WorkingDirectory=/opt/mock-kabu2
+ExecStartPost=/bin/sh scripts/ops/prune-rollback-images.sh 8

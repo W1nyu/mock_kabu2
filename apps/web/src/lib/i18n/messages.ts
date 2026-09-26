@@ -363,6 +363,7 @@ export const MESSAGES: Readonly<Record<string, readonly [string, string]>> = {
   "04:10 현금 정산": ["cash-settled at 04:10", "04:10に現金決済"],
   "지금 만기라면 받을 금액(계약당 가격 단위)": ["What it would pay if it expired now (price units per contract)", "今が満期なら受け取る金額（1枚あたりの価格単位）"],
   "내재가치": ["Intrinsic", "本質的価値"],
+  "만기가 지나 정산이 끝난 옵션입니다. 더는 주문할 수 없습니다.": ["This option has expired and been settled. No more orders can be placed.", "満期を過ぎて精算済みのオプションです。これ以上注文できません。"],
   "거래가 끝난 옵션입니다. 새로 살 수 없고, 보유분은 매도하거나 다음 04:10 만기에 현금 정산됩니다.": ["This option has been retired. You can't buy it; sell what you hold, or it is cash-settled at the next 04:10 expiry.", "取引が終了したオプションです。新規購入はできず、保有分は売却するか次の04:10満期に現金決済されます。"],
   "내 포지션": ["My position", "マイポジション"],
   "평균 매수가": ["Avg purchase price", "平均購入価格"],

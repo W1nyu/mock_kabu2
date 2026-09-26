@@ -7,6 +7,8 @@ export interface OptionRow {
   family: string;
   /** 거래 종료(보유분 매도·만기 정산만) */
   retired?: boolean;
+  /** 거래 종료 옵션의 마지막 만기가 지났다 — 주문 불가 */
+  expired?: boolean;
   familyName: string;
   type: "CALL" | "PUT";
   slot: number;

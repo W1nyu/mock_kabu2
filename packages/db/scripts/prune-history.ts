@@ -26,7 +26,7 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 const BATCH = 5_000;
-const CLOSED_EVENT_CLAIM_DAYS = 30;
+const CLOSED_EVENT_CLAIM_DAYS = 14;
 
 interface Options {
   apply: boolean;
@@ -198,7 +198,7 @@ async function main() {
   }
 
   // 4) order.closed 정산 claim. 정산 스트림은 ACK된 이벤트만 trim하고,
-  // 이미 발행된 outbox는 별도로 정리한다. 30일 이후 비체결 claim만 지우며,
+  // 이미 발행된 outbox는 별도로 정리한다. 14일 이후 비체결 claim만 지우며,
   // 체결 claim은 matching.trades의 증거이므로 그 체결이 남아 있는 동안 보존한다.
   const closedClaimsBefore = daysAgo(CLOSED_EVENT_CLAIM_DAYS);
   const closedClaimsWhere = `WHERE p.processed_at < $1 AND NOT EXISTS (
