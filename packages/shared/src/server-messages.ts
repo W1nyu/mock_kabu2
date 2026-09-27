@@ -61,6 +61,8 @@ export const SERVER_MESSAGES: readonly ServerMessage[] = [
   ["등록 재시도 대기: {message}", "Waiting to retry: {message}", "登録の再試行待ち：{message}"],
   ["OCO 짝 주문 발동으로 자동 취소", "Canceled automatically because its OCO pair triggered", "OCOの対の注文が発動したため自動取消"],
   ["청산할 선물 포지션이 없어 자동 취소", "Canceled automatically: no futures position left to close", "決済する先物ポジションがないため自動取消"],
+  ["걸려 있는 청산 주문이 보유 수량을 모두 차지해 자동 취소", "Canceled automatically: open closing orders already cover the whole position", "未約定の決済注文が保有数量をすべて占めているため自動取消"],
+  ["자동 손절/익절은 롱 진입 매수에만 붙일 수 있습니다", "Automatic stop-loss/take-profit can only be attached to a long-opening buy", "自動損切り/利確はロング新規の買いにのみ付けられます"],
   ["지정가는 양의 정수", "The limit price must be a positive whole number", "指値は正の整数にしてください"],
   ["{symbol}의 호가 단위는 {tick}입니다", "{symbol} trades in ticks of {tick}", "{symbol}の呼値は{tick}です"],
   ["트레일링 거리는 {min}%~{max}% 사이여야 합니다", "The trailing distance must be between {min}% and {max}%", "トレーリング幅は{min}%〜{max}%の間にしてください"],
