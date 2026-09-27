@@ -385,7 +385,7 @@ export default function MarketPage() {
                       <span className="hidden min-[380px]:block">
                         <Sparkline values={series} tone={sparkTone(series)} width={64} height={28} />
                       </span>
-                      <span className="w-[5.5rem] shrink-0 text-right">
+                      <span className="min-w-[5.5rem] shrink-0 text-right">
                         <span className="num block font-semibold">{won(s.lastPrice)}</span>
                         <span className={`num block text-xs font-medium ${toneClass(s.change)}`}>
                           {s.change > 0 ? "+" : ""}

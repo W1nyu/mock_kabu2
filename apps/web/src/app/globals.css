@@ -444,6 +444,8 @@ body::before {
 
   .num {
     font-variant-numeric: tabular-nums;
+    /* "1,234,000원"처럼 숫자에 붙은 단위에서 끊기지 않게(문장은 띄어쓰기에서만 줄바꿈). */
+    word-break: keep-all;
   }
 }
 

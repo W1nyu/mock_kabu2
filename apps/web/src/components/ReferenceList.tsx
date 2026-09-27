@@ -36,7 +36,7 @@ export default function ReferenceList({ codes }: { codes?: readonly string[] } =
               <span className="hidden min-[380px]:block">
                 <Sparkline values={row.spark.map((v) => v / row.scale)} tone={tone} width={64} height={28} />
               </span>
-              <span className="w-[6.5rem] shrink-0 text-right">
+              <span className="min-w-[6.5rem] shrink-0 text-right">
                 <span className="num block font-semibold">{formatReference(row.value, row)}</span>
                 <span className={`num block text-xs font-medium ${toneClass(row.change)}`}>
                   {row.change == null ? "—" : `${row.change > 0 ? "+" : ""}${row.change.toFixed(2)}%`}

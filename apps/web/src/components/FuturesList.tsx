@@ -71,7 +71,7 @@ export default function FuturesList() {
                 {row.symbol}
               </span>
             </span>
-            <span className="w-[6.5rem] shrink-0 text-right">
+            <span className="min-w-[6.5rem] shrink-0 text-right">
               <span className="num block font-semibold">{fmtFuture(row.symbol, row.price)}</span>
               <span className={`num block text-xs font-medium ${tone(row.change)}`}>
                 {row.change == null ? "—" : `${row.change > 0 ? "+" : ""}${row.change.toFixed(2)}%`}
