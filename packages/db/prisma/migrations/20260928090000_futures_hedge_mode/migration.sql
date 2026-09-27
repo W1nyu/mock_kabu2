@@ -15,18 +15,31 @@ JOIN "auth"."users" u ON u.id = a.user_id
 WHERE a.id = o.account_id AND u.is_bot = false
   AND o.symbol IN ('KABUF', 'USDF', 'OILF', 'GASF', 'CPRF', 'GOLDF', 'CORNF')
   AND o.status IN ('OPEN', 'PARTIAL');
+-- 증거금을 묶은(hold_per_unit > 0) 주문은 첫 UPDATE가 정한 진입 방향을 그대로 둔다.
+-- hold_per_unit = 0인 주문만 청산 후보이며, 그중에서도 순포지션을 줄이는 방향(SELL이면 순롱, BUY면 순숏)만 후보다.
+-- 후보를 (created_at, id) 순으로 누적해 순포지션 절대값 이내인 만큼만 청산으로 인정한다 — 옛(양방향 이전) 모델의 "누적 청산" 판정을 그대로 재현.
+-- 누적 한도를 넘어 못 들어간 후보는 첫 UPDATE의 진입 방향에 그대로 남고, 뒤의 취소 INSERT가 그 주문들을 잡아낸다.
 UPDATE "order"."orders" o
-SET "position_side" = CASE
-  WHEN o.side = 'SELL' AND p.qty > 0 AND o.qty - o.filled_qty <= p.qty THEN 'LONG'
-  WHEN o.side = 'BUY' AND p.qty < 0 AND o.qty - o.filled_qty <= -p.qty THEN 'SHORT'
-  WHEN o.side = 'BUY' THEN 'LONG'
-  ELSE 'SHORT'
-END
-FROM "account"."futures_positions" p
-WHERE p.account_id = o.account_id AND p.symbol = o.symbol AND o.position_side IS NOT NULL
-  AND o.status IN ('OPEN', 'PARTIAL');
+SET "position_side" = CASE WHEN cand.side = 'SELL' THEN 'LONG' ELSE 'SHORT' END
+FROM (
+  SELECT o2.id, o2.side,
+    SUM(o2.qty - o2.filled_qty) OVER (
+      PARTITION BY o2.account_id, o2.symbol ORDER BY o2.created_at, o2.id
+    ) AS running_qty,
+    ABS(p.qty) AS net_qty_abs
+  FROM "order"."orders" o2
+  JOIN "account"."futures_positions" p
+    ON p.account_id = o2.account_id AND p.symbol = o2.symbol
+  WHERE o2.position_side IS NOT NULL
+    AND o2.status IN ('OPEN', 'PARTIAL')
+    AND o2.hold_per_unit = 0
+    AND ((o2.side = 'SELL' AND p.qty > 0) OR (o2.side = 'BUY' AND p.qty < 0))
+) cand
+WHERE cand.id = o.id AND cand.running_qty <= cand.net_qty_abs;
 
--- 진입으로 바뀌었는데 증거금을 묶지 않은(청산으로 접수됐던) 주문은 취소 요청한다.
+-- 진입으로 남았는데(위 청산 판정에 들지 못했거나 원래 진입 방향인) 증거금을 묶지 않은 주문은 취소 요청한다.
+-- 이 취소 행은 API 아웃박스 릴레이어가 발행한다: 배포는 점검 시간(신규 주문 없음, 봇 정지)에 실행하고,
+-- 점검이 끝나기 전에 릴레이어가 이 행들을 모두 발행해야 한다(그 전엔 옛 증거금 없는 주문이 살아 있을 수 있다).
 INSERT INTO "order"."outbox" ("event_id", "topic", "payload")
 SELECT e.id, 'order.cancel.requested',
   jsonb_build_object('topic', 'order.cancel.requested', 'eventId', e.id, 'orderId', o.id, 'symbol', o.symbol,
