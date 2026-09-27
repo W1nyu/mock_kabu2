@@ -15,6 +15,9 @@ services:
     environment:
       PGBACKREST_PG1_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
     # command 목록은 병합되지 않고 통째로 바뀐다 — 기본 파일의 인자를 모두 옮기고 메모리만 늘렸다.
+    # 2026-09-28: DB 12GB에 캐시 적중 95%, 컨테이너 한도(1.5GB)가 페이지 캐시까지 묶었다. VM(7.9GB)은
+    # 2.4GB만 쓰므로 한도 3GB·shared_buffers 768MB로 늘리고, SSD라 random_page_cost 1.1로 인덱스 스캔을
+    # 제값에 평가하게 한다(기본 4는 큰 범위 집계에서 순차 스캔을 고르게 만든다). 적용하려면 postgres 재시작.
     command:
       - postgres
       - -c
@@ -24,9 +27,11 @@ services:
       - -c
       - archive_timeout=900
       - -c
-      - shared_buffers=512MB
+      - shared_buffers=768MB
       - -c
-      - effective_cache_size=1GB
+      - effective_cache_size=2GB
+      - -c
+      - random_page_cost=1.1
       - -c
       - max_connections=80
       - -c
@@ -36,7 +41,7 @@ services:
       resources:
         limits:
           cpus: "3.00"
-          memory: 1536M
+          memory: 3072M
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - pgbackrest-data:/var/lib/pgbackrest
