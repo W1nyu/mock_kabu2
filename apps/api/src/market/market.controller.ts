@@ -177,19 +177,10 @@ export class MarketController {
   }
 
   private async computeOverview(sessionStart: Date) {
-    // 세션 전체를 2초마다 다시 합산하지 않는다: 5분 경계까지는 한 번 합산해 두고(OVERVIEW_BASE_TTL_MS),
-    // 경계 뒤 체결만 매번 더한다. 하루 수십만 건을 훑던 집계가 최근 몇 분치로 줄어든다.
-    // 경계는 최소 30초 전으로 — 경계 직전 시각으로 찍힌 체결이 늦게 커밋돼 고정 합계에서 빠지는 일이 없게.
-    const settled = Math.floor((Date.now() - OVERVIEW_COMMIT_SLACK_MS) / OVERVIEW_BASE_STEP_MS) * OVERVIEW_BASE_STEP_MS;
-    const cutoff = new Date(Math.max(sessionStart.getTime(), settled));
-    const [symbols, base, recent] = await Promise.all([
+    const [symbols, bySymbol] = await Promise.all([
       this.symbolsForSession(sessionStart),
-      this.cache.getOrCompute(`overview-base:${sessionStart.getTime()}:${cutoff.getTime()}`, OVERVIEW_BASE_TTL_MS, () =>
-        this.sessionStats(sessionStart, cutoff),
-      ),
-      this.sessionStats(cutoff, null),
+      this.incrementalSessionStats(sessionStart, [...ACTIVE_SYMBOLS]),
     ]);
-    const bySymbol = mergeSessionStats(base, recent);
     return symbols.map((marketSymbol) => {
       const row = bySymbol.get(marketSymbol.symbol);
       return {
@@ -211,8 +202,26 @@ export class MarketController {
     });
   }
 
-  /** 현물 종목별 체결 통계 [from, until). until이 null이면 지금까지. */
-  private sessionStats(from: Date, until: Date | null) {
+  /**
+   * 세션 전체를 2초마다 다시 합산하지 않는다: 5분 경계까지는 한 번 합산해 두고(OVERVIEW_BASE_TTL_MS),
+   * 경계 뒤 체결만 매번 더한다. 하루 수십만 건을 훑던 집계가 최근 몇 분치로 줄어든다.
+   * 경계는 최소 30초 전으로 — 경계 직전 시각으로 찍힌 체결이 늦게 커밋돼 고정 합계에서 빠지는 일이 없게.
+   */
+  private async incrementalSessionStats(sessionStart: Date, symbols: string[]): Promise<Map<string, SessionStatsRow>> {
+    const settled = Math.floor((Date.now() - OVERVIEW_COMMIT_SLACK_MS) / OVERVIEW_BASE_STEP_MS) * OVERVIEW_BASE_STEP_MS;
+    const cutoff = new Date(Math.max(sessionStart.getTime(), settled));
+    const scope = symbols.length === ACTIVE_SYMBOLS.size ? "all" : symbols.join(",");
+    const [base, recent] = await Promise.all([
+      this.cache.getOrCompute(`session-base:${scope}:${sessionStart.getTime()}:${cutoff.getTime()}`, OVERVIEW_BASE_TTL_MS, () =>
+        this.sessionStats(sessionStart, cutoff, symbols),
+      ),
+      this.sessionStats(cutoff, null, symbols),
+    ]);
+    return mergeSessionStats(base, recent);
+  }
+
+  /** 종목별 체결 통계 [from, until). until이 null이면 지금까지. */
+  private sessionStats(from: Date, until: Date | null, symbols: string[]) {
     return this.prisma.$queryRaw<SessionStatsRow[]>`
       SELECT
         t.symbol,
@@ -227,7 +236,7 @@ export class MarketController {
       JOIN market.symbols s ON s.symbol = t.symbol
       -- 종목 조건이 있어야 (symbol, created_at) 인덱스를 탄다. 없으면 체결 테이블 전체를 훑었다.
       -- 결과도 현물(ACTIVE_SYMBOLS)만 쓴다 — 선물·옵션 체결은 여기서 합칠 필요가 없다.
-      WHERE t.symbol IN (${Prisma.join([...ACTIVE_SYMBOLS])})
+      WHERE t.symbol IN (${Prisma.join(symbols)})
         AND t.created_at >= ${from} AND t.created_at >= ${LISTED_SINCE}
         ${until ? Prisma.sql`AND t.created_at < ${until}` : Prisma.empty}
       GROUP BY t.symbol
@@ -246,32 +255,11 @@ export class MarketController {
   }
 
   private async computeSummary(symbol: string, sessionStart: Date) {
-    const [symbols, [stats]] = await Promise.all([
+    const [symbols, bySymbol] = await Promise.all([
       this.symbolsForSession(sessionStart),
-      this.prisma.$queryRaw<
-        {
-          high: number | null;
-          low: number | null;
-          volume: bigint;
-          turnover: bigint;
-          buy_volume: bigint;
-          sell_volume: bigint;
-          last_trade_ts: Date | null;
-        }[]
-      >`
-        SELECT
-          MAX(t.price) AS high,
-          MIN(t.price) AS low,
-          COALESCE(SUM(t.qty), 0) AS volume,
-          COALESCE(SUM(t.price::bigint * t.qty), 0) AS turnover,
-          COALESCE(SUM(t.qty) FILTER (WHERE t.taker_side = 'BUY'), 0) AS buy_volume,
-          COALESCE(SUM(t.qty) FILTER (WHERE t.taker_side = 'SELL'), 0) AS sell_volume,
-          MAX(t.created_at) AS last_trade_ts
-        FROM matching.trades t
-        JOIN market.symbols s ON s.symbol = t.symbol
-        WHERE t.symbol = ${symbol} AND t.created_at >= ${sessionStart} AND t.created_at >= ${LISTED_SINCE}
-      `,
+      this.incrementalSessionStats(sessionStart, [symbol]),
     ]);
+    const stats = bySymbol.get(symbol);
     const marketSymbol = symbols.find((row) => row.symbol === symbol);
     if (!marketSymbol) throw new NotFoundException(`없는 종목: ${symbol}`);
 
