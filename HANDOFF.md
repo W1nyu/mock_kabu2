@@ -1,5 +1,11 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-27 — 첫 접속 언어: 그 외 브라우저는 영어 운영 적용 (227a7c7, web만 무점검)
+
+- 언어 결정 순서는 그대로(`mk_locale` 쿠키 → `Accept-Language`). 한국어·일본어·영어가 아니거나 헤더가 없으면 이제 한국어 대신 영어(`pickLocale` → `FALLBACK_LOCALE`). `DEFAULT_LOCALE`(ko)는 클라이언트 초기값으로만 남김. 테스트 `packages/shared/test/i18n.node-test.mjs`.
+- 기준은 IP 국가가 아니라 브라우저 언어(서버가 DNS-only라 `CF-IPCountry` 없음).
+- 운영: web만 교체, 롤백 태그 `pre-localeen-20260927`, 원본 `/tmp/src-before-pre-localeen-20260927.tgz`. 확인: jobradar.my에 fr·zh·빈 헤더 → `lang="en"`, ja → `ja`, ko → `ko`.
+
 ## 2026-09-26 — 첫 접속 라이트 모드·가입하기 버튼 운영 적용 (1dede1e, web만 무점검)
 
 - 기본 테마 라이트(`DEFAULT_THEME`). 사용자가 직접 바꾼 테마만 저장(예전 코드는 첫 방문에 dark를 자동 저장했다 — 그 브라우저는 계속 다크). `layout.tsx` 인라인 스크립트로 첫 화면 전에 저장값 적용.
