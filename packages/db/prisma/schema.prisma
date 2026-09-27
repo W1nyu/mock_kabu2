@@ -164,6 +164,8 @@ model Order {
   @@index([accountId, createdAt])
   /// Per-symbol OPEN/PARTIAL reconciliation for dedicated market makers.
   @@index([accountId, symbol, status, createdAt])
+  // + 부분 인덱스 orders_live_account_created_idx (account_id, created_at DESC) WHERE status IN (OPEN, PARTIAL)
+  //   — 마이그레이션 20260928100000에만 있다(Prisma 스키마는 부분 인덱스를 표현하지 못한다).
   @@index([symbol, status])
   @@map("orders")
   @@schema("order")
