@@ -321,6 +321,7 @@ export class MarketController {
       this.prisma.marketSymbol.findMany({ where: { kind: "STOCK" } }),
       this.prisma.indexEpoch.findMany({ orderBy: { startsAt: "asc" } }),
     ]);
+    if (symbols.length === 0) return [];
     const epochs = epochRows.map((row) => ({ startsAt: row.startsAt.getTime(), divisor: row.divisor, members: row.members }));
     const shares = new Map(symbols.map((s) => [s.symbol, Number(s.listedShares)]));
     const prior = range === "all" ? [] : await this.prisma.$queryRaw<{ symbol: string; close: number | null }[]>`
@@ -340,7 +341,10 @@ export class MarketController {
           to_timestamp(floor(extract(epoch FROM ts) / ${bucketSeconds}) * ${bucketSeconds}) AS bucket,
             symbol, ts, open, close
         FROM market.candles
-        WHERE interval ${candleSourceIntervals(bucketSeconds)} AND ts >= ${since}
+        -- 현물 종목 조건이 있어야 (symbol, interval, ts) 기본키로 종목마다 범위만 읽는다. 없으면 선물 봉까지
+        -- 봉 테이블 전체를 훑었다(운영에서 분당 2회 순차 스캔).
+        WHERE symbol IN (${Prisma.join(symbols.map((s) => s.symbol))})
+          AND interval ${candleSourceIntervals(bucketSeconds)} AND ts >= ${since}
       ) c
       ORDER BY bucket ASC, symbol ASC, ts DESC
     `;
