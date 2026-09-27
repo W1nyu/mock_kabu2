@@ -81,7 +81,7 @@ export const SERVER_MESSAGES: readonly ServerMessage[] = [
   ["자동 손절/익절은 매수 주문에만 붙일 수 있습니다", "Automatic stop / take profit can only be attached to buy orders", "自動損切り・利確は買い注文にのみ付けられます"],
   ["같은 멱등 키의 주문이 아직 처리 중입니다. 잠시 후 다시 조회하세요", "An order with the same idempotency key is still being processed. Check again shortly", "同じ冪等キーの注文がまだ処理中です。しばらくしてから再度確認してください"],
   ["한 주문의 수량은 {n}주까지입니다", "Up to {n} shares per order", "1回の注文数量は{n}株までです"],
-  ["지정가는 {n}원까지입니다", "Limit prices go up to ₩{n}", "指値は{n}ウォンまでです"],
+  ["지정가는 {n}원까지입니다", "Limit prices go up to ₩{n}", "指値は₩{n}までです"],
   ["옵션은 한 주문에 {n}계약까지입니다", "Up to {n} option contracts per order", "オプションは1回の注文で{n}枚までです"],
   ["선물은 한 주문에 {n}계약까지입니다", "Up to {n} futures contracts per order", "先物は1回の注文で{n}枚までです"],
   ["주문 증거금이 부족합니다", "Not enough margin for this order", "注文証拠金が不足しています"],
@@ -104,7 +104,7 @@ export const SERVER_MESSAGES: readonly ServerMessage[] = [
   ["익절 매도", "Take-profit sell", "利確売り"],
   ["돌파 매수", "Breakout buy", "ブレイクアウト買い"],
   ["눌림 매수", "Buy the dip", "押し目買い"],
-  ["{n}원", "₩{n}", "{n}ウォン"],
+  ["{n}원", "₩{n}", "₩{n}"],
 ];
 
 interface Compiled {

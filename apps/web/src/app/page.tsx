@@ -110,8 +110,8 @@ function parseTradeTick(data: any): TradeTick | null {
 function formatTurnoverManWon(turnover: number | undefined): string {
   if (turnover == null || !Number.isFinite(turnover)) return "—";
   const locale = getLocale();
-  // 영어는 만 단위가 없어 ₩12.3M처럼 줄여 쓴다. 일본어는 한국어처럼 万 단위.
-  if (locale === "en") return `₩${new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(turnover)}`;
+  // 영어·일본어는 ₩12.3M처럼 줄여 쓴다(만 단위는 한국어만).
+  if (locale !== "ko") return `₩${new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(turnover)}`;
   return translate(locale, "{n}만 원", { n: fmt.format(Math.round(turnover / 10_000)) });
 }
 

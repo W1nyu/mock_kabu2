@@ -113,5 +113,5 @@ export function newIdempotencyKey(): string {
 }
 
 export const fmt = new Intl.NumberFormat("ko-KR");
-/** 원화 금액: 1,234원 / ₩1,234 / 1,234ウォン (화면 언어) */
+/** 원화 금액: 1,234원 / ₩1,234 (영어·일본어 같은 표기) (화면 언어) */
 export const won = (n: number | bigint) => formatWon(fmt.format(n), getLocale());

@@ -131,9 +131,8 @@ export function localizedOptionName(symbol: string, locale: Locale): string {
   return `${family} ${type} ${def.slot}`;
 }
 
-/** 원화 금액 표기: 1,234원 / ₩1,234 / 1,234ウォン */
+/** 원화 금액 표기: 1,234원 / ₩1,234 (영어·일본어 같은 표기) */
 export function formatWon(text: string, locale: Locale): string {
-  if (locale === "en") return text.startsWith("-") ? `-₩${text.slice(1)}` : `₩${text}`;
-  if (locale === "ja") return `${text}ウォン`;
-  return `${text}원`;
+  if (locale === "ko") return `${text}원`;
+  return text.startsWith("-") ? `-₩${text.slice(1)}` : `₩${text}`;
 }

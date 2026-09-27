@@ -59,8 +59,8 @@ test("money is written the way each market reads it", () => {
   assert.equal(formatEokLocale(3_200, "en"), "₩320B");
   assert.equal(formatEokLocale(12_000, "en"), "₩1.2T");
   assert.equal(formatEokLocale(5, "en"), "₩500M");
-  assert.equal(formatEokLocale(3_200, "ja"), "3,200億ウォン");
-  assert.equal(formatEokLocale(12_000, "ja"), "1兆2,000億ウォン");
+  assert.equal(formatEokLocale(3_200, "ja"), "₩320B");
+  assert.equal(formatEokLocale(12_000, "ja"), "₩1.2T");
 });
 
 function seededRandom(seed: number): RandomSource {

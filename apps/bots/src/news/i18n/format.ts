@@ -8,16 +8,8 @@ import type { NewsLocale } from "./index";
 const en = new Intl.NumberFormat("en-US");
 const ja = new Intl.NumberFormat("ja-JP");
 
-/** 억원 → ₩320B / 3,200億ウォン (반올림된 억 단위를 받는다) */
-export function formatEokLocale(eok: number, locale: NewsLocale): string {
-  if (locale === "ja") {
-    if (eok >= 10_000) {
-      const cho = Math.floor(eok / 10_000);
-      const rest = eok % 10_000;
-      return rest === 0 ? `${cho}兆ウォン` : `${cho}兆${ja.format(rest)}億ウォン`;
-    }
-    return `${ja.format(eok)}億ウォン`;
-  }
+/** 억원 → ₩320B (영어·일본어 같은 표기, 반올림된 억 단위를 받는다) */
+export function formatEokLocale(eok: number, _locale: NewsLocale): string {
   // 1억 = 1억 원 = 100M
   const won = eok * 100_000_000;
   if (won >= 1_000_000_000_000) return `₩${trim(won / 1_000_000_000_000)}T`;
@@ -30,14 +22,14 @@ function trim(value: number): string {
   return en.format(rounded);
 }
 
-/** 원화 가격 → ₩12,000 / 12,000ウォン */
-export function formatWonLocale(value: number, locale: NewsLocale): string {
-  return locale === "en" ? `₩${en.format(value)}` : `${ja.format(value)}ウォン`;
+/** 원화 가격 → ₩12,000 (영어·일본어 같은 표기) */
+export function formatWonLocale(value: number, _locale: NewsLocale): string {
+  return `₩${en.format(value)}`;
 }
 
 /** level 슬롯(환율·유가 수준) — 단위: 원·달러·없음 */
 export function formatLevelLocale(text: string, unit: string, locale: NewsLocale): string {
-  if (unit === "원") return locale === "en" ? `₩${text}` : `${text}ウォン`;
+  if (unit === "원") return `₩${text}`;
   if (unit === "달러") return locale === "en" ? `$${text}` : `${text}ドル`;
   return text;
 }
