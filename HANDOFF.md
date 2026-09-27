@@ -7,6 +7,7 @@
 - DB: 부분 인덱스 `orders_live_account_created_idx`(마이그레이션 20260928100000, CONCURRENTLY; 합성 200만 행 39ms→0.025ms, prepared 8회째도 사용)(3b57da8). GCP compose: postgres 메모리 3GB·shared_buffers 768MB·effective_cache_size 2GB·random_page_cost 1.1(2647c64) — **적용 시 postgres 재시작(수 초 중단)**.
 - 웹: `lib/snapshot`(탭 sessionStorage) — 대시보드·증권·랭킹·종목 화면이 마지막 응답을 먼저 그림(a6f037c), 상단 메뉴가 목록 스냅샷을 미리 받아 둠(75b15f0). `sharedGet`으로 같은 공개 GET 합치기(2dd8aeb·2f38bdb). 폰트 CDN preconnect(fb401e7·a656d8c).
 - 봇: 시장 관찰 루프 중복 실행 방지(00f93ec). 운영 로그 오류 0, 현물·선물 전 종목 거래 중, 무체결 옵션은 retired K 계열·깊은 ITM/먼 OTM.
+- 08:00 이후 추가: 실시간 체결가 0.2초 묶음 반영 — 대시보드·증권·종목 띠·지수 패널·선물 목록·옵션 체인(e6fdc76·ce45f55·b521cac; 대시보드 거래대금은 스냅샷 세대 번호로 중복 가산 방지). 시장 지수 봉 조회를 현물 종목으로 한정(3325ad2, 운영 1일 132→82ms; 10분 측정에서 candles 순차 스캔 20회의 출처). 10분 측정: trades 순차 스캔 120회·9,258만 행(= overview/summary 세션 집계, 증분 합산 배포로 해소 예정). `isTradingFeeExempt`(auth.users 초당 ~32회)는 수수료 정합성 기준이라 캐시하지 않았다.
 - 배포 시: api·web·bots 재빌드 + `prisma migrate deploy`(인덱스). 웹 변경은 단위 테스트·타입 검사만(로컬 API가 꺼져 있어 화면 확인은 못 함).
 
 ## 2026-09-28 04:21 KST — 수수료 + 현물 변동폭 50% 축소 운영 적용, '원' 줄바꿈 수정 (e0b8596·aa5bab6)
