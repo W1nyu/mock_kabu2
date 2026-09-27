@@ -159,6 +159,9 @@ export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
    */
   async daily(accountId: string, days = 30): Promise<DailyPerformance[]> {
     const take = Math.min(Math.max(1, days), 365);
+    // 가입 이후 날마다 스냅샷이 있으므로(오래된 것은 1시간 간격으로 남김) 최근 take+1일이면 충분하다.
+    // 서버가 멈춘 날이 있어도 결과가 같도록 여유 7일을 둔다. 예전엔 계정의 전체 이력을 읽었다(운영 ~150ms).
+    const since = new Date(Date.now() - (take + 7) * 86_400_000);
     const rows = await this.prisma.$queryRaw<
       {
         day: Date;
@@ -173,7 +176,7 @@ export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
         FROM (
           SELECT date_trunc('day', ts + interval '9 hours') AS day, ts, equity, cash
           FROM account.equity_snapshots
-          WHERE account_id = ${accountId}
+          WHERE account_id = ${accountId} AND ts >= ${since}
         ) s
         ORDER BY day DESC, ts DESC
       ),
@@ -182,9 +185,9 @@ export class EquitySnapshotService implements OnModuleInit, OnModuleDestroy {
         SELECT date_trunc('day', at + interval '9 hours') AS day,
           SUM(realized) AS realized, COUNT(*) AS fills
         FROM (
-          SELECT traded_at AS at, realized FROM account.realized_pnl WHERE account_id = ${accountId}
+          SELECT traded_at AS at, realized FROM account.realized_pnl WHERE account_id = ${accountId} AND traded_at >= ${since}
           UNION ALL
-          SELECT created_at AS at, realized FROM account.futures_realized WHERE account_id = ${accountId}
+          SELECT created_at AS at, realized FROM account.futures_realized WHERE account_id = ${accountId} AND created_at >= ${since}
         ) x
         GROUP BY 1
       )
