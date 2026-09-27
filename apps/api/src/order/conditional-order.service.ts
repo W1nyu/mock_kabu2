@@ -23,6 +23,7 @@ import {
   futureDef,
   isOnTick,
   isOption,
+  rowSideOf,
   tickSizeOf,
   trailingTrigger,
   type ConditionalOrderDto,
@@ -36,6 +37,7 @@ import { BackgroundStatusRegistry } from "../core/background-status";
 import { maintenanceWindow } from "../common/maintenance-window";
 import { PRISMA, REDIS_SUB } from "../core/tokens";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
+import { isBotAccount } from "./futures-margin";
 import { OrderService } from "./order.service";
 
 export interface PlaceConditionalOrderDto {
@@ -72,6 +74,7 @@ interface WaitingRow {
   qty: number;
   orderType: OrderType;
   limitPrice: number | null;
+  positionSide: string | null;
   ocoGroupId: string | null;
   trailBps: number | null;
   watermark: number | null;
@@ -164,7 +167,8 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     const trailBps = dto.trailBps != null ? Number(dto.trailBps) : null;
 
     this.assertSymbolSideQty(symbol, side, qty);
-    await this.assertFuturesClosing(accountId, symbol, side, qty);
+    const positionSide = await this.hedgeSideFor(accountId, symbol, side);
+    await this.assertFuturesClosing(accountId, symbol, side, qty, positionSide);
     if (orderType !== "MARKET" && orderType !== "LIMIT") throw new BadRequestException("orderType은 MARKET/LIMIT");
     if (orderType === "LIMIT" && (!Number.isInteger(limitPrice) || limitPrice! <= 0)) {
       throw new BadRequestException("지정가는 양의 정수");
@@ -210,6 +214,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
         qty,
         orderType,
         limitPrice: orderType === "LIMIT" ? limitPrice : null,
+        positionSide,
         trailBps,
         watermark,
       },
@@ -229,7 +234,8 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     const lowerPrice = Number(dto.lowerPrice);
     const upperPrice = Number(dto.upperPrice);
     this.assertSymbolSideQty(symbol, side, qty);
-    await this.assertFuturesClosing(accountId, symbol, side, qty);
+    const positionSide = await this.hedgeSideFor(accountId, symbol, side);
+    await this.assertFuturesClosing(accountId, symbol, side, qty, positionSide);
     if (!Number.isInteger(lowerPrice) || lowerPrice <= 0 || !Number.isInteger(upperPrice) || upperPrice <= 0) {
       throw new BadRequestException("트리거 가격은 양의 정수");
     }
@@ -248,7 +254,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     const rows = await this.prisma.$transaction(
       legs.map((leg) =>
         this.prisma.conditionalOrder.create({
-          data: { accountId, symbol, side, qty, orderType: "MARKET", ocoGroupId, ...leg },
+          data: { accountId, symbol, side, qty, orderType: "MARKET", ocoGroupId, positionSide, ...leg },
         }),
       ),
     );
@@ -263,14 +269,22 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     if (!Number.isInteger(qty) || qty <= 0) throw new BadRequestException("수량은 양의 정수");
   }
 
+  /** 선물 예약의 방향: 사람 계정은 늘 청산이라 매도 = 롱, 매수 = 숏. 봇·선물 아님은 null. */
+  private async hedgeSideFor(accountId: string, symbol: string, side: OrderSide): Promise<"LONG" | "SHORT" | null> {
+    if (!futureDef(symbol)) return null;
+    if (await isBotAccount(this.prisma, accountId)) return null;
+    return side === "SELL" ? "LONG" : "SHORT";
+  }
+
   /** 이 방향으로 지금 청산할 수 있는 선물 계약 수(매도는 롱, 매수는 숏). 선물이 아니면 null. */
-  private async futuresClosable(accountId: string, symbol: string, side: OrderSide): Promise<number | null> {
+  private async futuresClosable(accountId: string, symbol: string, side: OrderSide, positionSide: string | null): Promise<number | null> {
     if (!futureDef(symbol)) return null;
     const position = await this.prisma.futuresPosition.findUnique({
-      where: { accountId_symbol: { accountId, symbol } },
+      where: { accountId_symbol_positionSide: { accountId, symbol, positionSide: rowSideOf(positionSide) } },
       select: { qty: true },
     });
     const held = position?.qty ?? 0;
+    if (positionSide != null) return Math.abs(held);
     return side === "SELL" ? Math.max(0, held) : Math.max(0, -held);
   }
 
@@ -278,8 +292,14 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
    * 선물 예약은 보유 포지션을 닫는 방향·수량만 받는다. 포지션 없이 걸어 두면 나중에 발동해 새 포지션을
    * (증거금 확인 없이 사용자가 모르는 사이) 여는 주문이 된다.
    */
-  private async assertFuturesClosing(accountId: string, symbol: string, side: OrderSide, qty: number): Promise<void> {
-    const closable = await this.futuresClosable(accountId, symbol, side);
+  private async assertFuturesClosing(
+    accountId: string,
+    symbol: string,
+    side: OrderSide,
+    qty: number,
+    positionSide: string | null,
+  ): Promise<void> {
+    const closable = await this.futuresClosable(accountId, symbol, side, positionSide);
     if (closable == null) return;
     if (closable === 0) {
       throw new UnprocessableEntityException("선물 예약 주문은 보유 포지션을 청산하는 방향으로만 걸 수 있습니다");
@@ -410,7 +430,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
 
       // 선물: 발동 시점 포지션만큼만 청산한다. 포지션이 없거나 뒤집혔으면 새 포지션을 열지 않고 취소.
       let qty = row.qty;
-      const closable = await this.futuresClosable(row.accountId, row.symbol, row.side);
+      const closable = await this.futuresClosable(row.accountId, row.symbol, row.side, row.positionSide ?? null);
       if (closable != null) {
         if (closable === 0) {
           await this.prisma.conditionalOrder.update({
@@ -432,6 +452,7 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
           type: row.orderType,
           qty,
           ...(row.orderType === "LIMIT" && row.limitPrice != null ? { price: row.limitPrice } : {}),
+          ...(row.positionSide ? { positionSide: row.positionSide as "LONG" | "SHORT" } : {}),
         });
         triggeredOrderId = order.id;
       } catch (error) {
@@ -498,9 +519,9 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
    * 포지션이 사라진(전량 청산·일일 정산·반대매매·뒤집기) 선물 예약을 취소하고 남은 행만 돌려준다.
    * 선물 화면은 포지션이 없으면 예약 목록을 보여 주지 않으므로, 남겨 두면 사용자가 모르는 예약이 된다.
    */
-  private async sweepOrphanFutures<T extends { id: string; accountId: string; symbol: string; side: string; ocoGroupId: string | null }>(
-    rows: T[],
-  ): Promise<T[]> {
+  private async sweepOrphanFutures<
+    T extends { id: string; accountId: string; symbol: string; side: string; positionSide: string | null; ocoGroupId: string | null },
+  >(rows: T[]): Promise<T[]> {
     const futures = rows.filter((row) => futureDef(row.symbol) != null);
     if (futures.length === 0) return rows;
     const positions = await this.prisma.futuresPosition.findMany({
@@ -510,11 +531,13 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
           return { accountId, symbol };
         }),
       },
-      select: { accountId: true, symbol: true, qty: true },
+      select: { accountId: true, symbol: true, positionSide: true, qty: true },
     });
-    const held = new Map(positions.map((p) => [`${p.accountId}|${p.symbol}`, p.qty]));
+    const held = new Map(positions.map((p) => [`${p.accountId}|${p.symbol}|${p.positionSide}`, p.qty]));
     const orphans = futures.filter((row) => {
-      const qty = held.get(`${row.accountId}|${row.symbol}`) ?? 0;
+      const side = rowSideOf(row.positionSide);
+      const qty = held.get(`${row.accountId}|${row.symbol}|${side}`) ?? 0;
+      if (side !== "NET") return qty === 0;
       return row.side === "SELL" ? qty <= 0 : qty >= 0;
     });
     if (orphans.length === 0) return rows;
@@ -567,6 +590,7 @@ function toWaiting(row: {
   qty: number;
   orderType: string;
   limitPrice: number | null;
+  positionSide: string | null;
   ocoGroupId: string | null;
   trailBps: number | null;
   watermark: number | null;
@@ -581,6 +605,7 @@ function toWaiting(row: {
     qty: row.qty,
     orderType: row.orderType as OrderType,
     limitPrice: row.limitPrice,
+    positionSide: row.positionSide,
     ocoGroupId: row.ocoGroupId,
     trailBps: row.trailBps,
     watermark: row.watermark,
@@ -596,6 +621,7 @@ function toDto(row: {
   qty: number;
   orderType: string;
   limitPrice: number | null;
+  positionSide: string | null;
   ocoGroupId: string | null;
   trailBps: number | null;
   watermark: number | null;
@@ -615,6 +641,7 @@ function toDto(row: {
     qty: row.qty,
     orderType: row.orderType as OrderType,
     limitPrice: row.limitPrice,
+    positionSide: row.positionSide,
     ocoGroupId: row.ocoGroupId,
     trailBps: row.trailBps,
     watermark: row.watermark,

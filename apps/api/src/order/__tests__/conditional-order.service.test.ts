@@ -15,6 +15,7 @@ function waitingRow(overrides: Partial<Record<string, unknown>> = {}) {
     qty: 5,
     orderType: "MARKET",
     limitPrice: null,
+    positionSide: null,
     ocoGroupId: null,
     trailBps: null,
     watermark: null,
@@ -33,23 +34,30 @@ function build(
     rows?: ReturnType<typeof waitingRow>[];
     claimCount?: number;
     placeError?: Error;
-    /** 선물 포지션 "계좌|종목" → 부호 있는 계약 수 */
+    /** 선물 포지션 "계좌|종목|방향(LONG/SHORT/NET)" → 부호 있는 계약 수 */
     positions?: Map<string, number>;
+    /** 계정이 봇인지. 기본값 true — 지정 안 하면 기존 NET(순포지션) 테스트와 동일하게 동작 */
+    isBot?: boolean;
   } = {},
 ) {
   const positions = options.positions ?? new Map<string, number>();
+  const isBot = options.isBot ?? true;
   const prisma = {
+    account: { findUnique: vi.fn().mockResolvedValue({ userId: "u" }) },
+    user: { findUnique: vi.fn().mockResolvedValue({ isBot }) },
     futuresPosition: {
       findUnique: vi.fn().mockImplementation(({ where }: any) => {
-        const qty = positions.get(`${where.accountId_symbol.accountId}|${where.accountId_symbol.symbol}`);
+        const { accountId, symbol, positionSide } = where.accountId_symbol_positionSide;
+        const qty = positions.get(`${accountId}|${symbol}|${positionSide}`);
         return Promise.resolve(qty == null ? null : { qty });
       }),
       findMany: vi.fn().mockImplementation(({ where }: any) =>
         Promise.resolve(
-          (where.OR as { accountId: string; symbol: string }[]).flatMap((k) => {
-            const qty = positions.get(`${k.accountId}|${k.symbol}`);
-            return qty == null ? [] : [{ ...k, qty }];
-          }),
+          (where.OR as { accountId: string; symbol: string }[]).flatMap((k) =>
+            [...positions.entries()]
+              .filter(([key]) => key.startsWith(`${k.accountId}|${k.symbol}|`))
+              .map(([key, qty]) => ({ accountId: k.accountId, symbol: k.symbol, positionSide: key.split("|")[2], qty })),
+          ),
         ),
       ),
     },
@@ -184,30 +192,52 @@ describe("ConditionalOrderService trigger loop", () => {
   });
 });
 
-describe("ConditionalOrderService placement validation", () => {
-  function buildForPlace(lastPrice: number, waitingCount = 0) {
-    const prisma = {
-      conditionalOrder: {
-        findMany: vi.fn().mockResolvedValue([]),
-        count: vi.fn().mockResolvedValue(waitingCount),
-        create: vi.fn().mockImplementation(({ data }: any) =>
-          Promise.resolve({
-            ...waitingRow(),
-            ...data,
-            id: `${data.direction}-${data.triggerPrice}`,
-            createdAt: new Date(),
-          }),
-        ),
-      },
-      marketSymbol: { findUnique: vi.fn().mockResolvedValue({ symbol: "KABU", lastPrice }) },
-      $transaction: vi.fn().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops)),
-    };
-    const realtime = { notifyAccount: vi.fn() };
-    const sub = { on: vi.fn(), off: vi.fn(), psubscribe: vi.fn().mockResolvedValue(1) };
-    const service = new ConditionalOrderService(prisma as never, sub as never, {} as never, realtime as never);
-    return { service, prisma };
-  }
+function buildForPlace(
+  lastPrice: number,
+  waitingCount = 0,
+  extra: {
+    /** 선물 포지션 "계좌|종목|방향(LONG/SHORT/NET)" → 부호 있는 계약 수 */
+    positions?: Map<string, number>;
+    /** 계정이 봇인지. 기본값 true */
+    isBot?: boolean;
+    orders?: { place: ReturnType<typeof vi.fn> };
+  } = {},
+) {
+  const positions = extra.positions ?? new Map<string, number>();
+  const isBot = extra.isBot ?? true;
+  const prisma = {
+    account: { findUnique: vi.fn().mockResolvedValue({ userId: "u" }) },
+    user: { findUnique: vi.fn().mockResolvedValue({ isBot }) },
+    futuresPosition: {
+      findUnique: vi.fn().mockImplementation(({ where }: any) => {
+        const { accountId, symbol, positionSide } = where.accountId_symbol_positionSide;
+        const qty = positions.get(`${accountId}|${symbol}|${positionSide}`);
+        return Promise.resolve(qty == null ? null : { qty });
+      }),
+    },
+    conditionalOrder: {
+      findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(waitingCount),
+      create: vi.fn().mockImplementation(({ data }: any) =>
+        Promise.resolve({
+          ...waitingRow(),
+          ...data,
+          id: `${data.direction}-${data.triggerPrice}`,
+          createdAt: new Date(),
+        }),
+      ),
+    },
+    marketSymbol: { findUnique: vi.fn().mockResolvedValue({ symbol: "KABU", lastPrice }) },
+    $transaction: vi.fn().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops)),
+  };
+  const realtime = { notifyAccount: vi.fn() };
+  const sub = { on: vi.fn(), off: vi.fn(), psubscribe: vi.fn().mockResolvedValue(1) };
+  const orders = extra.orders ?? { place: vi.fn().mockResolvedValue({ id: "order-9" }) };
+  const service = new ConditionalOrderService(prisma as never, sub as never, orders as never, realtime as never);
+  return { service, prisma, orders };
+}
 
+describe("ConditionalOrderService placement validation", () => {
   it("rejects a trigger the current price already satisfies", async () => {
     const { service } = buildForPlace(1_000);
     await expect(
@@ -299,7 +329,7 @@ describe("futures conditional orders only ever close the position", () => {
     waitingRow({ symbol: "KABUF", side: "SELL", direction: "AT_OR_BELOW", triggerPrice: 87_000, qty: 5, ...overrides });
 
   it("clamps the stop to the contracts still held when it fires", async () => {
-    const { service, orders } = build({ rows: [futureRow()], positions: new Map([["acct-1|KABUF", 3]]) });
+    const { service, orders } = build({ rows: [futureRow()], positions: new Map([["acct-1|KABUF|NET", 3]]) });
     await (service as any).reloadIndex();
 
     service.onTick("KABUF", 86_995);
@@ -309,9 +339,9 @@ describe("futures conditional orders only ever close the position", () => {
   });
 
   it("cancels instead of opening a new position when the position is gone at trigger time", async () => {
-    const { service, prisma, orders, positions } = build({ rows: [futureRow()], positions: new Map([["acct-1|KABUF", 5]]) });
+    const { service, prisma, orders, positions } = build({ rows: [futureRow()], positions: new Map([["acct-1|KABUF|NET", 5]]) });
     await (service as any).reloadIndex();
-    positions.set("acct-1|KABUF", 0); // 사용자가 전량 청산했다(다음 인덱스 재적재 전)
+    positions.set("acct-1|KABUF|NET", 0); // 사용자가 전량 청산했다(다음 인덱스 재적재 전)
 
     service.onTick("KABUF", 86_000);
     await flush();
@@ -327,8 +357,8 @@ describe("futures conditional orders only ever close the position", () => {
     const { service, prisma, orders } = build({
       rows: [futureRow(), futureRow({ id: "cond-2", accountId: "acct-2" })],
       positions: new Map([
-        ["acct-1|KABUF", 2],
-        ["acct-2|KABUF", -4], // 롱이 숏으로 뒤집혔다 — 매도 손절은 의미가 없다
+        ["acct-1|KABUF|NET", 2],
+        ["acct-2|KABUF|NET", -4], // 롱이 숏으로 뒤집혔다 — 매도 손절은 의미가 없다
       ]),
     });
     await (service as any).reloadIndex();
@@ -348,5 +378,62 @@ describe("futures conditional orders only ever close the position", () => {
     await expect(
       service.place("acct-1", { symbol: "KABUF", side: "SELL", direction: "AT_OR_BELOW", triggerPrice: 87_000, qty: 1 }),
     ).rejects.toThrow(/청산하는 방향으로만/);
+  });
+});
+
+describe("human futures conditional orders close a hedge side (LONG/SHORT), not the net position", () => {
+  it("assigns the position side that the order side closes and clamps qty to what that side holds", async () => {
+    const positions = new Map([
+      ["acct-1|KABUF|LONG", 3],
+      ["acct-1|KABUF|SHORT", -2],
+    ]);
+    const { service } = buildForPlace(86_500, 0, { positions, isBot: false });
+
+    const row = await service.place("acct-1", {
+      symbol: "KABUF",
+      side: "BUY",
+      qty: 2,
+      direction: "AT_OR_ABOVE",
+      triggerPrice: 87_000,
+    });
+    expect(row.positionSide).toBe("SHORT");
+
+    await expect(
+      service.place("acct-1", {
+        symbol: "KABUF",
+        side: "BUY",
+        qty: 3,
+        direction: "AT_OR_ABOVE",
+        triggerPrice: 87_000,
+      }),
+    ).rejects.toThrow(/청산할 수 있는 수량은 2계약/);
+  });
+
+  it("passes the position side through to the market order when it fires", async () => {
+    const shortStop = waitingRow({
+      symbol: "KABUF",
+      side: "BUY",
+      direction: "AT_OR_ABOVE",
+      triggerPrice: 87_000,
+      qty: 2,
+      positionSide: "SHORT",
+    });
+    const { service, orders } = build({
+      rows: [shortStop],
+      isBot: false,
+      positions: new Map([["acct-1|KABUF|SHORT", -2]]),
+    });
+    await (service as any).reloadIndex();
+
+    service.onTick("KABUF", 87_000);
+    await flush();
+
+    expect(orders.place).toHaveBeenCalledWith("acct-1", {
+      symbol: "KABUF",
+      side: "BUY",
+      type: "MARKET",
+      qty: 2,
+      positionSide: "SHORT",
+    });
   });
 });

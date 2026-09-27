@@ -14,6 +14,8 @@ export interface ConditionalOrderDto {
   qty: number;
   orderType: OrderType;
   limitPrice: number | null;
+  /** 양방향 선물 예약의 청산 방향 LONG | SHORT. null/undefined = 순포지션(봇·옵션·현물) */
+  positionSide?: string | null;
   /** OCO 짝 그룹. 같은 그룹의 한 행이 발동하면 나머지는 자동 취소 */
   ocoGroupId: string | null;
   /** 트레일링 거리(bps). null이면 고정 트리거 */
