@@ -42,4 +42,58 @@ describe("MemoCache", () => {
     cache.invalidate("leaderboard:");
     expect(cache.size).toBe(1);
   });
+it("serves the stale value at once and refreshes in the background within staleMs", async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = new MemoCache();
+      let resolve!: (value: number) => void;
+      const compute = vi
+        .fn<() => Promise<number>>()
+        .mockResolvedValueOnce(1)
+        .mockImplementationOnce(() => new Promise<number>((r) => (resolve = r)));
+      expect(await cache.getOrCompute("k", 1_000, compute, { staleMs: 5_000 })).toBe(1);
+
+      vi.advanceTimersByTime(2_000);
+      // 만료됐지만 stale 구간이라 기다리지 않고 이전 값, 갱신은 한 번만 시작된다.
+      expect(await cache.getOrCompute("k", 1_000, compute, { staleMs: 5_000 })).toBe(1);
+      expect(await cache.getOrCompute("k", 1_000, compute, { staleMs: 5_000 })).toBe(1);
+      expect(compute).toHaveBeenCalledTimes(2);
+
+      resolve(2);
+      await vi.runAllTicks();
+      await Promise.resolve();
+      expect(await cache.getOrCompute("k", 1_000, compute, { staleMs: 5_000 })).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits for a fresh value once the stale window has passed", async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = new MemoCache();
+      const compute = vi.fn<() => Promise<number>>().mockResolvedValueOnce(1).mockResolvedValueOnce(2);
+      await cache.getOrCompute("k", 1_000, compute, { staleMs: 5_000 });
+      vi.advanceTimersByTime(7_000);
+      expect(await cache.getOrCompute("k", 1_000, compute, { staleMs: 5_000 })).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the stale value when a background refresh fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = new MemoCache();
+      const compute = vi.fn<() => Promise<number>>().mockRejectedValue(new Error("db down")).mockResolvedValueOnce(1);
+      await cache.getOrCompute("k", 1_000, compute, { staleMs: 5_000 });
+      vi.advanceTimersByTime(2_000);
+      expect(await cache.getOrCompute("k", 1_000, compute, { staleMs: 5_000 })).toBe(1);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(await cache.getOrCompute("k", 1_000, compute, { staleMs: 5_000 })).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

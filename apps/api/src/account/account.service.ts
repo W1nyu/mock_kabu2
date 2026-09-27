@@ -9,6 +9,7 @@ import { PRISMA } from "../core/tokens";
 
 /** 랭킹은 모든 사용자 계정을 LATERAL 조인으로 훑는다 — 보는 사람 수만큼 반복할 이유가 없다. */
 const LEADERBOARD_TTL_MS = 10_000;
+const LEADERBOARD_STALE_MS = 5 * 60_000;
 
 export type LeaderboardPeriod = "all" | "today" | "week";
 
@@ -300,9 +301,10 @@ export class AccountService {
    */
   async getLeaderboard(viewerAccountId: string, limit = 20, period: LeaderboardPeriod = "all") {
     // 순위표 자체는 보는 사람과 무관하니 기간별로 한 번만 계산하고, `me`만 요청마다 붙인다.
-    const ranked = await this.cache.getOrCompute(`leaderboard:${period}`, LEADERBOARD_TTL_MS, () =>
-      this.rankAccounts(period),
-    );
+    // 만료 뒤 5분까지는 이전 순위를 바로 주고 뒤에서 다시 계산한다 — 랭킹 화면이 무거운 집계를 기다리지 않는다.
+    const ranked = await this.cache.getOrCompute(`leaderboard:${period}`, LEADERBOARD_TTL_MS, () => this.rankAccounts(period), {
+      staleMs: LEADERBOARD_STALE_MS,
+    });
     const withViewer = ranked.map((row) => ({ ...row, me: row.accountId === viewerAccountId }));
     const me = withViewer.find((row) => row.me) ?? null;
     const top = withViewer.slice(0, Math.min(Math.max(1, limit), 100));

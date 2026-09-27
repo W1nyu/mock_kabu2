@@ -3,6 +3,13 @@ import { Injectable } from "@nestjs/common";
 interface Entry {
   value: unknown;
   expiresAt: number;
+  /** 이 시각까지는 만료됐어도 이전 값을 바로 돌려주고 뒤에서 다시 계산한다(stale-while-revalidate). */
+  staleUntil: number;
+}
+
+export interface MemoOptions {
+  /** 만료 뒤에도 이만큼은 이전 값을 즉시 돌려주고 백그라운드에서 갱신한다. 기본 0(기다림). */
+  staleMs?: number;
 }
 
 /**
@@ -17,17 +24,26 @@ export class MemoCache {
   private readonly inflight = new Map<string, Promise<unknown>>();
   private sweepCounter = 0;
 
-  async getOrCompute<T>(key: string, ttlMs: number, compute: () => Promise<T>): Promise<T> {
+  async getOrCompute<T>(key: string, ttlMs: number, compute: () => Promise<T>, options: MemoOptions = {}): Promise<T> {
     const now = Date.now();
     const hit = this.entries.get(key);
     if (hit && hit.expiresAt > now) return hit.value as T;
+    // 만료 직후라면 기다리게 하지 않는다 — 이전 값을 주고, 갱신은 single-flight로 한 번만 돌린다.
+    if (hit && hit.staleUntil > now) {
+      if (!this.inflight.has(key)) this.refresh(key, ttlMs, compute, options).catch(() => undefined);
+      return hit.value as T;
+    }
 
     const pending = this.inflight.get(key);
     if (pending) return pending as Promise<T>;
+    return this.refresh(key, ttlMs, compute, options);
+  }
 
+  private refresh<T>(key: string, ttlMs: number, compute: () => Promise<T>, options: MemoOptions): Promise<T> {
     const task = compute()
       .then((value) => {
-        this.entries.set(key, { value, expiresAt: Date.now() + ttlMs });
+        const expiresAt = Date.now() + ttlMs;
+        this.entries.set(key, { value, expiresAt, staleUntil: expiresAt + (options.staleMs ?? 0) });
         this.maybeSweep();
         return value;
       })
@@ -44,7 +60,7 @@ export class MemoCache {
   private maybeSweep(): void {
     if (++this.sweepCounter % 200 !== 0) return;
     const now = Date.now();
-    for (const [key, entry] of this.entries) if (entry.expiresAt <= now) this.entries.delete(key);
+    for (const [key, entry] of this.entries) if (Math.max(entry.expiresAt, entry.staleUntil) <= now) this.entries.delete(key);
   }
 
   get size(): number {

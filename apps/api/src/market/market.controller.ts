@@ -23,6 +23,56 @@ import { PRISMA, REDIS } from "../core/tokens";
  * 1분 봉·호가·최근 체결은 실시간성이 우선이라 캐시하지 않는다.
  */
 const SUMMARY_TTL_MS = 2_000;
+/**
+ * 만료 뒤 이 시간 안의 요청은 이전 값을 바로 받고 갱신은 뒤에서 한 번만 돈다. 첫 화면은 기다리지 않고,
+ * 실시간 값은 소켓 체결이 lastTradeTs 뒤로 이어 붙이므로 몇 초 묵은 스냅샷이어도 화면은 곧 맞춰진다.
+ */
+const SUMMARY_STALE = { staleMs: 10_000 };
+/** 전 종목 세션 통계는 이 경계까지를 한 번 합산해 두고 그 뒤 체결만 매번 더한다. */
+const OVERVIEW_BASE_STEP_MS = 5 * 60_000;
+const OVERVIEW_BASE_TTL_MS = OVERVIEW_BASE_STEP_MS + 60_000;
+const OVERVIEW_COMMIT_SLACK_MS = 30_000;
+
+interface SessionStatsRow {
+  symbol: string;
+  high: number | null;
+  low: number | null;
+  volume: bigint;
+  turnover: bigint;
+  buy_volume: bigint;
+  sell_volume: bigint;
+  last_trade_ts: Date | null;
+}
+
+/** 두 구간의 종목별 통계를 합친다(고가·저가는 극값, 수량·대금은 합, 마지막 체결은 늦은 쪽). */
+export function mergeSessionStats(...parts: SessionStatsRow[][]): Map<string, SessionStatsRow> {
+  const merged = new Map<string, SessionStatsRow>();
+  for (const rows of parts) {
+    for (const row of rows) {
+      const prev = merged.get(row.symbol);
+      if (!prev) {
+        merged.set(row.symbol, { ...row });
+        continue;
+      }
+      const pick = (a: number | null, b: number | null, f: (x: number, y: number) => number) =>
+        a == null ? b : b == null ? a : f(a, b);
+      merged.set(row.symbol, {
+        symbol: row.symbol,
+        high: pick(prev.high, row.high, Math.max),
+        low: pick(prev.low, row.low, Math.min),
+        volume: BigInt(prev.volume) + BigInt(row.volume),
+        turnover: BigInt(prev.turnover) + BigInt(row.turnover),
+        buy_volume: BigInt(prev.buy_volume) + BigInt(row.buy_volume),
+        sell_volume: BigInt(prev.sell_volume) + BigInt(row.sell_volume),
+        last_trade_ts:
+          prev.last_trade_ts && row.last_trade_ts
+            ? (prev.last_trade_ts > row.last_trade_ts ? prev.last_trade_ts : row.last_trade_ts)
+            : (prev.last_trade_ts ?? row.last_trade_ts),
+      });
+    }
+  }
+  return merged;
+}
 const AGGREGATE_CANDLE_TTL_MS = 5_000;
 /** 1분 봉·최근 체결 목록: 실시간 갱신은 소켓이 하므로 첫 화면용 REST는 1초만 공유해도 된다. */
 const LIVE_REST_TTL_MS = 1_000;
@@ -90,6 +140,7 @@ export class MarketController {
         WHERE s.symbol IN (${Prisma.join([...ACTIVE_SYMBOLS])})
         ORDER BY s.symbol ASC
       `.then((rows) => rows.map((row) => ({ ...row, sessionStart: sessionStart.getTime() }))),
+      SUMMARY_STALE,
     );
   }
 
@@ -100,43 +151,28 @@ export class MarketController {
   @Get("overview")
   overview() {
     const sessionStart = koreaSessionStart();
-    return this.cache.getOrCompute(`overview:${sessionStart.getTime()}`, SUMMARY_TTL_MS, () => this.computeOverview(sessionStart));
+    return this.cache.getOrCompute(
+      `overview:${sessionStart.getTime()}`,
+      SUMMARY_TTL_MS,
+      () => this.computeOverview(sessionStart),
+      SUMMARY_STALE,
+    );
   }
 
   private async computeOverview(sessionStart: Date) {
-    const [symbols, stats] = await Promise.all([
+    // 세션 전체를 2초마다 다시 합산하지 않는다: 5분 경계까지는 한 번 합산해 두고(OVERVIEW_BASE_TTL_MS),
+    // 경계 뒤 체결만 매번 더한다. 하루 수십만 건을 훑던 집계가 최근 몇 분치로 줄어든다.
+    // 경계는 최소 30초 전으로 — 경계 직전 시각으로 찍힌 체결이 늦게 커밋돼 고정 합계에서 빠지는 일이 없게.
+    const settled = Math.floor((Date.now() - OVERVIEW_COMMIT_SLACK_MS) / OVERVIEW_BASE_STEP_MS) * OVERVIEW_BASE_STEP_MS;
+    const cutoff = new Date(Math.max(sessionStart.getTime(), settled));
+    const [symbols, base, recent] = await Promise.all([
       this.symbolsForSession(sessionStart),
-      this.prisma.$queryRaw<
-        {
-          symbol: string;
-          high: number | null;
-          low: number | null;
-          volume: bigint;
-          turnover: bigint;
-          buy_volume: bigint;
-          sell_volume: bigint;
-          last_trade_ts: Date | null;
-        }[]
-      >`
-        SELECT
-          t.symbol,
-          MAX(t.price) AS high,
-          MIN(t.price) AS low,
-          COALESCE(SUM(t.qty), 0) AS volume,
-          COALESCE(SUM(t.price::bigint * t.qty), 0) AS turnover,
-          COALESCE(SUM(t.qty) FILTER (WHERE t.taker_side = 'BUY'), 0) AS buy_volume,
-          COALESCE(SUM(t.qty) FILTER (WHERE t.taker_side = 'SELL'), 0) AS sell_volume,
-          MAX(t.created_at) AS last_trade_ts
-        FROM matching.trades t
-        JOIN market.symbols s ON s.symbol = t.symbol
-        -- 종목 조건이 있어야 (symbol, created_at) 인덱스를 탄다. 없으면 2초마다 체결 테이블 전체를 훑었다.
-        -- 결과도 현물(ACTIVE_SYMBOLS)만 쓴다 — 선물·옵션 체결은 여기서 합칠 필요가 없다.
-        WHERE t.symbol IN (${Prisma.join([...ACTIVE_SYMBOLS])})
-          AND t.created_at >= ${sessionStart} AND t.created_at >= ${LISTED_SINCE}
-        GROUP BY t.symbol
-      `,
+      this.cache.getOrCompute(`overview-base:${sessionStart.getTime()}:${cutoff.getTime()}`, OVERVIEW_BASE_TTL_MS, () =>
+        this.sessionStats(sessionStart, cutoff),
+      ),
+      this.sessionStats(cutoff, null),
     ]);
-    const bySymbol = new Map(stats.map((row) => [row.symbol, row]));
+    const bySymbol = mergeSessionStats(base, recent);
     return symbols.map((marketSymbol) => {
       const row = bySymbol.get(marketSymbol.symbol);
       return {
@@ -158,6 +194,29 @@ export class MarketController {
     });
   }
 
+  /** 현물 종목별 체결 통계 [from, until). until이 null이면 지금까지. */
+  private sessionStats(from: Date, until: Date | null) {
+    return this.prisma.$queryRaw<SessionStatsRow[]>`
+      SELECT
+        t.symbol,
+        MAX(t.price) AS high,
+        MIN(t.price) AS low,
+        COALESCE(SUM(t.qty), 0) AS volume,
+        COALESCE(SUM(t.price::bigint * t.qty), 0) AS turnover,
+        COALESCE(SUM(t.qty) FILTER (WHERE t.taker_side = 'BUY'), 0) AS buy_volume,
+        COALESCE(SUM(t.qty) FILTER (WHERE t.taker_side = 'SELL'), 0) AS sell_volume,
+        MAX(t.created_at) AS last_trade_ts
+      FROM matching.trades t
+      JOIN market.symbols s ON s.symbol = t.symbol
+      -- 종목 조건이 있어야 (symbol, created_at) 인덱스를 탄다. 없으면 체결 테이블 전체를 훑었다.
+      -- 결과도 현물(ACTIVE_SYMBOLS)만 쓴다 — 선물·옵션 체결은 여기서 합칠 필요가 없다.
+      WHERE t.symbol IN (${Prisma.join([...ACTIVE_SYMBOLS])})
+        AND t.created_at >= ${from} AND t.created_at >= ${LISTED_SINCE}
+        ${until ? Prisma.sql`AND t.created_at < ${until}` : Prisma.empty}
+      GROUP BY t.symbol
+    `;
+  }
+
   /** 09:00 KST부터의 체결 기준 시세 요약. 캔들 개수 제한과 무관하게 세션 전체를 집계한다. */
   @Get("summary/:symbol")
   summary(@Param("symbol") symbol: string) {
@@ -165,6 +224,7 @@ export class MarketController {
     const sessionStart = koreaSessionStart();
     return this.cache.getOrCompute(`summary:${symbol}:${sessionStart.getTime()}`, SUMMARY_TTL_MS, () =>
       this.computeSummary(symbol, sessionStart),
+      SUMMARY_STALE,
     );
   }
 
@@ -223,9 +283,9 @@ export class MarketController {
   @Get("index")
   marketIndex(@Query("range") range = "1d") {
     const normalized = range === "all" || range === "1w" ? range : "1d";
-    return this.cache.getOrCompute(`index:${normalized}`, INDEX_TTL_MS[normalized], () =>
-      this.computeMarketIndex(normalized),
-    );
+    return this.cache.getOrCompute(`index:${normalized}`, INDEX_TTL_MS[normalized], () => this.computeMarketIndex(normalized), {
+      staleMs: INDEX_TTL_MS[normalized],
+    });
   }
 
   /** 현재 지수 구간 — 웹이 실시간 체결가로 현재 지수를 같은 식으로 계산할 때 쓴다. */
@@ -406,7 +466,7 @@ export class MarketController {
         }),
       );
       return Object.fromEntries(entries);
-    });
+    }, { staleMs: SPARK_TTL_MS * 5 });
   }
 
   /**

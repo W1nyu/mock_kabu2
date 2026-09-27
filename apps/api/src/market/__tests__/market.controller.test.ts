@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoCache } from "../../core/memo-cache";
-import { MarketController } from "../market.controller";
+import { MarketController, mergeSessionStats } from "../market.controller";
 import { SYMBOLS } from "@mock-kabu/shared";
 
 afterEach(() => vi.useRealTimers());
@@ -32,7 +32,10 @@ describe("market session reference", () => {
         volume: session.getUTCDate() === 22 ? 10n : 0n,
         turnover: 0n, buy_volume: 0n, sell_volume: 0n, last_trade_ts: null,
       };
-      return sql.includes("GROUP BY t.symbol") ? [{ symbol: "KABU", ...stats }] : [stats];
+      if (!sql.includes("GROUP BY t.symbol")) return [stats];
+      // overview는 5분 경계까지(until 있음)와 그 뒤를 나눠 합산한다 — 이 시나리오의 체결은 모두 경계 전.
+      const hasUntil = params.some((value: any) => Array.isArray(value?.values) && value.values.some((v: unknown) => v instanceof Date));
+      return hasUntil ? [{ symbol: "KABU", ...stats }] : [];
     });
     const controller = new MarketController({ $queryRaw: query } as any, {} as any, new MemoCache());
 
@@ -47,9 +50,10 @@ describe("market session reference", () => {
 
     firstTradeAvailable = true;
     vi.setSystemTime(new Date("2026-09-23T00:00:03.200Z"));
-    expect((await controller.symbols())[0].referencePrice).toBe(1250);
-    expect((await controller.overview())[0].referencePrice).toBe(1250);
-    expect(await controller.summary("KABU")).toMatchObject({ referencePrice: 1250 });
+    // 만료 직후 첫 요청은 이전 값을 바로 받고(stale-while-revalidate) 갱신은 뒤에서 돈다 — 곧 새 기준가로 바뀐다.
+    await vi.waitFor(async () => expect((await controller.symbols())[0].referencePrice).toBe(1250));
+    await vi.waitFor(async () => expect((await controller.overview())[0].referencePrice).toBe(1250));
+    await vi.waitFor(async () => expect(await controller.summary("KABU")).toMatchObject({ referencePrice: 1250 }));
   });
 });
 
@@ -166,5 +170,21 @@ describe("latest trades for every symbol in one request", () => {
 
     await controller.latestTrades("5");
     expect(findTrades).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("mergeSessionStats", () => {
+  it("adds volumes, keeps extremes and the latest trade across the base and recent parts", () => {
+    const row = (high: number | null, low: number | null, volume: bigint, ts: string | null) => ({
+      symbol: "KABU", high, low, volume, turnover: volume * 100n, buy_volume: volume, sell_volume: 0n,
+      last_trade_ts: ts ? new Date(ts) : null,
+    });
+    const merged = mergeSessionStats(
+      [row(1300, 1200, 10n, "2026-09-23T00:04:00Z"), { ...row(500, 400, 1n, null), symbol: "NEKO" }],
+      [row(1350, 1250, 5n, "2026-09-23T00:06:00Z")],
+    );
+    expect(merged.get("KABU")).toMatchObject({ high: 1350, low: 1200, volume: 15n, turnover: 1500n, buy_volume: 15n });
+    expect(merged.get("KABU")?.last_trade_ts).toEqual(new Date("2026-09-23T00:06:00Z"));
+    expect(merged.get("NEKO")).toMatchObject({ high: 500, volume: 1n });
   });
 });
