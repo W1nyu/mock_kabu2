@@ -40,8 +40,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang={locale} data-theme="light" suppressHydrationWarning>
       <body>
         {/* 첫 화면을 그리기 전에 저장된 테마를 적용한다 — 다크를 고른 사람에게 라이트가 번쩍이지 않게. */}
+        {/* 브라우저는 DOM에서 nonce 값을 숨긴다(클라이언트에선 ""로 보임) — 하이드레이션 경고만 끈다. */}
         <script
           nonce={nonce}
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html: `try{var t=localStorage.getItem("mock-kabu2:theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}`,
           }}
