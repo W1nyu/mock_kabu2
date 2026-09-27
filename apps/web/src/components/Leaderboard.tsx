@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, getToken, won } from "@/lib/api";
+import { api, getToken, getUser, won } from "@/lib/api";
+import { readSnapshot, SNAPSHOT_MAX_AGE_MS, writeSnapshot } from "@/lib/snapshot";
 import { everyVisible } from "@/lib/visible-interval";
 import { useT } from "@/lib/i18n";
 
@@ -62,10 +63,16 @@ export default function Leaderboard({ refreshKey, topN = DEFAULT_TOP_N }: { refr
   useEffect(() => {
     if (!getToken()) return;
     let active = true;
+    // 순위표에는 내 행 표시가 있어 계정별로 따로 보관한다. 다시 열거나 기간을 바꿀 때 이전 순위를 먼저 그린다.
+    const snapKey = `leaderboard:${getUser()?.accountId ?? "-"}:${period}:${topN}`;
+    const cached = readSnapshot<LeaderboardDto>(snapKey, SNAPSHOT_MAX_AGE_MS);
+    if (cached) setBoard((prev) => prev ?? cached);
     const load = () => {
       api<LeaderboardDto>(`/account/leaderboard?limit=${topN}&period=${period}`)
         .then((data) => {
-          if (active) setBoard(data);
+          if (!active) return;
+          setBoard(data);
+          writeSnapshot(snapKey, data);
         })
         .catch(() => {});
     };

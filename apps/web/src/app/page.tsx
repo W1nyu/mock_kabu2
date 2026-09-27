@@ -19,6 +19,7 @@ import Sparkline from "@/components/Sparkline";
 import ChipTabs from "@/components/ChipTabs";
 import { ALL_INDUSTRIES, INDUSTRY_STORAGE_KEY, industryChipItems } from "@/lib/industry-chips";
 import { mergeNews, parseNewsItem } from "@/lib/news";
+import { readSnapshot, SNAP_OVERVIEW, SNAP_SPARKS, SNAPSHOT_MAX_AGE_MS, writeSnapshot } from "@/lib/snapshot";
 import { cleanSparks } from "@/lib/sparks";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
@@ -189,34 +190,39 @@ export default function DashboardPage() {
     api<FuturesAccount>("/account/futures").then(setFutures).catch(() => {});
   }, []);
 
+  const applyOverview = useCallback((rows: (SymbolRow & MarketSummary)[]) => {
+    if (rows.some((row) => row.sessionStart < kstSessionStartMs())) return;
+    setSymbols(rows.map(({ symbol, name, lastPrice, referencePrice }) => ({ symbol, name, lastPrice, referencePrice })));
+    const summaries = rows.map((row) => ({ symbol: row.symbol, summary: row as MarketSummary }));
+
+    const nextTurnovers: Record<string, number> = {};
+    for (const { symbol, summary } of summaries) {
+      const watermark = finiteNumber(summary.lastTradeTs) ?? Number.NEGATIVE_INFINITY;
+      const sessionStart = finiteNumber(summary.sessionStart) ?? kstSessionStartMs();
+      const pending = pendingTurnoverTicksRef.current.get(symbol);
+      let pendingTurnover = 0;
+      if (pending) {
+        for (const [id, tick] of pending) {
+          if (tick.ts >= sessionStart && tick.ts > watermark) pendingTurnover += tick.price * tick.qty;
+          else pending.delete(id);
+        }
+      }
+      nextTurnovers[symbol] = Math.max(0, finiteNumber(summary.turnover) ?? 0) + pendingTurnover;
+      turnoverWatermarksRef.current.set(symbol, watermark);
+    }
+    // 스냅샷과 동시에 도착한 tick은 watermark 뒤의 것만 다시 더한다.
+    setTurnovers(() => nextTurnovers);
+  }, []);
+
   const refreshSymbols = useCallback(() => {
     // 종목 목록과 당일 요약을 한 요청으로 받는다 (예전: /symbols + 종목별 /summary 5번).
     api<(SymbolRow & MarketSummary)[]>("/market/overview", { auth: false })
-      .then(async (rows) => {
-        if (rows.some((row) => row.sessionStart < kstSessionStartMs())) return;
-        setSymbols(rows.map(({ symbol, name, lastPrice, referencePrice }) => ({ symbol, name, lastPrice, referencePrice })));
-        const summaries = rows.map((row) => ({ symbol: row.symbol, summary: row as MarketSummary }));
-
-        const nextTurnovers: Record<string, number> = {};
-        for (const { symbol, summary } of summaries) {
-          const watermark = finiteNumber(summary.lastTradeTs) ?? Number.NEGATIVE_INFINITY;
-          const sessionStart = finiteNumber(summary.sessionStart) ?? kstSessionStartMs();
-          const pending = pendingTurnoverTicksRef.current.get(symbol);
-          let pendingTurnover = 0;
-          if (pending) {
-            for (const [id, tick] of pending) {
-              if (tick.ts >= sessionStart && tick.ts > watermark) pendingTurnover += tick.price * tick.qty;
-              else pending.delete(id);
-            }
-          }
-          nextTurnovers[symbol] = Math.max(0, finiteNumber(summary.turnover) ?? 0) + pendingTurnover;
-          turnoverWatermarksRef.current.set(symbol, watermark);
-        }
-        // 스냅샷과 동시에 도착한 tick은 watermark 뒤의 것만 다시 더한다.
-        setTurnovers(() => nextTurnovers);
+      .then((rows) => {
+        applyOverview(rows);
+        if (!rows.some((row) => row.sessionStart < kstSessionStartMs())) writeSnapshot(SNAP_OVERVIEW, rows);
       })
       .catch(() => {});
-  }, []);
+  }, [applyOverview]);
 
   useEffect(() => {
     if (!getToken()) {
@@ -224,6 +230,9 @@ export default function DashboardPage() {
       return;
     }
     refreshAccount();
+    // 이 탭에서 받아 둔 종목 목록이 있으면 응답을 기다리지 않고 먼저 그린다.
+    const cached = readSnapshot<(SymbolRow & MarketSummary)[]>(SNAP_OVERVIEW, SNAPSHOT_MAX_AGE_MS);
+    if (cached?.length) applyOverview(cached);
     refreshSymbols();
     const user = getUser();
     const refreshAccountSoon = debounce(refreshAccount, ACCOUNT_REFRESH_DEBOUNCE_MS);
@@ -242,7 +251,7 @@ export default function DashboardPage() {
       refreshAccountSoon.cancel();
       unsub();
     };
-  }, [refreshAccount, refreshSymbols, router]);
+  }, [applyOverview, refreshAccount, refreshSymbols, router]);
 
   // The dashboard shows only the newest few; the news tab holds the full feed.
   useEffect(() => {
@@ -271,10 +280,14 @@ export default function DashboardPage() {
     const load = () => {
       api<Record<string, number[]>>("/market/sparks", { auth: false })
         .then((data) => {
-          if (active) setSparks(cleanSparks(data));
+          if (!active) return;
+          setSparks(cleanSparks(data));
+          writeSnapshot(SNAP_SPARKS, data);
         })
         .catch(() => {});
     };
+    const cachedSparks = readSnapshot<Record<string, number[]>>(SNAP_SPARKS, SNAPSHOT_MAX_AGE_MS);
+    if (cachedSparks) setSparks((prev) => (Object.keys(prev).length ? prev : cleanSparks(cachedSparks)));
     load();
     const t = everyVisible(load, SPARK_REFRESH_MS);
     return () => {

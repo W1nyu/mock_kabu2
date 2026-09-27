@@ -16,6 +16,7 @@ import { liveIndexLevel, type IndexMeta } from "@/lib/index-meta";
 import { matchStockCodes } from "@/lib/symbol-search";
 import { subscribe } from "@/lib/socket";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
+import { readSnapshot, SNAP_OVERVIEW, SNAP_SPARKS, SNAPSHOT_MAX_AGE_MS, writeSnapshot } from "@/lib/snapshot";
 import { readQueryParam, writeQueryParams } from "@/lib/url-query";
 import { everyVisible } from "@/lib/visible-interval";
 import { useNames, useT } from "@/lib/i18n";
@@ -47,6 +48,8 @@ const SORTS: { id: SortKey; label: string }[] = [
 ];
 const SORT_STORAGE_KEY = "market:symbol-sort";
 const KIND_STORAGE_KEY = "market:kind";
+const SNAP_INDEX = "market:index-1d";
+const SNAP_INDEX_META = "market:index-meta";
 type MarketKind = "stock" | "futures";
 const KINDS: { id: MarketKind; label: string }[] = [
   { id: "stock", label: "현물" },
@@ -138,18 +141,33 @@ export default function MarketPage() {
   const load = useCallback(() => {
     api<OverviewRow[]>("/market/overview", { auth: false })
       .then((data) => {
-        if (data.every((row) => row.sessionStart >= kstSessionStartMs())) setRows(data);
+        if (!data.every((row) => row.sessionStart >= kstSessionStartMs())) return;
+        setRows(data);
+        writeSnapshot(SNAP_OVERVIEW, data);
       })
       .catch(() => {});
     api<IndexPoint[]>("/market/index?range=1d", { auth: false })
-      .then(setIndexSeries)
+      .then((data) => {
+        setIndexSeries(data);
+        writeSnapshot(SNAP_INDEX, data);
+      })
       .catch(() => {});
     api<IndexMeta>("/market/index/meta", { auth: false })
-      .then(setIndexMeta)
+      .then((data) => {
+        setIndexMeta(data);
+        writeSnapshot(SNAP_INDEX_META, data);
+      })
       .catch(() => {});
   }, []);
 
   useEffect(() => {
+    // 다시 열 때는 이 탭의 마지막 응답을 먼저 그리고(응답 대기 없이) 곧 새 값으로 바꾼다.
+    const cached = readSnapshot<OverviewRow[]>(SNAP_OVERVIEW, SNAPSHOT_MAX_AGE_MS);
+    if (cached?.length && cached.every((row) => row.sessionStart >= kstSessionStartMs())) setRows((prev) => (prev.length ? prev : cached));
+    const cachedIndex = readSnapshot<IndexPoint[]>(SNAP_INDEX, SNAPSHOT_MAX_AGE_MS);
+    if (cachedIndex) setIndexSeries((prev) => prev ?? cachedIndex);
+    const cachedMeta = readSnapshot<IndexMeta>(SNAP_INDEX_META, SNAPSHOT_MAX_AGE_MS);
+    if (cachedMeta) setIndexMeta((prev) => prev ?? cachedMeta);
     load();
     const t = everyVisible(load, 15_000);
     const stopSessionRefresh = onKstSessionOpen(load);
@@ -182,10 +200,14 @@ export default function MarketPage() {
     const loadSparks = () => {
       api<Record<string, number[]>>("/market/sparks", { auth: false })
         .then((data) => {
-          if (active) setSparks(cleanSparks(data));
+          if (!active) return;
+          setSparks(cleanSparks(data));
+          writeSnapshot(SNAP_SPARKS, data);
         })
         .catch(() => {});
     };
+    const cachedSparks = readSnapshot<Record<string, number[]>>(SNAP_SPARKS, SNAPSHOT_MAX_AGE_MS);
+    if (cachedSparks) setSparks((prev) => (Object.keys(prev).length ? prev : cleanSparks(cachedSparks)));
     loadSparks();
     const t = everyVisible(loadSparks, 5 * 60 * 1000);
     return () => {
