@@ -1,5 +1,11 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-27 — 상단 메뉴 종목 검색·일본어 금액 ₩ 표기 운영 적용 (4ea4256·dc37ca0, web·bots만 무점검)
+
+- **종목 검색**(사용자 피드백 "검색 창이 없어 불편"): `NavSearch` — lg 이상은 메뉴 줄 입력칸, 좁은 화면·폰은 돋보기 버튼 → 헤더 아래 패널. `/` 키로 열기, 방향키·Enter. 대상은 현물 15·선물 7·환율/원자재 6(상장 폐지·옵션 제외). 코드·한영일 이름·한글 초성(`ㄷㅇ` → 다온반도체). 로직 `apps/web/src/lib/symbol-search.ts`(NFKC가 호환 자모를 바꾸므로 초성은 정규화 전 입력으로 비교), 테스트 `symbol-search.test.ts`. 전역 `:focus-visible`이 레이어 밖이라 입력칸 테두리는 인라인 `outline: none`으로 끈다.
+- **일본어 금액**: 사용자 요청 "ja도 en처럼, ウォン 쓰지 말 것" → `formatWon`·서버 문구·거래대금·가입 문구·뉴스 금액(`formatEokLocale` ₩320B 등)을 영어와 같은 ₩ 표기로. 통화 이름(`ドル/ウォン`)과 기사 속 "ウォン高" 같은 말은 유지. 옛 기사 번역은 DB에 ウォン 그대로(새 기사부터 ₩).
+- 운영: web·bots만 교체, 롤백 태그 `pre-search-20260927`(+web·bots), 원본 `/tmp/src-before-pre-search-20260927.tgz`. 확인: jobradar.my ja 쿠키로 `/market` 본문 ウォン은 `ドル/ウォン` 1건뿐·₩ 31건, 검색 `ㄷㅇ` → ダオン半導体, 페이지 오류 0, 봇 재시작 뒤 오류 로그 0.
+
 ## 2026-09-27 — 첫 접속 언어: 그 외 브라우저는 영어 운영 적용 (227a7c7, web만 무점검)
 
 - 언어 결정 순서는 그대로(`mk_locale` 쿠키 → `Accept-Language`). 한국어·일본어·영어가 아니거나 헤더가 없으면 이제 한국어 대신 영어(`pickLocale` → `FALLBACK_LOCALE`). `DEFAULT_LOCALE`(ko)는 클라이언트 초기값으로만 남김. 테스트 `packages/shared/test/i18n.node-test.mjs`.
