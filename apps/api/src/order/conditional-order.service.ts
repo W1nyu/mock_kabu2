@@ -83,6 +83,7 @@ interface WaitingRow {
 const OCO_SIBLING_NOTE = "OCO 짝 주문 발동으로 자동 취소";
 /** 선물 예약은 보유 포지션 청산용 — 포지션이 사라지거나 뒤집히면 남은 예약을 이 사유로 취소한다. */
 const NO_POSITION_NOTE = "청산할 선물 포지션이 없어 자동 취소";
+const RESERVED_NOTE = "걸려 있는 청산 주문이 보유 수량을 모두 차지해 자동 취소";
 
 /** 다른 API 인스턴스가 만든 대기 주문을 늦어도 이 간격 안에 메모리 인덱스로 가져온다. */
 const INDEX_REFRESH_MS = 10_000;
@@ -276,16 +277,35 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     return side === "SELL" ? "LONG" : "SHORT";
   }
 
-  /** 이 방향으로 지금 청산할 수 있는 선물 계약 수(매도는 롱, 매수는 숏). 선물이 아니면 null. */
-  private async futuresClosable(accountId: string, symbol: string, side: OrderSide, positionSide: string | null): Promise<number | null> {
+  /**
+   * 이 방향으로 지금 청산할 수 있는 선물 계약 수(매도는 롱, 매수는 숏). 선물이 아니면 null.
+   * 양방향(positionSide 있음)은 주문 접수와 같은 규칙으로 그 방향 보유 − 걸린 청산 미체결 잔량이다
+   * (futures-margin.ts). held는 보유 자체가 있는지를 가려 안내 문구를 고르는 데 쓴다.
+   */
+  private async futuresClosable(
+    accountId: string,
+    symbol: string,
+    side: OrderSide,
+    positionSide: string | null,
+  ): Promise<{ held: number; closable: number } | null> {
     if (!futureDef(symbol)) return null;
     const position = await this.prisma.futuresPosition.findUnique({
       where: { accountId_symbol_positionSide: { accountId, symbol, positionSide: rowSideOf(positionSide) } },
       select: { qty: true },
     });
-    const held = position?.qty ?? 0;
-    if (positionSide != null) return Math.abs(held);
-    return side === "SELL" ? Math.max(0, held) : Math.max(0, -held);
+    const qty = position?.qty ?? 0;
+    if (positionSide != null) {
+      const held = Math.abs(qty);
+      if (held === 0) return { held, closable: 0 };
+      const pending = await this.prisma.order.findMany({
+        where: { accountId, symbol, side, positionSide, status: { in: ["OPEN", "PARTIAL"] } },
+        select: { qty: true, filledQty: true },
+      });
+      const reserved = pending.reduce((sum, order) => sum + (order.qty - order.filledQty), 0);
+      return { held, closable: Math.max(0, held - reserved) };
+    }
+    const held = side === "SELL" ? Math.max(0, qty) : Math.max(0, -qty);
+    return { held, closable: held };
   }
 
   /**
@@ -299,12 +319,12 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
     qty: number,
     positionSide: string | null,
   ): Promise<void> {
-    const closable = await this.futuresClosable(accountId, symbol, side, positionSide);
-    if (closable == null) return;
-    if (closable === 0) {
+    const room = await this.futuresClosable(accountId, symbol, side, positionSide);
+    if (room == null) return;
+    if (room.held === 0) {
       throw new UnprocessableEntityException("선물 예약 주문은 보유 포지션을 청산하는 방향으로만 걸 수 있습니다");
     }
-    if (qty > closable) throw new UnprocessableEntityException(`청산할 수 있는 수량은 ${closable}계약입니다`);
+    if (qty > room.closable) throw new UnprocessableEntityException(`청산할 수 있는 수량은 ${room.closable}계약입니다`);
   }
 
   private async lastPriceOf(symbol: string): Promise<number> {
@@ -429,13 +449,15 @@ export class ConditionalOrderService implements OnModuleInit, OnModuleDestroy {
       if (row.ocoGroupId) await this.cancelOcoSiblings(row.ocoGroupId, row.id, OCO_SIBLING_NOTE);
 
       // 선물: 발동 시점 포지션만큼만 청산한다. 포지션이 없거나 뒤집혔으면 새 포지션을 열지 않고 취소.
+      // 양방향은 이미 걸린 청산 주문이 가져간 수량을 빼고, 남는 게 없으면 역시 취소한다.
       let qty = row.qty;
-      const closable = await this.futuresClosable(row.accountId, row.symbol, row.side, row.positionSide ?? null);
-      if (closable != null) {
+      const room = await this.futuresClosable(row.accountId, row.symbol, row.side, row.positionSide ?? null);
+      if (room != null) {
+        const closable = room.closable;
         if (closable === 0) {
           await this.prisma.conditionalOrder.update({
             where: { id: row.id },
-            data: { status: "CANCELED", failReason: NO_POSITION_NOTE },
+            data: { status: "CANCELED", failReason: room.held === 0 ? NO_POSITION_NOTE : RESERVED_NOTE },
           });
           this.realtime.notifyAccount(row.accountId, { type: "conditional", id: row.id, status: "CANCELED" });
           return;

@@ -29,6 +29,24 @@ function waitingRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+type LiveOrder = { accountId: string; symbol: string; side: string; positionSide: string | null; qty: number; filledQty: number; status: string };
+
+/** 걸려 있는 일반 주문 fixture로 prisma.order.findMany(청산 예약분 계산)에 응답한다. */
+function liveOrderMock(live: LiveOrder[]) {
+  return vi.fn().mockImplementation(({ where }: any) =>
+    Promise.resolve(
+      live.filter(
+        (o) =>
+          o.accountId === where.accountId &&
+          o.symbol === where.symbol &&
+          o.side === where.side &&
+          o.positionSide === where.positionSide &&
+          (where.status?.in as string[]).includes(o.status),
+      ),
+    ),
+  );
+}
+
 function build(
   options: {
     rows?: ReturnType<typeof waitingRow>[];
@@ -38,6 +56,8 @@ function build(
     positions?: Map<string, number>;
     /** 계정이 봇인지. 기본값 true — 지정 안 하면 기존 NET(순포지션) 테스트와 동일하게 동작 */
     isBot?: boolean;
+    /** 걸려 있는 일반 주문(양방향 청산 예약분 계산용) */
+    liveOrders?: LiveOrder[];
   } = {},
 ) {
   const positions = options.positions ?? new Map<string, number>();
@@ -76,6 +96,7 @@ function build(
       update: vi.fn().mockResolvedValue({}),
     },
     marketSymbol: { findMany: vi.fn().mockResolvedValue([]) },
+    order: { findMany: liveOrderMock(options.liveOrders ?? []) },
   };
   const orders = {
     place: options.placeError
@@ -201,6 +222,7 @@ function buildForPlace(
     /** 계정이 봇인지. 기본값 true */
     isBot?: boolean;
     orders?: { place: ReturnType<typeof vi.fn> };
+    liveOrders?: LiveOrder[];
   } = {},
 ) {
   const positions = extra.positions ?? new Map<string, number>();
@@ -228,6 +250,7 @@ function buildForPlace(
       ),
     },
     marketSymbol: { findUnique: vi.fn().mockResolvedValue({ symbol: "KABU", lastPrice }) },
+    order: { findMany: liveOrderMock(extra.liveOrders ?? []) },
     $transaction: vi.fn().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops)),
   };
   const realtime = { notifyAccount: vi.fn() };
@@ -463,5 +486,94 @@ describe("human futures conditional orders close a hedge side (LONG/SHORT), not 
         upperPrice: 88_000,
       }),
     ).rejects.toThrow(/청산할 수 있는 수량은 2계약/);
+  });
+});
+
+describe("hedge conditional orders leave room for closing orders already live on the same side", () => {
+  const liveClose = (qty: number, overrides: Partial<LiveOrder> = {}): LiveOrder => ({
+    accountId: "acct-1",
+    symbol: "KABUF",
+    side: "SELL",
+    positionSide: "LONG",
+    qty,
+    filledQty: 0,
+    status: "OPEN",
+    ...overrides,
+  });
+
+  it("rejects registering a stop when a live close already covers the whole LONG side", async () => {
+    const { service } = buildForPlace(87_000, 0, {
+      positions: new Map([["acct-1|KABUF|LONG", 5]]),
+      isBot: false,
+      liveOrders: [liveClose(5)],
+    });
+
+    await expect(
+      service.place("acct-1", { symbol: "KABUF", side: "SELL", qty: 1, direction: "AT_OR_BELOW", triggerPrice: 86_000 }),
+    ).rejects.toThrow(/청산할 수 있는 수량은 0계약/);
+    await expect(
+      service.placeOco("acct-1", { symbol: "KABUF", side: "SELL", qty: 1, lowerPrice: 86_000, upperPrice: 88_000 }),
+    ).rejects.toThrow(/청산할 수 있는 수량은 0계약/);
+  });
+
+  it("ignores live orders on another side, position side or status", async () => {
+    const { service } = buildForPlace(87_000, 0, {
+      positions: new Map([["acct-1|KABUF|LONG", 5]]),
+      isBot: false,
+      liveOrders: [
+        liveClose(1, { filledQty: 0, status: "PARTIAL", qty: 3 }), // 잔량 3
+        liveClose(5, { status: "FILLED" }),
+        liveClose(5, { positionSide: "SHORT" }),
+        liveClose(5, { side: "BUY" }),
+      ],
+    });
+
+    const row = await service.place("acct-1", { symbol: "KABUF", side: "SELL", qty: 2, direction: "AT_OR_BELOW", triggerPrice: 86_000 });
+    expect(row.positionSide).toBe("LONG");
+    await expect(
+      service.place("acct-1", { symbol: "KABUF", side: "SELL", qty: 3, direction: "AT_OR_BELOW", triggerPrice: 86_000 }),
+    ).rejects.toThrow(/청산할 수 있는 수량은 2계약/);
+  });
+
+  it("clamps the triggered close to held minus live closing qty", async () => {
+    const stop = waitingRow({ symbol: "KABUF", side: "SELL", direction: "AT_OR_BELOW", triggerPrice: 87_000, qty: 5, positionSide: "LONG" });
+    const { service, orders } = build({
+      rows: [stop],
+      isBot: false,
+      positions: new Map([["acct-1|KABUF|LONG", 5]]),
+      liveOrders: [liveClose(3)],
+    });
+    await (service as any).reloadIndex();
+
+    service.onTick("KABUF", 86_990);
+    await flush();
+
+    expect(orders.place).toHaveBeenCalledWith("acct-1", {
+      symbol: "KABUF",
+      side: "SELL",
+      type: "MARKET",
+      qty: 2,
+      positionSide: "LONG",
+    });
+  });
+
+  it("cancels the triggered stop when live closes already take everything held", async () => {
+    const stop = waitingRow({ symbol: "KABUF", side: "SELL", direction: "AT_OR_BELOW", triggerPrice: 87_000, qty: 5, positionSide: "LONG" });
+    const { service, prisma, orders } = build({
+      rows: [stop],
+      isBot: false,
+      positions: new Map([["acct-1|KABUF|LONG", 5]]),
+      liveOrders: [liveClose(5)],
+    });
+    await (service as any).reloadIndex();
+
+    service.onTick("KABUF", 86_990);
+    await flush();
+
+    expect(orders.place).not.toHaveBeenCalled();
+    expect(prisma.conditionalOrder.update).toHaveBeenCalledWith({
+      where: { id: "cond-1" },
+      data: { status: "CANCELED", failReason: expect.stringContaining("청산 주문") },
+    });
   });
 });
