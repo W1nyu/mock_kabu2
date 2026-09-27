@@ -106,12 +106,14 @@ describe("OrderService.amend", () => {
 describe("OrderService.place for futures", () => {
   beforeEach(() => { vi.spyOn(Date, "now").mockReturnValue(TRADING_FEES_EFFECTIVE_AT - 1); });
   afterEach(() => { vi.restoreAllMocks(); });
-  function harness(balance: bigint, holdAmount = 0n, positionMargin = 0n, debt = 0n) {
+  function harness(balance: bigint, holdAmount = 0n, positionMargin = 0n, debt = 0n, isBot = false) {
     const accounts: Record<string, { balance: bigint; holdAmount: bigint }> = { a: { balance, holdAmount } };
     const created: Record<string, unknown>[] = [];
     const outbox: Record<string, unknown>[] = [];
     const tx = {
-      $queryRawUnsafe: vi.fn(async () => [{ isBot: false }]),
+      $queryRawUnsafe: vi.fn(async () => [{ isBot }]),
+      account: { findUnique: vi.fn(async () => ({ userId: "u" })) },
+      user: { findUnique: vi.fn(async () => ({ isBot })) },
       futuresPosition: {
         aggregate: vi.fn(async () => ({ _sum: { marginHeld: positionMargin } })),
         // 포지션 없음(신규 주문) — 청산 판정·레버리지는 leverage.test.ts에서 따로 본다.
@@ -134,7 +136,7 @@ describe("OrderService.place for futures", () => {
 
   it("holds the initial margin in cash for a short as well as a long, and never touches share holdings", async () => {
     const { service, accounts, created, tx } = harness(10_000_000n);
-    await service.place("a", { symbol: "KABUF", side: "SELL", type: "LIMIT", price: 88_000, qty: 2 });
+    await service.place("a", { symbol: "KABUF", side: "SELL", type: "LIMIT", price: 88_000, qty: 2, positionSide: "SHORT" });
     // 880.00pt × 10,000원 × 21.75% = 1,914,000원/계약
     expect(created[0].holdPerUnit).toBe(1_914_000n);
     expect(accounts.a.holdAmount).toBe(3_828_000n);
@@ -144,11 +146,11 @@ describe("OrderService.place for futures", () => {
   it("reserves human fees on both futures sides after activation, while bots reserve only margin", async () => {
     vi.spyOn(Date, "now").mockReturnValue(TRADING_FEES_EFFECTIVE_AT);
     for (const side of ["BUY", "SELL"] as const) {
+      const positionSide = side === "BUY" ? "LONG" : "SHORT";
       const human = harness(10_000_000n);
-      await human.service.place("a", { symbol: "KABUF", side, type: "LIMIT", price: 88_000, qty: 2 });
+      await human.service.place("a", { symbol: "KABUF", side, type: "LIMIT", price: 88_000, qty: 2, positionSide });
       expect(human.created[0].holdPerUnit).toBe(1_914_880n);
-      const bot = harness(10_000_000n);
-      bot.tx.$queryRawUnsafe.mockResolvedValue([{ isBot: true }]);
+      const bot = harness(10_000_000n, 0n, 0n, 0n, true);
       await bot.service.place("a", { symbol: "KABUF", side, type: "LIMIT", price: 88_000, qty: 2 });
       expect(bot.created[0].holdPerUnit).toBe(1_914_000n);
     }
@@ -171,7 +173,7 @@ describe("OrderService.place for futures", () => {
     const { service } = harness(3_000_000n, 0n, 1_000_000n, 200_000n);
     // 가용 = 300만 − 100만(포지션 증거금) − 20만(미수) = 180만 < 1계약 증거금 191만4천
     await expect(
-      service.place("a", { symbol: "KABUF", side: "BUY", type: "LIMIT", price: 88_000, qty: 1 }),
+      service.place("a", { symbol: "KABUF", side: "BUY", type: "LIMIT", price: 88_000, qty: 1, positionSide: "LONG" }),
     ).rejects.toThrow(/증거금이 부족/);
   });
 
@@ -183,11 +185,32 @@ describe("OrderService.place for futures", () => {
 
   it("sends a market buy with a price cap in contract price units, separate from the margin hold", async () => {
     const { service, outbox, created } = harness(100_000_000n);
-    await service.place("a", { symbol: "KABUF", side: "BUY", type: "MARKET", qty: 1 });
+    await service.place("a", { symbol: "KABUF", side: "BUY", type: "MARKET", qty: 1, positionSide: "LONG" });
     const payload = outbox[0].payload as { price: number };
     expect(payload.price).toBe(Math.ceil(88_000 * 1.1));
     // 증거금은 체결 상한(최근가 × 1.1, 올림) 기준
     expect(created[0].holdPerUnit).toBe(futureMarginPerContract(futureDef("KABUF")!, Math.ceil(88_000 * 1.1)));
+  });
+
+  it("requires a position side on a human futures order and rejects one from a bot or on spot", async () => {
+    const human = harness(100_000_000n);
+    await expect(human.service.place("a", { symbol: "KABUF", side: "BUY", type: "LIMIT", price: 88_000, qty: 1 })).rejects.toThrow(/롱\/숏 방향이 필요/);
+    const bot = harness(100_000_000n, 0n, 0n, 0n, true);
+    await expect(
+      bot.service.place("a", { symbol: "KABUF", side: "BUY", type: "LIMIT", price: 88_000, qty: 1, positionSide: "LONG" }),
+    ).rejects.toThrow(/봇 계정은/);
+    await expect(
+      human.service.place("a", { symbol: "KABU", side: "BUY", type: "LIMIT", price: 100_000, qty: 1, positionSide: "LONG" }),
+    ).rejects.toThrow(/선물 주문에만/);
+    await expect(
+      human.service.place("a", { symbol: "KABUF", side: "BUY", type: "LIMIT", price: 88_000, qty: 1, positionSide: "UP" as never }),
+    ).rejects.toThrow(/LONG\/SHORT/);
+  });
+
+  it("stores the position side on the order row", async () => {
+    const { service, created } = harness(100_000_000n);
+    await service.place("a", { symbol: "KABUF", side: "SELL", type: "LIMIT", price: 88_000, qty: 1, positionSide: "SHORT" });
+    expect(created[0].positionSide).toBe("SHORT");
   });
 });
 

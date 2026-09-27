@@ -20,11 +20,13 @@ import {
   TRADABLE_SYMBOLS,
   formatFuturePrice,
   futureDef,
+  isFuturesPositionSide,
   optionDef,
   orderHoldWithFee,
   TRADING_FEES_EFFECTIVE_AT,
   isOnTick,
   tickSizeOf,
+  type FuturesPositionSide,
   type OrderCancelRequestedEvent,
   type OrderPlacedEvent,
   type OrderSide,
@@ -34,7 +36,7 @@ import type Redis from "ioredis";
 import { BALANCE_MUTATOR, PRISMA, REDIS } from "../core/tokens";
 import { OptionsService } from "../futures/options.service";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
-import { futuresMarginHeld, futuresOrderHoldPerUnit, optionOrderHoldPerUnit } from "./futures-margin";
+import { futuresMarginHeld, futuresOrderHoldPerUnit, isBotAccount, optionOrderHoldPerUnit } from "./futures-margin";
 import { OutboxRelayer } from "./outbox.relayer";
 
 export interface PlaceOrderDto {
@@ -43,6 +45,8 @@ export interface PlaceOrderDto {
   type: OrderType;
   price?: number;
   qty: number;
+  /** 양방향 선물 주문 방향(사람 계정 필수, 봇·옵션·현물은 없음) */
+  positionSide?: FuturesPositionSide;
 }
 
 export interface MyOrdersFilter {
@@ -154,6 +158,9 @@ export class OrderService {
     if ((future || option) && qty > MAX_FUTURES_ORDER_QTY) {
       throw new BadRequestException(`${option ? "옵션" : "선물"}은 한 주문에 ${MAX_FUTURES_ORDER_QTY}계약까지입니다`);
     }
+    const positionSide = dto.positionSide ?? null;
+    if (positionSide != null && !isFuturesPositionSide(positionSide)) throw new BadRequestException("positionSide는 LONG/SHORT");
+    if (positionSide != null && !future) throw new BadRequestException("롱/숏 방향은 선물 주문에만 씁니다");
     // 격자 밖 지정가는 호가창에 낯선 단계를 만들고 봇 래더와 어긋나므로 접수 단계에서 막는다.
     const tickSize = tickSizeOf(symbol);
     if (type === "LIMIT" && tickSize != null && !isOnTick(price!, tickSize)) {
@@ -177,7 +184,10 @@ export class OrderService {
 
     const order = await this.mutator.withAccountLock([accountId], async (ctx) => {
       if (future) {
-        holdPerUnit = await futuresOrderHoldPerUnit(ctx.tx, accountId, future, side, qty, type === "LIMIT" ? price! : marketCap);
+        const bot = await isBotAccount(ctx.tx, accountId);
+        if (!bot && positionSide == null) throw new BadRequestException("선물 주문은 롱/숏 방향이 필요합니다");
+        if (bot && positionSide != null) throw new BadRequestException("봇 계정은 롱/숏 방향 없이 주문합니다");
+        holdPerUnit = await futuresOrderHoldPerUnit(ctx.tx, accountId, future, side, qty, type === "LIMIT" ? price! : marketCap, positionSide);
       } else if (option) {
         holdPerUnit = await optionOrderHoldPerUnit(ctx.tx, accountId, option, side, qty, type === "LIMIT" ? price! : marketCap);
       }
@@ -213,7 +223,7 @@ export class OrderService {
       }
 
       const order = await ctx.tx.order.create({
-        data: { accountId, symbol, side, type, price, qty, holdPerUnit },
+        data: { accountId, symbol, side, type, price, qty, holdPerUnit, positionSide },
       });
 
       const event: OrderPlacedEvent = {
@@ -331,6 +341,7 @@ export class OrderService {
       type: "LIMIT",
       price,
       qty: nextQty,
+      ...(order.positionSide ? { positionSide: order.positionSide as FuturesPositionSide } : {}),
     });
     return { amended: true, reason: null, canceled: closed, order: placed };
   }

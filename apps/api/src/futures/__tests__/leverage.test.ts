@@ -33,6 +33,22 @@ describe("futures order hold", () => {
     expect(await futuresOrderHoldPerUnit(db({ qty: 3, leverage: 20 }, pending), "a", USDF, "SELL", 1, 14_000)).toBe(0n);
     expect(await futuresOrderHoldPerUnit(db({ qty: 3, leverage: 20 }, pending), "a", USDF, "SELL", 2, 14_000)).toBe(700_000n);
   });
+
+  it("hedge orders: opening holds margin, closing within the side's position holds nothing", async () => {
+    // 롱 진입은 그 방향 포지션과 상관없이 증거금
+    expect(await futuresOrderHoldPerUnit(db({ qty: 0, leverage: 20 }), "a", USDF, "BUY", 1, 14_000, "LONG")).toBe(700_000n);
+    // 숏 진입(매도)도 증거금 — 롱을 들고 있어도 롱을 줄이지 않는다
+    expect(await futuresOrderHoldPerUnit(db({ qty: 0, leverage: 20 }), "a", USDF, "SELL", 2, 14_000, "SHORT")).toBe(700_000n);
+    // 숏 −3에서 숏 청산(매수) 3 → 0
+    expect(await futuresOrderHoldPerUnit(db({ qty: -3, leverage: 20 }), "a", USDF, "BUY", 3, 14_000, "SHORT")).toBe(0n);
+  });
+
+  it("hedge closing beyond the side's closable quantity is rejected, not turned into an opening order", async () => {
+    await expect(futuresOrderHoldPerUnit(db({ qty: 3, leverage: 20 }), "a", USDF, "SELL", 4, 14_000, "LONG")).rejects.toThrow(/청산 가능 수량이 부족/);
+    const pending = [{ qty: 2, filledQty: 0 }];
+    await expect(futuresOrderHoldPerUnit(db({ qty: 3, leverage: 20 }, pending), "a", USDF, "SELL", 2, 14_000, "LONG")).rejects.toThrow(/청산 가능 수량이 부족/);
+    await expect(futuresOrderHoldPerUnit(db(null), "a", USDF, "BUY", 1, 14_000, "SHORT")).rejects.toThrow(/청산 가능 수량이 부족/);
+  });
 });
 
 describe("setting leverage", () => {

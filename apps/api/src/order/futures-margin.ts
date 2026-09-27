@@ -1,5 +1,15 @@
 import { UnprocessableEntityException } from "@nestjs/common";
-import { futureMarginPerContract, futuresTradingDay, nextFuturesSettlementAt, optionWriterMarginPerContract, type FutureDef, type OptionDef, type OrderSide } from "@mock-kabu/shared";
+import {
+  futureMarginPerContract,
+  futuresTradingDay,
+  isOpeningHedgeOrder,
+  nextFuturesSettlementAt,
+  optionWriterMarginPerContract,
+  type FutureDef,
+  type FuturesPositionSide,
+  type OptionDef,
+  type OrderSide,
+} from "@mock-kabu/shared";
 
 /**
  * 선물 때문에 쓸 수 없는 현금(원) = 포지션 위탁증거금 합계 + 미수금.
@@ -54,6 +64,7 @@ export async function futuresMarginHeld(db: FuturesReader | { [key: string]: any
  *    이미 걸린 증거금 0 청산 주문(같은 방향, 미체결 잔량)만큼은 빼고 센다 — 같은 포지션으로 청산 주문을 여러 번 내
  *    반대 포지션을 증거금 없이 여는 것을 막는다.
  *  - 그 밖(신규·뒤집기): 계좌·종목의 레버리지로 계산한 계약당 위탁증거금.
+ *  - 양방향(positionSide 있음): 진입 = 위탁증거금, 청산 = 0(청산 가능 수량 초과는 422).
  * 계좌 락 안의 트랜잭션으로 부른다.
  */
 export async function futuresOrderHoldPerUnit(
@@ -63,11 +74,24 @@ export async function futuresOrderHoldPerUnit(
   side: OrderSide,
   qty: number,
   priceUnits: number,
+  /** 양방향 주문 방향(사람 계정). null이면 순포지션(봇) */
+  positionSide: FuturesPositionSide | null = null,
 ): Promise<bigint> {
   const position = (await db.futuresPosition.findUnique({
-    where: { accountId_symbol: { accountId, symbol: def.symbol } },
+    where: { accountId_symbol_positionSide: { accountId, symbol: def.symbol, positionSide: positionSide ?? "NET" } },
   })) as { qty: number; leverage: number | null } | null;
   const held = position?.qty ?? 0;
+  if (positionSide != null) {
+    // 양방향: 진입은 늘 증거금, 청산은 그 방향 보유 − 걸린 청산 미체결 이내만(넘으면 거절 — 반대 포지션을 열지 않는다)
+    if (isOpeningHedgeOrder(side, positionSide)) return futureMarginPerContract(def, priceUnits, position?.leverage ?? null);
+    const pending = (await db.order.findMany({
+      where: { accountId, symbol: def.symbol, side, positionSide, status: { in: ["OPEN", "PARTIAL"] } },
+      select: { qty: true, filledQty: true },
+    })) as { qty: number; filledQty: number }[];
+    const reserved = pending.reduce((sum, order) => sum + (order.qty - order.filledQty), 0);
+    if (qty > Math.abs(held) - reserved) throw new UnprocessableEntityException("청산 가능 수량이 부족합니다");
+    return 0n;
+  }
   const closing = (side === "SELL" && held > 0) || (side === "BUY" && held < 0);
   if (closing) {
     const pending = (await db.order.findMany({
@@ -126,7 +150,7 @@ export async function optionOrderHoldPerUnit(
   return optionWriterMarginPerContract(def, series.strike);
 }
 
-async function isBotAccount(db: { [key: string]: any }, accountId: string): Promise<boolean> {
+export async function isBotAccount(db: { [key: string]: any }, accountId: string): Promise<boolean> {
   const account = (await db.account.findUnique({ where: { id: accountId }, select: { userId: true } })) as { userId: string } | null;
   if (!account) return false;
   const user = (await db.user.findUnique({ where: { id: account.userId }, select: { isBot: true } })) as { isBot: boolean } | null;
