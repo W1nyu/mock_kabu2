@@ -33,6 +33,20 @@ const OVERVIEW_BASE_STEP_MS = 5 * 60_000;
 const OVERVIEW_BASE_TTL_MS = OVERVIEW_BASE_STEP_MS + 60_000;
 const OVERVIEW_COMMIT_SLACK_MS = 30_000;
 
+/** 결과 순서를 유지하며 최대 limit개씩만 동시에 실행한다. */
+export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 /** trades/latest 한 행 — 체결이 없는 종목도 listedSymbol로 빈 목록을 만든다. */
 interface LatestTradeRow {
   listedSymbol: string;
@@ -100,6 +114,7 @@ const LATEST_TRADES_MAX = 50;
 const SPARK_TTL_MS = 60_000;
 const SPARK_INTERVAL_SECONDS = 300;
 const SPARK_POINTS = 72;
+const SPARK_CONCURRENCY = 4;
 const INDEX_TTL_MS = { "1d": 15_000, "1w": 60_000, all: 120_000 } as const;
 const INDEX_META_TTL_MS = 10_000;
 /** 재상장 전 체결은 시세에서 뺀다 (listed_at이 없으면 전체). */
@@ -474,12 +489,11 @@ export class MarketController {
   @Get("sparks")
   async sparks() {
     return this.cache.getOrCompute("sparks:5m", SPARK_TTL_MS, async () => {
-      const entries = await Promise.all(
-        [...ACTIVE_SYMBOLS].map(async (symbol) => {
-          const rows = await this.aggregateCandles(symbol, SPARK_INTERVAL_SECONDS, SPARK_POINTS);
-          return [symbol, rows.map((row) => row.close)] as const;
-        }),
-      );
+      // 한꺼번에 18개를 보내면 API 커넥션 풀(운영 12)을 다 차지해 주문 처리가 밀린다 — 몇 개씩만.
+      const entries = await mapWithConcurrency([...ACTIVE_SYMBOLS], SPARK_CONCURRENCY, async (symbol) => {
+        const rows = await this.aggregateCandles(symbol, SPARK_INTERVAL_SECONDS, SPARK_POINTS);
+        return [symbol, rows.map((row) => row.close)] as const;
+      });
       return Object.fromEntries(entries);
     }, { staleMs: SPARK_TTL_MS * 5 });
   }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoCache } from "../../core/memo-cache";
-import { MarketController, mergeSessionStats } from "../market.controller";
+import { MarketController, mapWithConcurrency, mergeSessionStats } from "../market.controller";
 import { SYMBOLS } from "@mock-kabu/shared";
 
 afterEach(() => vi.useRealTimers());
@@ -192,5 +192,21 @@ describe("mergeSessionStats", () => {
     expect(merged.get("KABU")).toMatchObject({ high: 1350, low: 1200, volume: 15n, turnover: 1500n, buy_volume: 15n });
     expect(merged.get("KABU")?.last_trade_ts).toEqual(new Date("2026-09-23T00:06:00Z"));
     expect(merged.get("NEKO")).toMatchObject({ high: 500, volume: 1n });
+  });
+});
+
+describe("mapWithConcurrency", () => {
+  it("keeps order and never runs more than the limit at once", async () => {
+    let running = 0;
+    let peak = 0;
+    const out = await mapWithConcurrency([5, 1, 4, 2, 3, 0], 2, async (n) => {
+      running++;
+      peak = Math.max(peak, running);
+      await new Promise((resolve) => setTimeout(resolve, n));
+      running--;
+      return n * 10;
+    });
+    expect(out).toEqual([50, 10, 40, 20, 30, 0]);
+    expect(peak).toBe(2);
   });
 });
