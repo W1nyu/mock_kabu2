@@ -326,7 +326,13 @@ export class AccountService {
     // 기간 시작 전에 스냅샷이 없는(그 뒤 가입한) 계정은 순입금을 기준으로 삼는다.
     const since =
       period === "today" ? koreaDayStart() : period === "week" ? new Date(Date.now() - 7 * 24 * 3_600_000) : new Date(0);
-    const rows = await this.prisma.$queryRaw<
+    // 지수 기준 시각: 전체 기간은 가입 시각, 기간 랭킹은 기준 스냅샷 시각(없으면 기간 시작과 가입 중 늦은 쪽).
+    const baseTs = period === "all" ? Prisma.sql`u.created_at` : Prisma.sql`COALESCE(b.ts, GREATEST(u.created_at, ${since}))`;
+    // 계획 비용이 커서 Postgres가 JIT를 켜는데, 운영에서 JIT 컴파일만 매번 ~1초였다(쿼리 자체는 ~35ms).
+    // 이 트랜잭션에서만 끈다(SET LOCAL) — 서버 전역 jit=off는 compose에도 있지만 재시작 전에도 효과가 나게.
+    const [, rows] = await this.prisma.$transaction([
+      this.prisma.$executeRaw`SET LOCAL jit = off`,
+      this.prisma.$queryRaw<
       {
         account_id: string;
         nickname: string;
@@ -377,15 +383,23 @@ export class AccountService {
             SELECT SUM(COALESCE(c.close, s.initial_price)::double precision * s.listed_shares) / MAX(e.divisor) AS level
             FROM (
               SELECT divisor, members FROM market.index_epochs
-              WHERE starts_at <= ${period === "all" ? Prisma.sql`u.created_at` : Prisma.sql`COALESCE(b.ts, GREATEST(u.created_at, ${since}))`}
+              WHERE starts_at <= ${baseTs}
               ORDER BY starts_at DESC LIMIT 1
             ) e
             JOIN market.symbols s ON s.symbol = ANY(e.members)
+            -- 간격별로 (symbol, interval, ts) 기본키를 역순 1건씩 읽고 늦은 쪽을 쓴다. IN ('1m', '1h') 한 번에
+            -- 찾으면 인덱스 순서를 못 써 조회마다 봉 수천 개를 읽고 정렬했다(운영: 계정×종목 1,140회, 1.5~3초).
             LEFT JOIN LATERAL (
-              SELECT close FROM market.candles c
-              WHERE c.symbol = s.symbol AND c.interval IN ('1m', '1h')
-                AND c.ts <= ${period === "all" ? Prisma.sql`u.created_at` : Prisma.sql`COALESCE(b.ts, GREATEST(u.created_at, ${since}))`}
-              ORDER BY c.ts DESC LIMIT 1
+              SELECT x.close FROM (
+                (SELECT c.close, c.ts FROM market.candles c
+                 WHERE c.symbol = s.symbol AND c.interval = '1m' AND c.ts <= ${baseTs}
+                 ORDER BY c.ts DESC LIMIT 1)
+                UNION ALL
+                (SELECT c.close, c.ts FROM market.candles c
+                 WHERE c.symbol = s.symbol AND c.interval = '1h' AND c.ts <= ${baseTs}
+                 ORDER BY c.ts DESC LIMIT 1)
+              ) x
+              ORDER BY x.ts DESC LIMIT 1
             ) c ON true
           ) base
       ) idx ON true
@@ -417,7 +431,8 @@ export class AccountService {
       ) r ON true
       -- 선물 평가손익 − 미수금 (총 자산에 포함)
       LEFT JOIN (${futuresValueSql()}) fv ON fv.account_id = a.id
-    `;
+    `,
+    ]);
     const ranked = rows
       .map((row) => {
         const equity = Number(row.equity);

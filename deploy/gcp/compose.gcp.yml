@@ -36,6 +36,9 @@ services:
       - max_connections=80
       - -c
       - wal_compression=on
+      - -c
+      # JIT 컴파일이 랭킹 같은 계획 비용 큰 OLTP 쿼리마다 ~1초씩 붙었다(쿼리 자체는 ~35ms).
+      - jit=off
     shm_size: 512mb
     deploy:
       resources:
