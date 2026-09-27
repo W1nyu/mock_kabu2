@@ -56,10 +56,14 @@ export class AccountService {
   ) {}
 
   async getAccount(accountId: string) {
-    const acc = await this.prisma.account.findUnique({ where: { id: accountId } });
+    // 서로 독립인 조회라 한 번에 보낸다(대시보드·봇이 자주 부른다).
+    const [acc, futures, tradingFeeExempt] = await Promise.all([
+      this.prisma.account.findUnique({ where: { id: accountId } }),
+      // 선물 포지션 증거금은 holdAmount와 따로 묶여 있다 — 주문·이체 가능 금액에서 함께 뺀다.
+      futuresEncumbrance(this.prisma, accountId),
+      isTradingFeeExempt(this.prisma, accountId),
+    ]);
     if (!acc) throw new NotFoundException("계좌를 찾을 수 없습니다");
-    // 선물 포지션 증거금은 holdAmount와 따로 묶여 있다 — 주문·이체 가능 금액에서 함께 뺀다.
-    const futures = await futuresEncumbrance(this.prisma, accountId);
     const available = acc.balance - acc.holdAmount - futures.total;
     return {
       id: acc.id,
@@ -70,16 +74,21 @@ export class AccountService {
       futuresDebt: futures.debt,
       available,
       availableExact: available.toString(),
-      tradingFeeExempt: await isTradingFeeExempt(this.prisma, accountId),
+      tradingFeeExempt,
     };
   }
 
   async getHoldings(accountId: string) {
-    const holdings = await this.prisma.holding.findMany({
-      where: { accountId, qty: { gt: 0 }, symbol: { in: SYMBOLS.map((symbol) => symbol.symbol) } },
-      orderBy: { symbol: "asc" },
-    });
-    const symbols = await this.prisma.marketSymbol.findMany();
+    const [holdings, symbols] = await Promise.all([
+      this.prisma.holding.findMany({
+        where: { accountId, qty: { gt: 0 }, symbol: { in: SYMBOLS.map((symbol) => symbol.symbol) } },
+        orderBy: { symbol: "asc" },
+      }),
+      this.prisma.marketSymbol.findMany({
+        where: { symbol: { in: SYMBOLS.map((symbol) => symbol.symbol) } },
+        select: { symbol: true, lastPrice: true },
+      }),
+    ]);
     const lastPrice = new Map(symbols.map((s) => [s.symbol, s.lastPrice]));
     return holdings.map((h) => {
       const price = lastPrice.get(h.symbol) ?? 0;
