@@ -647,10 +647,16 @@ async function main() {
   );
   setInterval(() => ref.tick(), 1_500);
   const observedTradeIds = new Map(restoredMarket.latestTradeIds);
-  setInterval(
-    () => void observeLatestMarketTrades(clients[0], ref, observedTradeIds),
-    MARKET_OBSERVATION_INTERVAL_MS,
-  );
+  // 앞 조회가 끝나기 전에는 새로 보내지 않는다 — API가 느리거나 재시작 중일 때 요청이 쌓이고,
+  // 늦게 온 옛 응답이 새 응답 뒤에 처리돼 이미 본 체결을 다시 관찰하는 일을 막는다.
+  let observing = false;
+  setInterval(() => {
+    if (observing) return;
+    observing = true;
+    void observeLatestMarketTrades(clients[0], ref, observedTradeIds).finally(() => {
+      observing = false;
+    });
+  }, MARKET_OBSERVATION_INTERVAL_MS);
 
   // Dedicated bot16+ reserve accounts each own exactly one symbol's ladder.
   // Existing bot1..bot10 order history is left untouched.
