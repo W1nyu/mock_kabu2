@@ -14,11 +14,12 @@ import QuoteHeader from "@/components/QuoteHeader";
 import SymbolNews from "@/components/SymbolNews";
 import SymbolStrip from "@/components/SymbolStrip";
 import TradesFeed from "@/components/TradesFeed";
-import { api, getToken } from "@/lib/api";
+import { getToken, sharedGet } from "@/lib/api";
+import { readSnapshot, SNAP_OVERVIEW, SNAPSHOT_MAX_AGE_MS } from "@/lib/snapshot";
 import { COMPACT_TRADE_QUERY, useMediaQuery } from "@/lib/media";
 import { subscribe } from "@/lib/socket";
 import { useMaintenance } from "@/lib/maintenance";
-import { formatKstHm } from "@/lib/time";
+import { formatKstHm, kstSessionStartMs } from "@/lib/time";
 import { serverText, useNames, useT } from "@/lib/i18n";
 
 // 캔들차트(lightweight-charts)는 클라이언트에서만 렌더하고 코드도 따로 싣는다.
@@ -71,7 +72,12 @@ export default function SymbolPage({ params }: { params: Promise<{ symbol: strin
         active = false;
       };
     }
-    api<SymbolInfo[]>("/market/symbols", { auth: false })
+    // 대시보드·증권에서 받아 둔 목록이 있으면 종목명·기준가를 응답 전에 먼저 채운다.
+    const cached = readSnapshot<(SymbolInfo & { sessionStart: number })[]>(SNAP_OVERVIEW, SNAPSHOT_MAX_AGE_MS)?.find(
+      (r) => r.symbol === symbol && r.sessionStart >= kstSessionStartMs(),
+    );
+    if (cached) setInfo(cached);
+    sharedGet<SymbolInfo[]>("/market/symbols")
       .then((rows) => {
         if (active) setInfo(rows.find((r) => r.symbol === symbol) ?? null);
       })

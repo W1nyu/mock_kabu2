@@ -10,7 +10,7 @@ import {
   TickMarkType,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { api, fmt } from "@/lib/api";
+import { api, fmt, sharedGet } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { formatKstHm, formatKstMonthDay, formatKstTime, kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { indexSessionBase, type IndexPoint } from "@/lib/index-session";
@@ -97,12 +97,12 @@ export default function MarketIndexPanel() {
           if (active) setSeries(points);
         })
         .catch(() => {});
-      api<SymbolRow[]>("/market/symbols", { auth: false })
+      sharedGet<SymbolRow[]>("/market/symbols")
         .then((data) => {
           if (active && data.every((row) => row.sessionStart >= kstSessionStartMs())) setRows(data);
         })
         .catch(() => {});
-      api<IndexMeta>("/market/index/meta", { auth: false })
+      sharedGet<IndexMeta>("/market/index/meta")
         .then((data) => {
           if (active) setMeta(data);
         })

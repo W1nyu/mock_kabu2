@@ -105,6 +105,24 @@ export async function api<T = unknown>(
   return res.json() as Promise<T>;
 }
 
+const sharedGets = new Map<string, { at: number; promise: Promise<unknown> }>();
+
+/**
+ * 로그인 없이 받는 공개 시세 GET을 잠깐(ttlMs) 공유한다. 한 화면의 여러 컴포넌트(종목 띠·지수 패널·
+ * 종목 화면)가 같은 목록을 동시에 부르면 요청 한 번으로 합친다. 실패한 요청은 바로 버린다.
+ */
+export function sharedGet<T>(path: string, ttlMs = 2_000): Promise<T> {
+  const now = Date.now();
+  const hit = sharedGets.get(path);
+  if (hit && now - hit.at < ttlMs) return hit.promise as Promise<T>;
+  const promise = api<T>(path, { auth: false });
+  sharedGets.set(path, { at: now, promise });
+  promise.catch(() => {
+    if (sharedGets.get(path)?.promise === promise) sharedGets.delete(path);
+  });
+  return promise;
+}
+
 /** 주문 재시도가 두 번째 주문을 만들지 않도록 제출마다 새로 만드는 멱등 키. */
 export function newIdempotencyKey(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto

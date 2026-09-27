@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, fmt } from "@/lib/api";
+import { fmt, sharedGet } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { everyVisible } from "@/lib/visible-interval";
@@ -29,7 +29,7 @@ export default function SymbolStrip({ current }: { current: string }) {
   useEffect(() => {
     let active = true;
     const load = () => {
-      api<SymbolRow[]>("/market/symbols", { auth: false })
+      sharedGet<SymbolRow[]>("/market/symbols")
         .then((data) => {
           if (active && data.every((row) => row.sessionStart >= kstSessionStartMs())) setRows(data);
         })
