@@ -30,3 +30,16 @@ describe("createTickBatcher", () => {
     expect(apply).not.toHaveBeenCalled();
   });
 });
+
+describe("mergePrices", () => {
+  it("keeps the same object when nothing changed and applies the latest price per symbol", async () => {
+    const { mergePrices } = await import("../live-prices");
+    const prev = { KABU: 100 };
+    expect(mergePrices(prev, [{ symbol: "KABU", price: 100 }])).toBe(prev);
+    expect(mergePrices(prev, [{ symbol: "KABU", price: 101 }, { symbol: "KABU", price: 102 }, { symbol: "NEKO", price: 5 }])).toEqual({
+      KABU: 102,
+      NEKO: 5,
+    });
+    expect(prev).toEqual({ KABU: 100 });
+  });
+});

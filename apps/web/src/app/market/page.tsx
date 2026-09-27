@@ -14,8 +14,7 @@ import { cleanSparks } from "@/lib/sparks";
 import { ALL_INDUSTRIES, INDUSTRY_STORAGE_KEY, industryChipItems } from "@/lib/industry-chips";
 import { liveIndexLevel, type IndexMeta } from "@/lib/index-meta";
 import { matchStockCodes } from "@/lib/symbol-search";
-import { subscribe } from "@/lib/socket";
-import { createTickBatcher } from "@/lib/tick-batch";
+import { subscribeLivePrices } from "@/lib/live-prices";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { readSnapshot, SNAP_OVERVIEW, SNAP_SPARKS, SNAPSHOT_MAX_AGE_MS, writeSnapshot } from "@/lib/snapshot";
 import { readQueryParam, writeQueryParams } from "@/lib/url-query";
@@ -183,27 +182,7 @@ export default function MarketPage() {
   useEffect(() => {
     if (!symbolKey) return;
     // 체결마다 목록 전체를 다시 그리지 않도록 0.2초씩 모아 반영한다.
-    const batcher = createTickBatcher<{ symbol: string; price: number }>((items) =>
-      setLive((prev) => {
-        let next = prev;
-        for (const { symbol, price } of items) {
-          if (next[symbol] !== price) next = next === prev ? { ...prev, [symbol]: price } : { ...next, [symbol]: price };
-        }
-        return next;
-      }),
-    );
-    const unsubscribe = subscribe(
-      symbolKey.split(",").map((symbol) => `trades:${symbol}`),
-      ({ channel, data }) => {
-        const price = Number(data?.price);
-        if (!Number.isFinite(price)) return;
-        batcher.push({ symbol: channel.slice("trades:".length), price });
-      },
-    );
-    return () => {
-      unsubscribe();
-      batcher.cancel();
-    };
+    return subscribeLivePrices(symbolKey.split(","), setLive);
   }, [symbolKey]);
 
   // 종목별 미니 추세선: 최근 6시간 5분봉. 5분마다만 다시 읽는다.

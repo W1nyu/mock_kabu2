@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { fmt, sharedGet } from "@/lib/api";
-import { subscribe } from "@/lib/socket";
+import { subscribeLivePrices } from "@/lib/live-prices";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { everyVisible } from "@/lib/visible-interval";
 import { useNames, useT } from "@/lib/i18n";
@@ -47,14 +47,10 @@ export default function SymbolStrip({ current }: { current: string }) {
 
   useEffect(() => {
     if (rows.length === 0) return;
-    return subscribe(
-      rows.map((r) => `trades:${r.symbol}`),
-      ({ channel, data }) => {
-        const price = Number(data?.price);
-        if (!Number.isFinite(price)) return;
-        const symbol = channel.slice("trades:".length);
-        setLive((prev) => (prev[symbol] === price ? prev : { ...prev, [symbol]: price }));
-      },
+    // 체결마다 다시 그리지 않도록 0.2초씩 모아서 반영한다.
+    return subscribeLivePrices(
+      rows.map((r) => r.symbol),
+      setLive,
     );
   }, [rows]);
 
