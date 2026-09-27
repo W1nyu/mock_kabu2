@@ -45,9 +45,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {/* The glass theme is specified on Inter, which has no Hangul coverage —
             Pretendard carries the Korean text. React hoists these into <head>;
             both degrade to the system stack if the CDN is unreachable. */}
-        {/* 폰트 CSS는 첫 화면 전에 받아야 한다 — 세 CDN 연결(DNS·TLS)을 미리 열어 대기를 줄인다. */}
+        {/* 폰트 CSS는 첫 화면 전에 받아야 한다 — CDN 연결(DNS·TLS)을 미리 열어 대기를 줄인다. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {/* jsDelivr는 CSS(일반 연결)와 폰트 파일(CORS 연결)을 모두 준다 — 브라우저가 연결을 따로 쓴다. */}
+        <link rel="preconnect" href="https://cdn.jsdelivr.net" />
         <link rel="preconnect" href="https://cdn.jsdelivr.net" crossOrigin="anonymous" />
         <link
           rel="stylesheet"
