@@ -156,6 +156,8 @@ model Order {
   status    String   @default("OPEN") // OPEN | PARTIAL | FILLED | CANCELED | REJECTED
   /// BUY: 홀드한 현금 단가 (LIMIT=지정가, MARKET=추정가). SELL: 0 (수량은 holdings.hold_qty로 홀드)
   holdPerUnit BigInt @default(0) @map("hold_per_unit")
+  /// 양방향 선물 주문 방향 LONG | SHORT. null = 순포지션(봇·옵션·현물)
+  positionSide String? @map("position_side")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
@@ -181,6 +183,8 @@ model ConditionalOrder {
   /// 발동 시 접수할 주문 유형 (MARKET | LIMIT)
   orderType    String   @map("order_type")
   limitPrice   Int?     @map("limit_price")
+  /// 양방향 선물 주문 방향 LONG | SHORT. null = 순포지션(봇·옵션·현물)
+  positionSide String? @map("position_side")
   /// OCO(One-Cancels-Other) 짝. 같은 그룹의 한 행이 발동하면 나머지 WAITING 행은 자동 취소
   ocoGroupId   String?  @map("oco_group_id")
   /// 트레일링 스탑 거리(basis points). null이면 고정 트리거. 있으면 trigger_price가 watermark를 따라 움직인다
@@ -387,14 +391,16 @@ model NewsItem {
 model FuturesPosition {
   accountId  String   @map("account_id")
   symbol     String
+  /// LONG | SHORT(사람 계정 양방향 선물) | NET(봇·옵션 순포지션)
+  positionSide String @default("NET") @map("position_side")
   qty        Int      @default(0)
   entryValue BigInt   @default(0) @map("entry_value")
   marginHeld BigInt   @default(0) @map("margin_held")
-  /// 1~20배, null = 거래소 기준 증거금률
+  /// 1~20배, null = 거래소 기준 증거금률. 같은 계좌·종목의 LONG·SHORT 행은 같은 값
   leverage   Int?
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
 
-  @@id([accountId, symbol])
+  @@id([accountId, symbol, positionSide])
   @@map("futures_positions")
   @@schema("account")
 }

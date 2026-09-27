@@ -7,8 +7,8 @@
  *  5) 실현손익 행은 매도자의 실제 체결과 1:1 (고아·불일치 0건)
  *  6) 조건부 주문: 발동 행은 접수 주문 ID 또는 실패 사유를 갖고, 대기 행이 현재가를 오래 넘겨 있지 않음
  */
-import { PrismaClient } from "@prisma/client";
-import { futureDef, futurePositionMargin, optionDef, optionPositionMargin } from "@mock-kabu/shared";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { FUTURES, futureDef, futurePositionMargin, optionDef, optionPositionMargin } from "@mock-kabu/shared";
 
 const prisma = new PrismaClient();
 let failures = 0;
@@ -224,6 +224,20 @@ async function main() {
   });
   check("futures position margin matches its entry value", badMargin.length === 0,
     badMargin.map((row) => ({ accountId: row.accountId, symbol: row.symbol, marginHeld: row.marginHeld })));
+
+  // 9) 양방향 선물: 사람 계정은 선물을 LONG/SHORT 행에만, 봇 계정은 NET 행에만 둔다. 옵션은 늘 NET.
+  const badSides = await prisma.$queryRaw<{ account_id: string; symbol: string; position_side: string; qty: number }[]>`
+    SELECT p.account_id, p.symbol, p.position_side, p.qty
+    FROM account.futures_positions p
+    JOIN account.accounts a ON a.id = p.account_id
+    JOIN auth.users u ON u.id = a.user_id
+    WHERE p.qty <> 0 AND (
+      (p.symbol IN (${Prisma.join(FUTURES.map((f) => f.symbol))}) AND u.is_bot = false AND p.position_side = 'NET')
+      OR (u.is_bot = true AND p.position_side <> 'NET')
+      OR (p.symbol NOT IN (${Prisma.join(FUTURES.map((f) => f.symbol))}) AND p.position_side <> 'NET')
+    )
+  `;
+  check("futures position sides: humans hedge (LONG/SHORT), bots and options net", badSides.length === 0, badSides);
 
   const totals = await prisma.$queryRaw<{ symbol: string; total: bigint }[]>`
     SELECT symbol, SUM(qty) AS total FROM account.holdings GROUP BY symbol ORDER BY symbol
