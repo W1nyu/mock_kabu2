@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getUser, onSessionChange, type SessionUser } from "@/lib/api";
+import { warmMarketSnapshot } from "@/lib/market-warm";
 import { loadSavedTheme, setTheme, useTheme } from "@/lib/theme";
 import NotificationBell from "./NotificationBell";
 import UserMenu from "./UserMenu";
@@ -43,6 +44,8 @@ export default function Nav() {
   const theme = useTheme();
 
   useEffect(() => loadSavedTheme(), []);
+  // 종목 목록을 이 탭에 미리 받아 둬 증권·대시보드·종목 화면이 곧바로 그려지게 한다.
+  useEffect(() => warmMarketSnapshot(), []);
 
   useEffect(() => {
     setUser(getUser());
