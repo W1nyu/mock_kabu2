@@ -7,7 +7,8 @@ ALTER TABLE "order"."orders" ADD CONSTRAINT "orders_position_side_check"
 ALTER TABLE "order"."conditional_orders" ADD CONSTRAINT "conditional_orders_position_side_check"
   CHECK ("position_side" IS NULL OR "position_side" IN ('LONG', 'SHORT'));
 
--- 사람 계정의 살아 있는 선물 주문: 순포지션을 줄이고 잔량이 그 포지션 이내면 청산, 그 밖은 진입.
+-- 사람 계정의 살아 있는 선물 주문: 먼저 모두 진입 방향(매수 = 롱, 매도 = 숏)으로 둔다.
+-- 다음 UPDATE가 증거금 없이 순포지션을 줄이는 주문을 (created_at, id) 순으로 누적해 순포지션 이내인 것만 청산으로 바꾼다.
 UPDATE "order"."orders" o
 SET "position_side" = CASE WHEN o.side = 'BUY' THEN 'LONG' ELSE 'SHORT' END
 FROM "account"."accounts" a
@@ -41,13 +42,18 @@ WHERE cand.id = o.id AND cand.running_qty <= cand.net_qty_abs;
 -- 이 취소 행은 API 아웃박스 릴레이어가 발행한다: 배포는 점검 시간(신규 주문 없음, 봇 정지)에 실행하고,
 -- 점검이 끝나기 전에 릴레이어가 이 행들을 모두 발행해야 한다(그 전엔 옛 증거금 없는 주문이 살아 있을 수 있다).
 INSERT INTO "order"."outbox" ("event_id", "topic", "payload")
-SELECT e.id, 'order.cancel.requested',
-  jsonb_build_object('topic', 'order.cancel.requested', 'eventId', e.id, 'orderId', o.id, 'symbol', o.symbol,
+-- 이벤트 ID는 행마다 한 번 만든다(비상관 LATERAL은 한 번만 평가될 수 있어 ID가 겹친다).
+-- MATERIALIZED로 고정해 event_id와 payload.eventId가 같은 값을 쓰게 한다.
+WITH x AS MATERIALIZED (
+  SELECT gen_random_uuid()::text AS eid, o.id, o.symbol
+  FROM "order"."orders" o
+  WHERE o.position_side IS NOT NULL AND o.status IN ('OPEN', 'PARTIAL') AND o.hold_per_unit = 0
+    AND ((o.side = 'BUY' AND o.position_side = 'LONG') OR (o.side = 'SELL' AND o.position_side = 'SHORT'))
+)
+SELECT x.eid, 'order.cancel.requested',
+  jsonb_build_object('topic', 'order.cancel.requested', 'eventId', x.eid, 'orderId', x.id, 'symbol', x.symbol,
                      'ts', (extract(epoch FROM now()) * 1000)::bigint)
-FROM "order"."orders" o
-CROSS JOIN LATERAL (SELECT gen_random_uuid()::text AS id) e
-WHERE o.position_side IS NOT NULL AND o.status IN ('OPEN', 'PARTIAL') AND o.hold_per_unit = 0
-  AND ((o.side = 'BUY' AND o.position_side = 'LONG') OR (o.side = 'SELL' AND o.position_side = 'SHORT'));
+FROM x;
 
 -- 사람 계정의 대기 중인 선물 조건부 주문은 늘 청산이다: 매도 = 롱 청산, 매수 = 숏 청산.
 UPDATE "order"."conditional_orders" c
