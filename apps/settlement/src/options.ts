@@ -39,7 +39,7 @@ export async function settleOptionTrade(
   const cash = new Map<string, { balance: bigint; release: bigint }>();
 
   for (const leg of legs) {
-    const where = { accountId_symbol: { accountId: leg.accountId, symbol: event.symbol } };
+    const where = { accountId_symbol_positionSide: { accountId: leg.accountId, symbol: event.symbol, positionSide: "NET" } };
     const existing = await ctx.tx.futuresPosition.findUnique({ where });
     const before = existing ? { qty: existing.qty as number, entryValue: existing.entryValue as bigint } : { qty: 0, entryValue: 0n };
     const fill = applyFutureFill(def, before, leg.side, event.price, event.qty);

@@ -1,7 +1,9 @@
 import {
   applyFutureFill,
   applyFuturesCash,
+  applyHedgeFill,
   futurePositionMargin,
+  rowSideOf,
   stateAfterTrade,
   type FutureDef,
   type TradeExecutedEvent,
@@ -23,7 +25,7 @@ export interface FuturesLockContext {
 interface Leg {
   accountId: string;
   side: "BUY" | "SELL";
-  order: { id: string; holdPerUnit: bigint; status: string; qty: number; filledQty: number };
+  order: { id: string; holdPerUnit: bigint; status: string; qty: number; filledQty: number; positionSide?: string | null };
 }
 
 export interface FuturesSettlementSummary {
@@ -47,19 +49,28 @@ export async function settleFuturesTrade(
   const realized = new Map<string, bigint>();
 
   for (const leg of legs) {
-    const where = { accountId_symbol: { accountId: leg.accountId, symbol: event.symbol } };
+    // 사람 계정의 양방향 주문은 그 방향 행(LONG/SHORT), 봇 주문은 순포지션 행(NET).
+    const positionSide = rowSideOf(leg.order.positionSide);
+    const where = { accountId_symbol_positionSide: { accountId: leg.accountId, symbol: event.symbol, positionSide } };
     const existing = await ctx.tx.futuresPosition.findUnique({ where });
     const before = existing
       ? { qty: existing.qty as number, entryValue: existing.entryValue as bigint }
       : { qty: 0, entryValue: 0n };
-    const fill = applyFutureFill(def, before, leg.side, event.price, event.qty);
+    const fill =
+      positionSide === "NET"
+        ? { ...applyFutureFill(def, before, leg.side, event.price, event.qty), overflow: 0 }
+        : applyHedgeFill(def, before, positionSide, leg.side, event.price, event.qty);
+    if (fill.overflow > 0) {
+      // 접수 단계(청산 가능 수량 검사)가 막으므로 정상이면 일어나지 않는다. 반대 포지션을 열지 않고 기록만 남긴다.
+      console.warn(`[settlement] hedge close overflow ${leg.accountId} ${event.symbol} ${positionSide}: ${fill.overflow} (trade ${event.tradeId})`);
+    }
     // 포지션 증거금은 그 계좌·종목의 레버리지로(없으면 거래소 기준). 레버리지는 포지션이 없을 때만 바뀐다.
     const leverage = (existing?.leverage as number | null | undefined) ?? null;
     const marginHeld = fill.qty === 0 ? 0n : futurePositionMargin(def, fill.entryValue, leverage);
     await ctx.tx.futuresPosition.upsert({
       where,
       update: { qty: fill.qty, entryValue: fill.entryValue, marginHeld },
-      create: { accountId: leg.accountId, symbol: event.symbol, qty: fill.qty, entryValue: fill.entryValue, marginHeld },
+      create: { accountId: leg.accountId, symbol: event.symbol, positionSide, qty: fill.qty, entryValue: fill.entryValue, marginHeld },
     });
     if (fill.closedQty > 0) {
       // (trade_id, side) unique — 재전달이 두 번 기록하지 못한다.

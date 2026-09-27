@@ -9,7 +9,8 @@ function context(botIds: string[] = []) {
     A: { balance: 10_000_000n, holdAmount: 0n }, B: { balance: 10_000_000n, holdAmount: 0n },
   };
   const ledger: any[] = [], debts = new Map<string, bigint>(), positions = new Map<string, any>();
-  const key = (where: any) => `${where.accountId_symbol.accountId}:${where.accountId_symbol.symbol}`;
+  const key = (where: any) =>
+    `${where.accountId_symbol_positionSide.accountId}:${where.accountId_symbol_positionSide.symbol}:${where.accountId_symbol_positionSide.positionSide}`;
   const ctx: FuturesLockContext = {
     accounts,
     updateAccount: async (id, next) => { accounts[id] = next; },
@@ -50,15 +51,15 @@ describe("trading fees", () => {
   it("10x on a million-won margin charges 1,000 won, not 10,000, for each side", async () => {
     const f = context();
     const e = event({ symbol: "KABUF", price: 100_000, qty: 1 });
-    f.positions.set("A:KABUF", { qty: 0, entryValue: 0n, marginHeld: 0n, leverage: 10 });
+    f.positions.set("A:KABUF:NET", { qty: 0, entryValue: 0n, marginHeld: 0n, leverage: 10 });
     await settleFuturesTrade(f.ctx, futureDef("KABUF")!, e, order(), order());
-    expect(f.positions.get("A:KABUF").marginHeld).toBe(1_000_000n);
+    expect(f.positions.get("A:KABUF:NET").marginHeld).toBe(1_000_000n);
     expect(f.accounts.A.balance).toBe(9_999_000n);
     expect(f.accounts.B.balance).toBe(9_999_000n);
     expect(f.ledger.map(r => [r.reason, r.delta])).toEqual([["TRADE_FEE_BUY", -1_000n], ["TRADE_FEE_SELL", -1_000n]]);
     await settleFuturesTrade(f.ctx, futureDef("KABUF")!, { ...e, buyerAccountId: "B", sellerAccountId: "A" }, order(), order());
     expect(f.accounts.A.balance).toBe(9_998_000n);
-    expect(f.positions.get("A:KABUF").qty).toBe(0);
+    expect(f.positions.get("A:KABUF:NET").qty).toBe(0);
   });
   it("uses option premium and exempts the bot writer", async () => {
     const f = context(["B"]), def = optionDef("KCOMC6")!;

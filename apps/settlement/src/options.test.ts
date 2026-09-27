@@ -11,8 +11,8 @@ function fakeContext(accounts: Record<string, { balance: bigint; holdAmount: big
   const positions = new Map<string, { qty: number; entryValue: bigint; marginHeld: bigint }>();
   const ledger: { accountId: string; delta: bigint; reason: string }[] = [];
   const realized: { accountId: string; side: string; realized: bigint }[] = [];
-  const key = (w: { accountId_symbol: { accountId: string; symbol: string } }) =>
-    `${w.accountId_symbol.accountId}:${w.accountId_symbol.symbol}`;
+  const key = (w: { accountId_symbol_positionSide: { accountId: string; symbol: string; positionSide: string } }) =>
+    `${w.accountId_symbol_positionSide.accountId}:${w.accountId_symbol_positionSide.symbol}:${w.accountId_symbol_positionSide.positionSide}`;
   const ctx: FuturesLockContext = {
     accounts,
     async updateAccount(accountId, next) {
@@ -66,8 +66,8 @@ describe("option trade settlement", () => {
 
     expect(f.accounts.U).toEqual({ balance: 400_000n, holdAmount: 0n });
     expect(f.accounts.W).toEqual({ balance: 50_600_000n, holdAmount: 0n });
-    expect(f.positions.get("U:KC3")).toMatchObject({ qty: 2, entryValue: 6_000n, marginHeld: 0n });
-    expect(f.positions.get("W:KC3")).toMatchObject({ qty: -2, entryValue: 6_000n, marginHeld: writerMargin * 2n });
+    expect(f.positions.get("U:KC3:NET")).toMatchObject({ qty: 2, entryValue: 6_000n, marginHeld: 0n });
+    expect(f.positions.get("W:KC3:NET")).toMatchObject({ qty: -2, entryValue: 6_000n, marginHeld: writerMargin * 2n });
     expect(f.ledger.map((l) => [l.accountId, l.delta, l.reason])).toEqual([
       ["U", -600_000n, "OPTION_PREMIUM"],
       ["W", 600_000n, "OPTION_PREMIUM"],
@@ -88,8 +88,8 @@ describe("option trade settlement", () => {
 
     expect(f.accounts.U).toEqual({ balance: 1_300_000n, holdAmount: 0n });
     expect(f.accounts.W).toEqual({ balance: 49_700_000n, holdAmount: 0n });
-    expect(f.positions.get("U:KC3")).toMatchObject({ qty: 0, entryValue: 0n, marginHeld: 0n });
-    expect(f.positions.get("W:KC3")).toMatchObject({ qty: 0, entryValue: 0n, marginHeld: 0n });
+    expect(f.positions.get("U:KC3:NET")).toMatchObject({ qty: 0, entryValue: 0n, marginHeld: 0n });
+    expect(f.positions.get("W:KC3:NET")).toMatchObject({ qty: 0, entryValue: 0n, marginHeld: 0n });
     expect(f.realized.map((r) => [r.accountId, r.side, r.realized])).toEqual([
       ["W", "BUY", -300_000n],
       ["U", "SELL", 300_000n],

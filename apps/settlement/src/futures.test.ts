@@ -10,8 +10,8 @@ function fakeContext(accounts: Record<string, { balance: bigint; holdAmount: big
   const debts = new Map<string, bigint>();
   const ledger: { accountId: string; delta: bigint; reason: string }[] = [];
   const realized: { accountId: string; side: string; realized: bigint }[] = [];
-  const key = (w: { accountId_symbol: { accountId: string; symbol: string } }) =>
-    `${w.accountId_symbol.accountId}:${w.accountId_symbol.symbol}`;
+  const key = (w: { accountId_symbol_positionSide: { accountId: string; symbol: string; positionSide: string } }) =>
+    `${w.accountId_symbol_positionSide.accountId}:${w.accountId_symbol_positionSide.symbol}:${w.accountId_symbol_positionSide.positionSide}`;
   const ctx: FuturesLockContext = {
     accounts,
     async updateAccount(accountId, next) {
@@ -54,8 +54,8 @@ function trade(price: number, qty: number, buyer = "A", seller = "B"): TradeExec
   } as TradeExecutedEvent;
 }
 
-function order(price: number, qty: number) {
-  return { id: "o", holdPerUnit: futureMarginPerContract(KABUF, price), status: "OPEN", qty, filledQty: 0 };
+function order(price: number, qty: number, positionSide: string | null = null) {
+  return { id: "o", holdPerUnit: futureMarginPerContract(KABUF, price), status: "OPEN", qty, filledQty: 0, positionSide };
 }
 
 /** 체결 전에 주문 접수가 했을 증거금 묶음을 양쪽 계좌에 반영한 뒤 정산한다. */
@@ -71,8 +71,8 @@ describe("futures settlement", () => {
     const f = fakeContext({ A: { balance: 10_000_000n, holdAmount: 0n }, B: { balance: 10_000_000n, holdAmount: 0n } });
     await fill(f, trade(88_000, 2));
 
-    expect(f.positions.get("A:KABUF")).toMatchObject({ qty: 2, entryValue: 176_000n, marginHeld: futurePositionMargin(KABUF, 176_000n) });
-    expect(f.positions.get("B:KABUF")!.qty).toBe(-2);
+    expect(f.positions.get("A:KABUF:NET")).toMatchObject({ qty: 2, entryValue: 176_000n, marginHeld: futurePositionMargin(KABUF, 176_000n) });
+    expect(f.positions.get("B:KABUF:NET")!.qty).toBe(-2);
     expect(f.accounts.A).toEqual({ balance: 10_000_000n, holdAmount: 0n });
     expect(f.ledger).toHaveLength(0);
   });
@@ -80,11 +80,11 @@ describe("futures settlement", () => {
   it("holds position margin at the account's chosen leverage for that symbol", async () => {
     const f = fakeContext({ A: { balance: 10_000_000n, holdAmount: 0n }, B: { balance: 10_000_000n, holdAmount: 0n } });
     // A는 KABUF 20배로 미리 설정(포지션 없는 설정 행)
-    f.positions.set("A:KABUF", { qty: 0, entryValue: 0n, marginHeld: 0n, leverage: 20 });
+    f.positions.set("A:KABUF:NET", { qty: 0, entryValue: 0n, marginHeld: 0n, leverage: 20 });
     await fill(f, trade(88_000, 2));
     // 명목 176,000 × 100원 = 1,760만 원 → 20배면 88만 원, B는 거래소 기준(21.75%)
-    expect(f.positions.get("A:KABUF")!.marginHeld).toBe(880_000n);
-    expect(f.positions.get("B:KABUF")!.marginHeld).toBe(futurePositionMargin(KABUF, 176_000n));
+    expect(f.positions.get("A:KABUF:NET")!.marginHeld).toBe(880_000n);
+    expect(f.positions.get("B:KABUF:NET")!.marginHeld).toBe(futurePositionMargin(KABUF, 176_000n));
   });
 
   it("closing books realized P&L to cash with a FUTURES_PNL ledger row on each side", async () => {
@@ -93,7 +93,7 @@ describe("futures settlement", () => {
     // A가 885.00에 되팔고, B가 885.00에 되사 청산: A +500단위×100원 = +5만, B −5만
     await fill(f, trade(88_500, 1, "B", "A"));
 
-    expect(f.positions.get("A:KABUF")).toMatchObject({ qty: 0, entryValue: 0n, marginHeld: 0n });
+    expect(f.positions.get("A:KABUF:NET")).toMatchObject({ qty: 0, entryValue: 0n, marginHeld: 0n });
     expect(f.accounts.A.balance).toBe(10_050_000n);
     expect(f.accounts.B.balance).toBe(9_950_000n);
     expect(f.ledger.map((l) => [l.accountId, l.delta, l.reason])).toEqual([
@@ -119,7 +119,38 @@ describe("futures settlement", () => {
   it("a self-trade nets to a flat position and no cash movement", async () => {
     const f = fakeContext({ A: { balance: 10_000_000n, holdAmount: 0n } });
     await fill(f, trade(88_000, 1, "A", "A"));
-    expect(f.positions.get("A:KABUF")).toMatchObject({ qty: 0, entryValue: 0n, marginHeld: 0n });
+    expect(f.positions.get("A:KABUF:NET")).toMatchObject({ qty: 0, entryValue: 0n, marginHeld: 0n });
     expect(f.accounts.A).toEqual({ balance: 10_000_000n, holdAmount: 0n });
+  });
+
+  it("hedge: a long open never touches the same account's short", async () => {
+    const f = fakeContext({ A: { balance: 100_000_000n, holdAmount: 0n }, B: { balance: 100_000_000n, holdAmount: 0n } });
+    f.positions.set("A:KABUF:SHORT", { qty: -2, entryValue: 176_000n, marginHeld: futurePositionMargin(KABUF, 176_000n) });
+    const event = trade(88_000, 1);
+    f.accounts.A.holdAmount += futureMarginPerContract(KABUF, 88_000);
+    await settleFuturesTrade(f.ctx, KABUF, event, order(88_000, 1, "LONG"), { ...order(88_000, 1), holdPerUnit: 0n });
+    expect(f.positions.get("A:KABUF:SHORT")!.qty).toBe(-2);
+    expect(f.positions.get("A:KABUF:LONG")!.qty).toBe(1);
+    expect(f.positions.get("A:KABUF:LONG")!.marginHeld).toBe(futurePositionMargin(KABUF, 88_000n));
+  });
+
+  it("hedge: closing part of a short realizes P&L on that side only", async () => {
+    const f = fakeContext({ A: { balance: 100_000_000n, holdAmount: 0n }, B: { balance: 100_000_000n, holdAmount: 0n } });
+    f.positions.set("A:KABUF:SHORT", { qty: -3, entryValue: 264_000n, marginHeld: futurePositionMargin(KABUF, 264_000n) });
+    f.positions.set("A:KABUF:LONG", { qty: 2, entryValue: 176_000n, marginHeld: futurePositionMargin(KABUF, 176_000n) });
+    // A가 숏 청산(매수) 1 @ 87,000 — 88,000에 판 숏이라 +1,000단위×1×100원 = +100,000원. B는 순포지션 숏 진입.
+    f.accounts.B.holdAmount += futureMarginPerContract(KABUF, 87_000);
+    await settleFuturesTrade(f.ctx, KABUF, trade(87_000, 1), { ...order(87_000, 1, "SHORT"), holdPerUnit: 0n }, order(87_000, 1));
+    expect(f.positions.get("A:KABUF:SHORT")!.qty).toBe(-2);
+    expect(f.positions.get("A:KABUF:LONG")!.qty).toBe(2);
+    expect(f.realized.filter((r) => r.accountId === "A").map((r) => r.realized)).toEqual([100_000n]);
+  });
+
+  it("hedge: one account's long open and short open matched together land on separate rows", async () => {
+    const f = fakeContext({ A: { balance: 100_000_000n, holdAmount: 0n } });
+    f.accounts.A.holdAmount += futureMarginPerContract(KABUF, 88_000) * 2n;
+    await settleFuturesTrade(f.ctx, KABUF, trade(88_000, 1, "A", "A"), order(88_000, 1, "LONG"), order(88_000, 1, "SHORT"));
+    expect(f.positions.get("A:KABUF:LONG")!.qty).toBe(1);
+    expect(f.positions.get("A:KABUF:SHORT")!.qty).toBe(-1);
   });
 });
