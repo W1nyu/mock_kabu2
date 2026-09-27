@@ -41,7 +41,7 @@ function FuturesRows({ positions }: { positions: FuturesAccount["positions"] }) 
         {positions.map((p) => {
           const name = names.future(p.symbol, futureDef(p.symbol)?.name ?? p.symbol);
           return (
-            <li key={p.symbol}>
+            <li key={`${p.symbol}:${p.positionSide}`}>
               <Link
                 href={`/futures/${p.symbol}`}
                 className="flex items-center gap-3 px-4 py-3 active:bg-surface-3/45"
@@ -98,7 +98,7 @@ function FuturesRows({ positions }: { positions: FuturesAccount["positions"] }) 
           </thead>
           <tbody>
             {positions.map((p) => (
-              <tr key={p.symbol}>
+              <tr key={`${p.symbol}:${p.positionSide}`}>
                 <td className="font-semibold">
                   <Link href={`/futures/${p.symbol}`} className="hover:text-sky">
                     {p.symbol}

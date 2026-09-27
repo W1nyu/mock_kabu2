@@ -174,6 +174,8 @@ export class BracketService implements OnModuleInit, OnModuleDestroy {
             side: "SELL",
             type: "MARKET",
             qty: filledQty,
+            // 사람 선물 매수(롱 진입)의 브래킷은 그 롱을 닫는다. 봇·현물은 방향 없이(NET) 낸다.
+            ...(order.positionSide ? { positionSide: "LONG" as const } : {}),
           });
           note = `${reason} → 즉시 시장가 매도 (${sell.id})`;
         } catch (error) {

@@ -22,6 +22,14 @@ const DISMISS_MS = 6_000;
 /** 같은 종목·방향의 체결이 이 시간 안에 이어지면 한 토스트로 합친다 (봇 계정 로그인 시 폭주 방지). */
 const COALESCE_MS = 1_500;
 
+/** 포지션 키("KABUF:LONG", 순포지션은 "KABUF")를 "KABUF 롱"처럼 읽히게 바꾼다. */
+function positionKeyLabel(key: string, tr: (ko: string) => string): string {
+  const [symbol, side] = key.split(":");
+  if (side === "LONG") return `${symbol} ${tr("롱")}`;
+  if (side === "SHORT") return `${symbol} ${tr("숏")}`;
+  return symbol;
+}
+
 interface PendingFill {
   key: string;
   symbol: string;
@@ -128,11 +136,15 @@ export default function Toaster() {
       }
       if (data.type === "futures_settled" && typeof data.symbol === "string") {
         const realized = Number(data.realized);
+        // 양방향 계정은 같은 종목의 롱·숏이 따로 정산된다 — 알림이 하나로 합쳐지지 않게 방향을 넣는다.
+        const hedgeSide = data.positionSide === "LONG" || data.positionSide === "SHORT" ? data.positionSide : null;
         push({
-          id: `futures-settled:${data.symbol}:${data.tradingDay}`,
+          id: `futures-settled:${data.symbol}:${hedgeSide ?? "NET"}:${data.tradingDay}`,
           href: `/${isOption(data.symbol) ? "options" : "futures"}/${data.symbol}`,
           tone: realized > 0 ? "up" : realized < 0 ? "down" : "info",
-          title: tr(isOption(data.symbol) ? "{symbol} 만기 정산" : "{symbol} 일일 정산", { symbol: data.symbol }),
+          title: tr(isOption(data.symbol) ? "{symbol} 만기 정산" : "{symbol} 일일 정산", {
+            symbol: positionKeyLabel(hedgeSide ? `${data.symbol}:${hedgeSide}` : data.symbol, tr),
+          }),
           detail: tr(isOption(data.symbol) ? "내재가치 {price} · 정산손익 {pnl}" : "결제가 {price} · 정산손익 {pnl}", {
             price: fmtFuture(data.symbol, Number(data.price)),
             pnl: `${realized > 0 ? "+" : ""}${krw(realized || 0)}`,
@@ -164,7 +176,7 @@ export default function Toaster() {
             detail:
               data.status === "EMERGENCY"
                 ? tr("평가손실이 증거금의 90%에 닿아 {symbols} 포지션을 시장가로 청산합니다", {
-                    symbols: Array.isArray(data.symbols) ? data.symbols.join(", ") : "",
+                    symbols: Array.isArray(data.symbols) ? data.symbols.map((key: unknown) => positionKeyLabel(String(key), tr)).join(", ") : "",
                   })
                 : tr("추가증거금 기한이 지나 포지션 일부를 시장가로 청산합니다"),
           });

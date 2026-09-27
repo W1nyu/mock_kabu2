@@ -136,4 +136,21 @@ describe("BracketService.sweep", () => {
     expect(conditional.placeOco).not.toHaveBeenCalled();
     expect(orders.place).toHaveBeenCalledWith("acct-1", { symbol: "KABU", side: "SELL", type: "MARKET", qty: 10 });
   });
+
+  it("closes the LONG side when the immediate sell is for a human hedge futures buy", async () => {
+    const { service, orders } = build({
+      order: { id: "order-1", status: "FILLED", filledQty: 2, positionSide: "LONG" },
+      lastPrice: 9_400,
+      fill: { qty: 2n, amount: 20_000n },
+      intent: { symbol: "KABUF" },
+    });
+    await service.sweep();
+    expect(orders.place).toHaveBeenCalledWith("acct-1", {
+      symbol: "KABUF",
+      side: "SELL",
+      type: "MARKET",
+      qty: 2,
+      positionSide: "LONG",
+    });
+  });
 });

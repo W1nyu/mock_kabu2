@@ -39,6 +39,8 @@ export class OrderController {
     assertTradingOpen();
     const spec = body.bracket ? BracketService.validateSpec(body.bracket) : null;
     if (spec && body.side !== "BUY") throw new BadRequestException("자동 손절/익절은 매수 주문에만 붙일 수 있습니다");
+    // 양방향 선물의 매수 + 숏은 숏 청산이다 — 닫을 롱이 생기지 않으므로 브래킷을 붙일 수 없다.
+    if (spec && body.positionSide === "SHORT") throw new BadRequestException("자동 손절/익절은 롱 진입 매수에만 붙일 수 있습니다");
     // Idempotency-Key 헤더(1~128자)가 있으면 재시도가 두 번째 주문을 만들지 않는다.
     const key = idempotencyKey?.trim();
     if (key != null && (key.length === 0 || key.length > 128)) throw new BadRequestException("Idempotency-Key는 1~128자");
