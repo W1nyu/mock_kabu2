@@ -33,6 +33,21 @@ const OVERVIEW_BASE_STEP_MS = 5 * 60_000;
 const OVERVIEW_BASE_TTL_MS = OVERVIEW_BASE_STEP_MS + 60_000;
 const OVERVIEW_COMMIT_SLACK_MS = 30_000;
 
+/** trades/latest 한 행 — 체결이 없는 종목도 listedSymbol로 빈 목록을 만든다. */
+interface LatestTradeRow {
+  listedSymbol: string;
+  id: string | null;
+  symbol: string;
+  price: number;
+  qty: number;
+  buyOrderId: string;
+  sellOrderId: string;
+  buyerAccountId: string;
+  sellerAccountId: string;
+  takerSide: string;
+  createdAt: Date;
+}
+
 interface SessionStatsRow {
   symbol: string;
   high: number | null;
@@ -477,21 +492,29 @@ export class MarketController {
   async latestTrades(@Query("limit") limit = "20") {
     const take = Math.min(Math.max(1, Number(limit) || 20), LATEST_TRADES_MAX);
     return this.cache.getOrCompute(`trades:latest:${take}`, LATEST_TRADES_TTL_MS, async () => {
-      const listed = await this.prisma.marketSymbol.findMany({
-        where: { symbol: { in: [...ACTIVE_SYMBOLS] } },
-        select: { symbol: true, listedAt: true },
-      });
-      const entries = await Promise.all(
-        listed.map(async ({ symbol, listedAt }) => {
-          const rows = await this.prisma.trade.findMany({
-            where: { symbol, ...(listedAt ? { createdAt: { gte: listedAt } } : {}) },
-            orderBy: { createdAt: "desc" },
-            take,
-          });
-          return [symbol, rows] as const;
-        }),
-      );
-      return Object.fromEntries(entries);
+      // 종목마다 따로 조회하면 초당 몇 번씩 18개 쿼리가 커넥션 풀을 한꺼번에 차지해 주문 처리까지 줄을 섰다.
+      // LATERAL로 종목별 최신 take건을 쿼리 1개로 받는다((symbol, created_at) 인덱스를 종목마다 역순으로 탄다).
+      const rows = await this.prisma.$queryRaw<LatestTradeRow[]>`
+        SELECT s.symbol AS "listedSymbol", t.id, t.symbol, t.price, t.qty,
+               t.buy_order_id AS "buyOrderId", t.sell_order_id AS "sellOrderId",
+               t.buyer_account_id AS "buyerAccountId", t.seller_account_id AS "sellerAccountId",
+               t.taker_side AS "takerSide", t.created_at AS "createdAt"
+        FROM market.symbols s
+        LEFT JOIN LATERAL (
+          SELECT * FROM matching.trades t
+          WHERE t.symbol = s.symbol AND t.created_at >= ${LISTED_SINCE}
+          ORDER BY t.created_at DESC
+          LIMIT ${take}
+        ) t ON true
+        WHERE s.symbol IN (${Prisma.join([...ACTIVE_SYMBOLS])})
+        ORDER BY s.symbol, t.created_at DESC
+      `;
+      const bySymbol: Record<string, Omit<LatestTradeRow, "listedSymbol">[]> = {};
+      for (const { listedSymbol, ...trade } of rows) {
+        const list = (bySymbol[listedSymbol] ??= []);
+        if (trade.id != null) list.push(trade);
+      }
+      return bySymbol;
     });
   }
 

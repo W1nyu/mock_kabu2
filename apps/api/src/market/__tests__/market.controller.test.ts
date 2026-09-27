@@ -155,21 +155,27 @@ describe("aggregated candles past the 1m retention window", () => {
 
 describe("latest trades for every symbol in one request", () => {
   it("returns newest-first trades keyed by symbol, respecting relisting, and shares the result briefly", async () => {
-    const listedAt = new Date("2026-09-24T00:00:00Z");
-    const findTrades = vi.fn(async ({ where }: { where: { symbol: string } }) => [{ id: `${where.symbol}-1`, price: 100 }]);
-    const controller = new MarketController({
-      marketSymbol: {
-        findMany: vi.fn(async () => [{ symbol: "MOCK", listedAt: null }, { symbol: "KABU", listedAt }]),
-      },
-      trade: { findMany: findTrades },
-    } as any, {} as any, new MemoCache());
+    const query = vi.fn(async (strings: TemplateStringsArray, ...params: unknown[]) => {
+      const sql = strings.join("?");
+      // 한 쿼리로 종목별 최신 N건 — 재상장 전 체결은 빼고, 최신순.
+      expect(sql).toContain("LEFT JOIN LATERAL");
+      expect(sql).toContain("t.created_at >= ?");
+      expect(sql).toContain("ORDER BY t.created_at DESC");
+      expect(params).toContain(5);
+      return [
+        { listedSymbol: "KABU", id: "KABU-2", price: 101 },
+        { listedSymbol: "KABU", id: "KABU-1", price: 100 },
+        // 체결이 없는 종목은 LEFT JOIN으로 id가 null인 한 행만 온다.
+        { listedSymbol: "MOCK", id: null, price: null },
+      ];
+    });
+    const controller = new MarketController({ $queryRaw: query } as any, {} as any, new MemoCache());
 
     const first = await controller.latestTrades("5");
-    expect(first).toEqual({ MOCK: [{ id: "MOCK-1", price: 100 }], KABU: [{ id: "KABU-1", price: 100 }] });
-    expect(findTrades).toHaveBeenCalledWith(expect.objectContaining({ where: { symbol: "KABU", createdAt: { gte: listedAt } }, take: 5 }));
+    expect(first).toEqual({ KABU: [{ id: "KABU-2", price: 101 }, { id: "KABU-1", price: 100 }], MOCK: [] });
 
     await controller.latestTrades("5");
-    expect(findTrades).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledTimes(1);
   });
 });
 
