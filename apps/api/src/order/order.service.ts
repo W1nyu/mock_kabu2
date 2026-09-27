@@ -4,8 +4,10 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from "@nestjs/common";
+import { ModuleRef } from "@nestjs/core";
 import { randomUUID } from "node:crypto";
 import type { BalanceMutator } from "@mock-kabu/concurrency";
 import type { PrismaClient } from "@mock-kabu/db";
@@ -28,6 +30,7 @@ import {
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
 import { BALANCE_MUTATOR, PRISMA, REDIS } from "../core/tokens";
+import { OptionsService } from "../futures/options.service";
 import { RealtimeGateway } from "../gateway/realtime.gateway";
 import { futuresMarginHeld, futuresOrderHoldPerUnit, optionOrderHoldPerUnit } from "./futures-margin";
 import { OutboxRelayer } from "./outbox.relayer";
@@ -70,8 +73,25 @@ export class OrderService {
     @Inject(BALANCE_MUTATOR) private mutator: BalanceMutator,
     @Inject(REDIS) private redis: Redis,
     private realtime: RealtimeGateway,
-    private outboxRelayer?: OutboxRelayer,
+    @Optional() private outboxRelayer?: OutboxRelayer,
+    // OptionsService는 FuturesModule(이 모듈을 import한다)에 있어 직접 주입하면 순환이 된다 — 쓸 때 찾아온다.
+    @Optional() private moduleRef?: ModuleRef,
   ) {}
+
+  /**
+   * 옵션 시장가 체결 한도의 기준가 = 지금 이론가. 최근가는 체결이 없으면 옛 값에 머물러(하루 만기라 시간가치가 빠르게 준다)
+   * 한도가 마켓메이커 호가(이론가 근처)를 벗어나면 시장가가 체결 없이 취소되고, 그래서 최근가가 또 안 바뀌었다.
+   * 이론가를 구할 수 없으면 최근가.
+   */
+  private async optionMarketReference(symbol: string, lastPrice: number): Promise<number> {
+    try {
+      const options = this.moduleRef?.get(OptionsService, { strict: false });
+      const row = options ? (await options.overview()).find((r) => r.symbol === symbol) : undefined;
+      return row?.theo ?? lastPrice;
+    } catch {
+      return lastPrice;
+    }
+  }
 
   /**
    * 멱등 키가 있으면 같은 키로 이미 접수된 주문을 돌려준다. 키 선점(SET NX)은 접수 전에 하고,
@@ -142,9 +162,10 @@ export class OrderService {
     if (!marketSymbol) throw new NotFoundException(`없는 종목: ${symbol}`);
 
     // 시장가 체결 상한(정수 가격 단위): 최근가 × 안전계수. 현물 매수는 이 값이 곧 홀드 단가다.
-    // 옵션은 가격이 짧은 시간에 크게 움직여 체결 상한을 넉넉히 둔다(최근가 × 1.5 + 10호가).
+    // 옵션은 가격이 짧은 시간에 크게 움직여 체결 상한을 넉넉히 둔다(이론가 × 1.5 + 10호가, optionMarketReference).
+    const optionReference = option && type === "MARKET" ? await this.optionMarketReference(symbol, marketSymbol.lastPrice) : marketSymbol.lastPrice;
     const marketCap = option
-      ? Math.ceil(marketSymbol.lastPrice * 1.5) + option.tickUnits * 10
+      ? Math.ceil(optionReference * 1.5) + option.tickUnits * 10
       : Math.ceil(marketSymbol.lastPrice * MARKET_BUY_HOLD_FACTOR);
     // 홀드 단가(원/주, 원/계약):
     //  - 현물 BUY: LIMIT=지정가, MARKET=체결 상한. 현물 SELL은 현금이 아니라 보유 수량을 묶는다.
@@ -199,7 +220,7 @@ export class OrderService {
         side,
         type,
         // MARKET BUY는 체결 상한을 전달 (홀드 초과 체결 방지). 선물 홀드는 증거금이라 상한과 따로 계산한다.
-        // 옵션 시장가 매도는 최근가의 절반을 하한으로 — 호가가 비어도 1호가에 던지지 않게.
+        // 옵션 시장가 매도는 이론가의 절반을 하한으로 — 호가가 비어도 1호가에 던지지 않게.
         // 선물 시장가 매도는 매수 상한(최근가 × 1.1)과 대칭인 최근가 ÷ 1.1을 하한으로(반대매매와 같은 보호 한도).
         price:
           type === "LIMIT"
@@ -207,7 +228,7 @@ export class OrderService {
             : side === "BUY"
               ? marketCap
               : option
-                ? Math.max(option.tickUnits, Math.floor(marketSymbol.lastPrice / 2))
+                ? Math.max(option.tickUnits, Math.floor(optionReference / 2))
                 : future
                   ? Math.max(future.tickUnits, Math.floor(marketSymbol.lastPrice / MARKET_BUY_HOLD_FACTOR))
                   : null,

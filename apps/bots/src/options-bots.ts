@@ -222,10 +222,18 @@ export function closingOrder(position: { symbol: string; qty: number }): { symbo
 }
 
 /**
+ * 만기까지 그냥 두는 매수 보유분 — 이론가가 2호가 미만이면 마켓메이커가 매수 호가를 내지 않아(planOptionLadder) 팔 곳이 없다.
+ * 이런 보유분을 계속 닫으려 하면 보유 한도(`maxHeld`)를 채운 채 흐름 전체가 멈춘다(2026-09-27 12~18시 체결 0).
+ */
+export function heldToExpiry(position: { qty: number }, row: Pick<OptionOverviewRow, "theo" | "tickUnits"> | null): boolean {
+  return position.qty > 0 && row?.theo != null && row.theo < row.tickUnits * 2;
+}
+
+/**
  * 옵션 거래 흐름(사용자처럼 열고 → 1~6분 뒤 청산). `pauseMs`마다:
  * 보유 기간이 끝난 포지션이 있으면 전부 시장가로 닫고, 아니면 보유 종목이 `maxHeld` 미만일 때 1~3계약을 연다 —
  * `writeRatio` 확률로 매도(쓰기, 등가격 근처·외가격), 나머지는 매수. 닫을 때 보유 수량보다 많이 거래하지 않는다.
- * 호가가 없어 닫지 못하면 1분 뒤 다시 시도한다.
+ * 호가가 없어 닫지 못하면 1분 뒤 다시 시도한다. 가치가 거의 0인 매수 보유분(heldToExpiry)은 닫지 않고 보유 한도에서도 뺀다.
  */
 export async function runOptionsTrader(
   client: ApiClient,
@@ -239,11 +247,12 @@ export async function runOptionsTrader(
     await sleep(pauseMin + Math.random() * (pauseMax - pauseMin));
     try {
       const positions = (await client.optionsPositions()).filter((p) => p.qty !== 0);
+      const active = positions.filter((p) => !heldToExpiry(p, market.row(p.symbol)));
       const now = Date.now();
-      for (const p of positions) if (!exitAt.has(p.symbol)) exitAt.set(p.symbol, now + 60_000 + Math.random() * 5 * 60_000);
-      for (const symbol of [...exitAt.keys()]) if (!positions.some((p) => p.symbol === symbol)) exitAt.delete(symbol);
+      for (const p of active) if (!exitAt.has(p.symbol)) exitAt.set(p.symbol, now + 60_000 + Math.random() * 5 * 60_000);
+      for (const symbol of [...exitAt.keys()]) if (!active.some((p) => p.symbol === symbol)) exitAt.delete(symbol);
 
-      const due = positions.find((p) => (exitAt.get(p.symbol) ?? Infinity) <= now);
+      const due = active.find((p) => (exitAt.get(p.symbol) ?? Infinity) <= now);
       if (due) {
         const order = closingOrder(due)!;
         exitAt.set(due.symbol, now + 60_000); // 실패하면 1분 뒤 다시
@@ -251,7 +260,7 @@ export async function runOptionsTrader(
         exitAt.delete(due.symbol);
         continue;
       }
-      if (positions.length >= style.maxHeld) continue;
+      if (active.length >= style.maxHeld) continue;
       const families = [...new Set(OPTIONS.map((def) => def.family.code))];
       const familyCode = families[Math.floor(Math.random() * families.length)];
       const rows = market.all().filter((row) => row.family === familyCode && !row.expired);

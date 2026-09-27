@@ -162,6 +162,54 @@ describe("OrderService.place for futures", () => {
   });
 });
 
+describe("OrderService.place market option limits", () => {
+  function harness(lastPrice: number, theo: number | null, heldQty = 0) {
+    const accounts: Record<string, { balance: bigint; holdAmount: bigint }> = { a: { balance: 100_000_000n, holdAmount: 0n } };
+    const outbox: Record<string, unknown>[] = [];
+    const tx = {
+      $queryRawUnsafe: vi.fn(async () => [{ isBot: true }]),
+      futuresPosition: {
+        aggregate: vi.fn(async () => ({ _sum: { marginHeld: 0n } })),
+        findUnique: vi.fn(async () => (heldQty > 0 ? { qty: heldQty } : null)),
+      },
+      futuresDebt: { findUnique: vi.fn(async () => null) },
+      order: { findMany: vi.fn(async () => []), create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: "o1", ...data })) },
+      outbox: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => outbox.push(data)) },
+    };
+    const mutator = {
+      withAccountLock: vi.fn(async (_ids: string[], fn: (ctx: unknown) => Promise<unknown>) =>
+        fn({ accounts, tx, updateAccount: async (id: string, next: { balance: bigint; holdAmount: bigint }) => (accounts[id] = next) }),
+      ),
+    };
+    const prisma = { marketSymbol: { findUnique: vi.fn(async () => ({ symbol: "KCOMC8", lastPrice })) } };
+    const options = { overview: vi.fn(async () => [{ symbol: "KCOMC8", theo }]) };
+    const moduleRef = { get: vi.fn(() => options) };
+    const service = new OrderService(prisma as never, mutator as never, {} as never, { notifyAccount: vi.fn() } as never, undefined, moduleRef as never);
+    return { service, outbox };
+  }
+  const sentPrice = (outbox: Record<string, unknown>[]) => (outbox[0].payload as { price: number }).price;
+
+  it("caps a market buy from the current theoretical price, not a stale last trade", async () => {
+    // 최근가 3호가에 머문 사이 이론가가 20호가로 올랐다 — 예전 상한(3 × 1.5 + 10 = 15)은 매도 호가(~21)에 닿지 못했다.
+    const { service, outbox } = harness(3, 20);
+    await service.place("a", { symbol: "KCOMC8", side: "BUY", type: "MARKET", qty: 1 });
+    expect(sentPrice(outbox)).toBe(20 * 1.5 + 10);
+  });
+
+  it("floors a market sell at half the theoretical price so a decayed option can still be closed", async () => {
+    // 최근가 40호가 → 이론가 12호가(시간가치 감소). 예전 하한 20은 매수 호가(~11)보다 높아 청산이 안 됐다.
+    const { service, outbox } = harness(40, 12, 3);
+    await service.place("a", { symbol: "KCOMC8", side: "SELL", type: "MARKET", qty: 1 });
+    expect(sentPrice(outbox)).toBe(6);
+  });
+
+  it("falls back to the last trade price when no theoretical price is available", async () => {
+    const { service, outbox } = harness(40, null, 3);
+    await service.place("a", { symbol: "KCOMC8", side: "SELL", type: "MARKET", qty: 1 });
+    expect(sentPrice(outbox)).toBe(20);
+  });
+});
+
 describe("OrderService.cancel", () => {
   function setup() {
     const keys = new Map<string, string>();
