@@ -1,8 +1,8 @@
 import { futureDef } from "./futures";
 import { optionDef } from "./options";
 
-/** 2026-09-29 04:20 KST: charge by execution time, including delayed/replayed fills. */
-export const TRADING_FEES_EFFECTIVE_AT = Date.parse("2026-09-28T19:20:00Z");
+/** 2026-09-28 04:20 KST: charge by execution time, including delayed/replayed fills. */
+export const TRADING_FEES_EFFECTIVE_AT = Date.parse("2026-09-27T19:20:00Z");
 export const TRADING_FEE_BPS = 1;
 
 /** Spot consideration, futures notional, or option premium, in whole won. */
