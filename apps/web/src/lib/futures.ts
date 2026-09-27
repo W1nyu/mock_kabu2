@@ -37,6 +37,10 @@ export interface FuturesAccount {
     maintenanceMargin: number;
     /** 1~20배, null = 거래소 기준 증거금 */
     leverage: number | null;
+    /** LONG/SHORT(사람 계정 양방향), NET(봇) */
+    positionSide: "LONG" | "SHORT" | "NET";
+    /** 지금 청산 주문을 더 낼 수 있는 계약 수(보유 − 걸린 청산 미체결) */
+    closableQty: number;
   }[];
   marginHeld: number;
   debt: number;

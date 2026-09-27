@@ -22,8 +22,8 @@ interface AccountInfo {
 }
 
 /**
- * 선물 주문 — 레버리지(1~20배), 매수(롱)/매도(숏), 지정가/시장가, 계약 수. 필요 위탁증거금을 미리 보여 준다.
- * 신규 주문은 레버리지로 계산한 증거금을 묶고, 보유 포지션을 줄이는 청산 주문은 증거금이 필요 없다.
+ * 선물 주문 — 레버리지, [진입|청산] 탭, 롱/숏, 지정가/시장가, 계약 수.
+ * 진입은 레버리지 증거금을 묶고, 청산은 증거금 없이 보유(청산 가능) 수량까지.
  */
 export default function FuturesOrderPanel({
   symbol,
@@ -40,7 +40,11 @@ export default function FuturesOrderPanel({
 }) {
   const tr = useT();
   const def = futureDef(symbol)!;
-  const [side, setSide] = useState<"BUY" | "SELL">(initialSide);
+  type Mode = "OPEN" | "CLOSE";
+  type Dir = "LONG" | "SHORT";
+  const [mode, setMode] = useState<Mode>("OPEN");
+  // 청산 탭의 % 버튼·예상 실현손익 기준 방향. 처음엔 시트를 연 버튼(매수 → 롱, 매도 → 숏).
+  const [dir, setDir] = useState<Dir>(initialSide === "BUY" ? "LONG" : "SHORT");
   const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT");
   const [priceText, setPriceText] = useState("");
   const [qty, setQty] = useState(1);
@@ -82,12 +86,20 @@ export default function FuturesOrderPanel({
   }, [refreshAccount]);
 
   const leverage = futures?.leverage?.[symbol] ?? null;
-  const positionRow = futures?.positions.find((p) => p.symbol === symbol) ?? null;
-  const positionQty = positionRow?.qty ?? 0;
+  const rowOf = (d: Dir) => futures?.positions.find((p) => p.symbol === symbol && p.positionSide === d) ?? null;
+  const longRow = rowOf("LONG");
+  const shortRow = rowOf("SHORT");
+  const held = { LONG: longRow?.qty ?? 0, SHORT: Math.abs(shortRow?.qty ?? 0) };
+  const closable = { LONG: longRow?.closableQty ?? 0, SHORT: shortRow?.closableQty ?? 0 };
   // 포지션·미체결이 있으면 레버리지를 못 바꾼다(서버도 막는다).
-  const leverageLocked = positionQty !== 0 || liveOrders > 0;
-  const closing = (side === "SELL" && positionQty > 0) || (side === "BUY" && positionQty < 0);
-  const closingOnly = closing && qty <= Math.abs(positionQty);
+  const leverageLocked = held.LONG > 0 || held.SHORT > 0 || liveOrders > 0;
+  // 청산 탭을 열었는데 고른 방향에 포지션이 없고 반대쪽에 있으면 그쪽으로
+  useEffect(() => {
+    if (mode === "CLOSE" && held[dir] === 0) {
+      const other: Dir = dir === "LONG" ? "SHORT" : "LONG";
+      if (held[other] > 0) setDir(other);
+    }
+  }, [mode, dir, held.LONG, held.SHORT]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function chooseLeverage(next: number | null) {
     setLeverageBusy(true);
@@ -107,12 +119,13 @@ export default function FuturesOrderPanel({
   const holdPriceUnits = type === "LIMIT" ? priceUnits : lastPrice != null ? Math.ceil(lastPrice * MARKET_BUY_HOLD_FACTOR) : null;
   const marginPerContract = holdPriceUnits != null ? futureMarginPerContract(def, holdPriceUnits, leverage) : null;
   const perContract = holdPriceUnits != null && marginPerContract != null ? Number(feeExempt ? marginPerContract : orderHoldWithFee(marginPerContract, symbol, holdPriceUnits)) : null;
-  // 수량 % 버튼의 기준: 청산 방향이면 보유 포지션, 아니면 주문 가능 금액으로 열 수 있는 최대 계약
-  const sizingBase = closing
-    ? Math.min(Math.abs(positionQty), MAX_FUTURES_ORDER_QTY)
-    : available != null && perContract != null && perContract > 0
-      ? Math.min(MAX_FUTURES_ORDER_QTY, Math.floor(available / perContract))
-      : 0;
+  // 수량 % 버튼의 기준: 청산 탭이면 고른 방향의 청산 가능 수량, 진입 탭이면 주문 가능 금액으로 열 수 있는 최대 계약
+  const sizingBase =
+    mode === "CLOSE"
+      ? Math.min(closable[dir], MAX_FUTURES_ORDER_QTY)
+      : available != null && perContract != null && perContract > 0
+        ? Math.min(MAX_FUTURES_ORDER_QTY, Math.floor(available / perContract))
+        : 0;
   const [activePct, setActivePct] = useState<number | null>(null);
   function applyPct(pct: number) {
     if (sizingBase < 1) return;
@@ -120,21 +133,17 @@ export default function FuturesOrderPanel({
     setActivePct(pct);
   }
   const margin = perContract != null ? perContract * qty : null;
-  // 청산 주문이면 이 가격에 닫을 때의 실현손익(평균가 기준), 새로 여는 주문이면 긴급 반대매매(평가손실 = 증거금 90%) 예상 가격.
-  const closeQty = closing ? Math.min(qty, Math.abs(positionQty)) : 0;
+  const closeRow = dir === "LONG" ? longRow : shortRow;
+  const closeQty = Math.min(qty, closable[dir]);
+  // 청산 탭: 이 가격에 닫을 때의 실현손익(평균가 기준)
   const expectedRealized =
-    closing && positionRow && priceUnits != null
-      ? Math.sign(positionQty) * (priceUnits - positionRow.avgPrice) * closeQty * def.unitValue
+    mode === "CLOSE" && closeRow && closeQty > 0 && priceUnits != null
+      ? (dir === "LONG" ? 1 : -1) * (priceUnits - closeRow.avgPrice) * closeQty * def.unitValue
       : null;
-  const openingQty = qty - closeQty;
-  const emergencyUnits =
-    openingQty > 0 && priceUnits != null
-      ? (() => {
-          const bps = leverage != null ? Math.ceil(10_000 / leverage) : def.initialMarginBps;
-          const move = (priceUnits * bps * FUTURES_EMERGENCY_LOSS_BPS) / 10_000 / 10_000;
-          // 새로 열리는 쪽은 주문 방향(뒤집기면 청산 뒤 남는 수량)
-          return Math.round(side === "BUY" ? priceUnits - move : priceUnits + move);
-        })()
+  // 진입 탭: 긴급 반대매매(평가손실 = 증거금 90%) 예상 가격 — 롱은 아래, 숏은 위
+  const emergencyMove =
+    mode === "OPEN" && priceUnits != null
+      ? (priceUnits * (leverage != null ? Math.ceil(10_000 / leverage) : def.initialMarginBps) * FUTURES_EMERGENCY_LOSS_BPS) / 10_000 / 10_000
       : null;
   const tickText = unitsToInput(symbol, def.tickUnits);
   /** 지정가를 호가 단위만큼 올리고 내린다(입력이 비었거나 틀렸으면 현재가에서 시작, 틱에 맞춘다). */
@@ -146,20 +155,19 @@ export default function FuturesOrderPanel({
   }
   const invalidPrice = type === "LIMIT" && priceUnits == null;
 
-  async function submit() {
+  async function submit(target: Dir) {
     if (invalidPrice) return;
+    const orderSide = mode === "OPEN" ? (target === "LONG" ? "BUY" : "SELL") : target === "LONG" ? "SELL" : "BUY";
+    const label = tr(mode === "OPEN" ? (target === "LONG" ? "롱 진입" : "숏 진입") : target === "LONG" ? "롱 청산" : "숏 청산");
     setBusy(true);
     setMessage(null);
     try {
       await api("/orders", {
         method: "POST",
         headers: { "idempotency-key": newIdempotencyKey() },
-        body: { symbol, side, type, qty, ...(type === "LIMIT" ? { price: priceUnits } : {}) },
+        body: { symbol, side: orderSide, positionSide: target, type, qty, ...(type === "LIMIT" ? { price: priceUnits } : {}) },
       });
-      setMessage({
-        ok: true,
-        text: side === "BUY" ? tr("매수 {n}계약 주문을 접수했습니다", { n: qty }) : tr("매도 {n}계약 주문을 접수했습니다", { n: qty }),
-      });
+      setMessage({ ok: true, text: tr("{label} {n}계약 주문을 접수했습니다", { label, n: qty }) });
       refreshAccount();
       onPlaced();
     } catch (error) {
@@ -184,7 +192,6 @@ export default function FuturesOrderPanel({
     );
   }
 
-  const sideTone = side === "BUY" ? "bg-up text-white" : "bg-down text-white";
   return (
     <div className="glass space-y-3 p-4">
       <TradingFeeNotice symbol={symbol} price={priceUnits} qty={qty} leverage={leverage} exempt={feeExempt} />
@@ -227,20 +234,40 @@ export default function FuturesOrderPanel({
         {leverageLocked && <p className="mt-1 text-[11px] text-ink-faint">{tr("포지션·미체결 주문이 없을 때 바꿀 수 있습니다.")}</p>}
       </div>
 
-      <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-2/60 p-1">
-        {(["BUY", "SELL"] as const).map((s) => (
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-2/60 p-1" role="tablist">
+        {(["OPEN", "CLOSE"] as const).map((m) => (
           <button
-            key={s}
+            key={m}
             type="button"
-            onClick={() => setSide(s)}
-            className={`min-h-10 rounded-lg text-sm font-semibold transition-colors ${
-              side === s ? (s === "BUY" ? "bg-up/15 text-up" : "bg-down/15 text-down") : "text-ink-muted"
-            }`}
+            role="tab"
+            aria-selected={mode === m}
+            onClick={() => { setMode(m); setActivePct(null); }}
+            className={`min-h-10 rounded-lg text-sm font-semibold transition-colors ${mode === m ? "bg-surface-3 text-ink" : "text-ink-muted"}`}
           >
-            {s === "BUY" ? tr("매수 (롱)") : tr("매도 (숏)")}
+            {m === "OPEN" ? tr("진입") : tr("청산")}
           </button>
         ))}
       </div>
+      {mode === "CLOSE" && (
+        <div className="grid grid-cols-2 gap-1.5" role="group" aria-label={tr("청산할 포지션")}>
+          {(["LONG", "SHORT"] as const).map((d) => (
+            <button
+              key={d}
+              type="button"
+              disabled={held[d] === 0}
+              onClick={() => { setDir(d); setActivePct(null); }}
+              aria-pressed={dir === d}
+              className={`num rounded-lg border px-2 py-1.5 text-left text-[12px] disabled:opacity-40 ${
+                dir === d ? (d === "LONG" ? "border-up/45 bg-up/10" : "border-down/45 bg-down/10") : "border-hairline-soft"
+              }`}
+            >
+              <span className={`font-semibold ${d === "LONG" ? "text-up" : "text-down"}`}>{d === "LONG" ? tr("롱") : tr("숏")}</span>{" "}
+              {tr("{n}계약", { n: held[d] })}
+              <span className="block text-[11px] text-ink-faint">{tr("청산 가능 {n}계약", { n: closable[d] })}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="flex gap-1">
         {(["LIMIT", "MARKET"] as const).map((t) => (
@@ -324,7 +351,7 @@ export default function FuturesOrderPanel({
 
       <div>
         <div className="mb-1.5 flex items-center justify-between text-[11px] text-ink-faint">
-          <span>{closing ? tr("보유 포지션 기준 (청산)") : tr("주문 가능 금액 기준")}</span>
+          <span>{mode === "CLOSE" ? tr("청산 가능 수량 기준") : tr("주문 가능 금액 기준")}</span>
           <span className="num">{tr("최대 {n}계약", { n: sizingBase.toLocaleString("ko-KR") })}</span>
         </div>
         <div className="grid grid-cols-4 gap-1.5">
@@ -337,9 +364,11 @@ export default function FuturesOrderPanel({
               aria-pressed={activePct === pct}
               className={`num rounded-lg border py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${
                 activePct === pct
-                  ? side === "BUY"
-                    ? "border-up/45 bg-up/15 text-up"
-                    : "border-down/45 bg-down/15 text-down"
+                  ? mode === "CLOSE"
+                    ? dir === "LONG"
+                      ? "border-up/45 bg-up/15 text-up"
+                      : "border-down/45 bg-down/15 text-down"
+                    : "border-sky/45 bg-sky/12 text-sky"
                   : "border-hairline-soft bg-surface-2/50 text-ink-muted hover:border-hairline hover:text-ink"
               }`}
             >
@@ -351,10 +380,8 @@ export default function FuturesOrderPanel({
 
       <dl className="num space-y-1 text-[13px]">
         <div className="flex justify-between">
-          <dt className="text-ink-muted">
-            {closingOnly ? tr("필요 증거금 (청산 주문)") : tr("주문 예약금 (수수료 포함)")}
-          </dt>
-          <dd className="font-semibold">{closingOnly ? tr("없음") : margin == null ? "—" : krw(margin)}</dd>
+          <dt className="text-ink-muted">{mode === "CLOSE" ? tr("필요 증거금 (청산 주문)") : tr("주문 예약금 (수수료 포함)")}</dt>
+          <dd className="font-semibold">{mode === "CLOSE" ? tr("없음") : margin == null ? "—" : krw(margin)}</dd>
         </div>
         {expectedRealized != null && (
           <div className="flex justify-between">
@@ -369,10 +396,13 @@ export default function FuturesOrderPanel({
             </dd>
           </div>
         )}
-        {emergencyUnits != null && (
+        {emergencyMove != null && priceUnits != null && (
           <div className="flex justify-between" title={tr("평가손실이 이 포지션 증거금의 90%가 되는 가격 — 여기에 닿으면 즉시 전량 반대매매")}>
             <dt className="text-ink-muted">{tr("긴급 반대매매가 (예상)")}</dt>
-            <dd className="text-ink-muted">{fmtFuture(symbol, emergencyUnits)}</dd>
+            <dd className="text-ink-muted">
+              <span className="text-up">{tr("롱")}</span> {fmtFuture(symbol, Math.round(priceUnits - emergencyMove))} ·{" "}
+              <span className="text-down">{tr("숏")}</span> {fmtFuture(symbol, Math.round(priceUnits + emergencyMove))}
+            </dd>
           </div>
         )}
         <div className="flex justify-between">
@@ -387,14 +417,21 @@ export default function FuturesOrderPanel({
         )}
       </dl>
 
-      <button
-        type="button"
-        disabled={busy || invalidPrice}
-        onClick={submit}
-        className={`min-h-11 w-full rounded-xl text-sm font-semibold disabled:opacity-50 ${sideTone}`}
-      >
-        {busy ? tr("주문 중…") : side === "BUY" ? tr("매수 {n}계약", { n: qty }) : tr("매도 {n}계약", { n: qty })}
-      </button>
+      <div className="grid grid-cols-2 gap-2">
+        {(["LONG", "SHORT"] as const).map((d) => (
+          <button
+            key={d}
+            type="button"
+            disabled={busy || invalidPrice || (mode === "CLOSE" && closable[d] === 0)}
+            onClick={() => void submit(d)}
+            className={`min-h-11 rounded-xl text-sm font-semibold text-white disabled:opacity-50 ${d === "LONG" ? "bg-up" : "bg-down"}`}
+          >
+            {busy
+              ? tr("주문 중…")
+              : tr(mode === "OPEN" ? (d === "LONG" ? "롱 진입" : "숏 진입") : d === "LONG" ? "롱 청산" : "숏 청산")}
+          </button>
+        ))}
+      </div>
       {message && <p className={`text-[13px] ${message.ok ? "text-ok" : "text-down"}`}>{message.text}</p>}
       <p className="text-[11px] leading-5 text-ink-faint">
         {tr("1일물 — 매일 04:10 점검 시간에 그 시각 기초자산 가격으로 현금 정산되고 포지션이 사라집니다.")}
