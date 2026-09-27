@@ -1438,3 +1438,16 @@ git commit -m "docs: 선물 양방향 매매 인수인계 기록"
 ```
 
 (`scripts/smoke.mjs`를 고치지 않았으면 add에서 뺀다.)
+
+---
+
+### Task 11: 운영 반영 (사용자 요청 — 구현·검증 뒤 바로 운영 적용)
+
+마이그레이션이 있으므로 `docs/production-update-runbook.md`의 **전체 절차**를 따른다. 컨트롤러(메인 세션)가 직접 한다 — 서브에이전트에 맡기지 않는다.
+
+- [ ] **Step 1: 로컬 묶기** — `BASE`는 서버 `/opt/mock-kabu2/DEPLOYED_COMMIT`(04:13 예약 적용 뒤 값을 다시 확인). `git diff --name-only --diff-filter=ACMR $BASE HEAD`로 파일 목록, `git -c core.autocrlf=false archive`로 묶어 scp.
+- [ ] **Step 2: 서버 준비(영향 없음)** — 서버 소스가 `BASE`와 같은지 해시로 확인, 롤백 태그 `pre-hedge-YYYYMMDD`(+서비스별), 소스 백업, `sudo tar xf`로 교체, grep 확인(`positionSide`가 `apps/api/src/order/order.service.ts`에, 마이그레이션 폴더 존재), `build api`.
+- [ ] **Step 3: 점검 예고** — 5분 뒤 시작·25분 창, 문구 "선물 양방향(롱·숏 동시 보유) 매매 적용 점검".
+- [ ] **Step 4: 적용** — 점검 시작 뒤 `stop bots` → pgBackRest diff 백업 → `run --rm migrate`(출력에 `20260928090000_futures_hedge_mode` 적용 확인) → `up -d --no-deps api web matching-engine settlement`.
+- [ ] **Step 5: 해제·확인** — 점검 해제 → `up -d --no-deps bots` → 90초 → 컨테이너 상태, 호가(KABU·DAON·KABUF), `consistency`의 `PASS|FAIL` 줄(마지막 `정합성 검사 전부 통과`), 봇 5분 로그 오류 0, 사람 계정 선물 포지션 방향 분포 SQL(읽기 전용).
+- [ ] **Step 6: 기록** — `DEPLOYED_COMMIT` 갱신, HANDOFF 운영 적용 기록(롤백 태그·백업·확인 결과) `docs:` 커밋.
