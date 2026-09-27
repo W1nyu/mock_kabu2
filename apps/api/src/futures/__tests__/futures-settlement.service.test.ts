@@ -9,29 +9,31 @@ function harness(options: { usdClose?: number | null; withOptions?: boolean; wit
     optBuyer: { balance: 1_000_000n, holdAmount: 0n },
     optWriter: { balance: 100_000n, holdAmount: 0n },
   };
-  const positions = new Map<string, { accountId: string; symbol: string; qty: number; entryValue: bigint; marginHeld: bigint }>([
+  const positions = new Map<string, { accountId: string; symbol: string; positionSide: string; qty: number; entryValue: bigint; marginHeld: bigint }>([
     // USDF 1,400.0원에 2계약 롱 / 숏
-    ["long:USDF", { accountId: "long", symbol: "USDF", qty: 2, entryValue: 28_000n, marginHeld: 1n }],
-    ["short:USDF", { accountId: "short", symbol: "USDF", qty: -2, entryValue: 28_000n, marginHeld: 1n }],
+    ["long:USDF:NET", { accountId: "long", symbol: "USDF", positionSide: "NET", qty: 2, entryValue: 28_000n, marginHeld: 1n }],
+    ["short:USDF:NET", { accountId: "short", symbol: "USDF", positionSide: "NET", qty: -2, entryValue: 28_000n, marginHeld: 1n }],
   ]);
   if (options.withKcom) {
     // 원자재지수 콜 3번(행사가 100.00pt) — 0.40pt에 2계약 매수 / 쓰기
-    positions.set("optBuyer:KCOMC3", { accountId: "optBuyer", symbol: "KCOMC3", qty: 2, entryValue: 80n, marginHeld: 0n });
-    positions.set("optWriter:KCOMC3", { accountId: "optWriter", symbol: "KCOMC3", qty: -2, entryValue: 80n, marginHeld: 800_000n });
+    positions.set("optBuyer:KCOMC3:NET", { accountId: "optBuyer", symbol: "KCOMC3", positionSide: "NET", qty: 2, entryValue: 80n, marginHeld: 0n });
+    positions.set("optWriter:KCOMC3:NET", { accountId: "optWriter", symbol: "KCOMC3", positionSide: "NET", qty: -2, entryValue: 80n, marginHeld: 800_000n });
   }
   if (options.withOptions) {
     // 원/달러 콜 3번(행사가 1,400.0원) — 프리미엄 3.0원에 3계약. 매수자 / 쓰기(봇)
-    positions.set("optBuyer:UC3", { accountId: "optBuyer", symbol: "UC3", qty: 3, entryValue: 90n, marginHeld: 0n });
-    positions.set("optWriter:UC3", { accountId: "optWriter", symbol: "UC3", qty: -3, entryValue: 90n, marginHeld: 1_260_000n });
+    positions.set("optBuyer:UC3:NET", { accountId: "optBuyer", symbol: "UC3", positionSide: "NET", qty: 3, entryValue: 90n, marginHeld: 0n });
+    positions.set("optWriter:UC3:NET", { accountId: "optWriter", symbol: "UC3", positionSide: "NET", qty: -3, entryValue: 90n, marginHeld: 1_260_000n });
     // 원/달러 풋 3번 — 만기에 외가격이라 소멸
-    positions.set("optBuyer:UP3", { accountId: "optBuyer", symbol: "UP3", qty: 1, entryValue: 25n, marginHeld: 0n });
-    positions.set("optWriter:UP3", { accountId: "optWriter", symbol: "UP3", qty: -1, entryValue: 25n, marginHeld: 420_000n });
+    positions.set("optBuyer:UP3:NET", { accountId: "optBuyer", symbol: "UP3", positionSide: "NET", qty: 1, entryValue: 25n, marginHeld: 0n });
+    positions.set("optWriter:UP3:NET", { accountId: "optWriter", symbol: "UP3", positionSide: "NET", qty: -1, entryValue: 25n, marginHeld: 420_000n });
   }
+  const keyOf = (w: { accountId: string; symbol: string; positionSide: string }) => `${w.accountId}:${w.symbol}:${w.positionSide}`;
   const claims = new Set<string>();
   const debts = new Map<string, bigint>();
   const ledger: { accountId: string; delta: bigint; reason: string }[] = [];
   const settlements = new Map<string, { price: number; positions: number; realizedTotal: bigint }>();
   const outbox: unknown[] = [];
+  const realized: { accountId: string; symbol: string; tradeId: string; closedQty: number; realized: bigint }[] = [];
   const marginCalls = [{ id: "c1", resolvedAt: null as Date | null, outcome: null as string | null }];
 
   const tx = {
@@ -40,14 +42,13 @@ function harness(options: { usdClose?: number | null; withOptions?: boolean; wit
       create: async ({ data }: any) => claims.add(data.eventId),
     },
     futuresPosition: {
-      findUnique: async ({ where }: any) =>
-        positions.get(`${where.accountId_symbol.accountId}:${where.accountId_symbol.symbol}`) ?? null,
+      findUnique: async ({ where }: any) => positions.get(keyOf(where.accountId_symbol_positionSide)) ?? null,
       update: async ({ where, data }: any) => {
-        const k = `${where.accountId_symbol.accountId}:${where.accountId_symbol.symbol}`;
+        const k = keyOf(where.accountId_symbol_positionSide);
         positions.set(k, { ...positions.get(k)!, ...data });
       },
     },
-    futuresRealized: { create: vi.fn(async () => undefined) },
+    futuresRealized: { create: vi.fn(async ({ data }: any) => void realized.push(data)) },
     futuresDebt: {
       findUnique: async ({ where }: any) => (debts.has(where.accountId) ? { amount: debts.get(where.accountId)! } : null),
       upsert: async ({ where, update }: any) => debts.set(where.accountId, update.amount),
@@ -112,7 +113,7 @@ function harness(options: { usdClose?: number | null; withOptions?: boolean; wit
     undefined,
     optionsService as never,
   );
-  return { service, restrikeStale, accounts, positions, debts, ledger, settlements, outbox, marginCalls };
+  return { service, restrikeStale, accounts, positions, debts, ledger, settlements, outbox, marginCalls, claims, realized, redis };
 }
 
 describe("futures daily settlement", () => {
@@ -146,11 +147,11 @@ describe("futures daily settlement", () => {
     const h = harness();
     await h.service.settle("2026-09-26");
     // 04:20 이후 새로 연 포지션
-    h.positions.set("long:USDF", { accountId: "long", symbol: "USDF", qty: 1, entryValue: 14_050n, marginHeld: 1n });
+    h.positions.set("long:USDF:NET", { accountId: "long", symbol: "USDF", positionSide: "NET", qty: 1, entryValue: 14_050n, marginHeld: 1n });
     h.marginCalls.push({ id: "c2", resolvedAt: null, outcome: null });
     const outboxBefore = h.outbox.length;
     await h.service.settle("2026-09-26");
-    expect(h.positions.get("long:USDF")!.qty).toBe(1);
+    expect(h.positions.get("long:USDF:NET")!.qty).toBe(1);
     // 낮에 새로 낸 미체결 주문도 취소하지 않는다(재기동마다 모든 선물 주문이 취소되던 문제).
     expect(h.outbox.length).toBe(outboxBefore);
     expect(h.marginCalls[1].resolvedAt).toBeNull();
@@ -167,7 +168,7 @@ describe("futures daily settlement", () => {
   it("refuses to close positions at a made-up price when the underlying has no stored value", async () => {
     const h = harness({ usdClose: null });
     await expect(h.service.settle("2026-09-26")).rejects.toThrow(/no settlement price for USDF/);
-    expect(h.positions.get("long:USDF")!.qty).toBe(2);
+    expect(h.positions.get("long:USDF:NET")!.qty).toBe(2);
   });
 
   it("settles options at intrinsic value: buyers get it, writers pay it (debt if short), OTM expires worthless", async () => {
@@ -208,5 +209,33 @@ describe("futures daily settlement", () => {
       ["optWriter", -100_000n],
     ]);
     expect(h.debts.get("optWriter")).toBe(100_000n);
+  });
+
+  it("settles a person's long and short on the same contract separately", async () => {
+    const h = harness();
+    // 한 계좌가 USDF 롱 2 @ 1,400.0원, 숏 −1 @ 1,420.0원을 같이 들고 있다. 결제가 1,410.0원.
+    h.positions.clear();
+    h.positions.set("long:USDF:LONG", { accountId: "long", symbol: "USDF", positionSide: "LONG", qty: 2, entryValue: 28_000n, marginHeld: 1n });
+    h.positions.set("long:USDF:SHORT", { accountId: "long", symbol: "USDF", positionSide: "SHORT", qty: -1, entryValue: 14_200n, marginHeld: 1n });
+    const result = await h.service.settle("2026-09-26");
+
+    expect(h.positions.get("long:USDF:LONG")!.qty).toBe(0);
+    expect(h.positions.get("long:USDF:SHORT")!.qty).toBe(0);
+    // 롱 +100단위 × 2 × 1,000원 = +200,000, 숏 +100단위 × 1 × 1,000원 = +100,000
+    expect(h.realized.map((r) => [r.tradeId, r.closedQty, r.realized])).toEqual([
+      ["futures-settle:USDF:2026-09-26:long:LONG", 2, 200_000n],
+      ["futures-settle:USDF:2026-09-26:long:SHORT", 1, 100_000n],
+    ]);
+    expect(h.claims.has("futures-settle:USDF:2026-09-26:long:LONG")).toBe(true);
+    expect(h.claims.has("futures-settle:USDF:2026-09-26:long:SHORT")).toBe(true);
+    expect(h.accounts.long.balance).toBe(5_300_000n);
+    expect(result.symbols.find((s) => s.symbol === "USDF")).toMatchObject({ positions: 2, realizedTotal: 300_000n });
+    expect(h.redis.publish).toHaveBeenCalledWith("mock-kabu2:account:long", expect.stringContaining('"positionSide":"SHORT"'));
+  });
+
+  it("keeps the old event key for net rows so an already-settled day is not settled again", async () => {
+    const h = harness();
+    await h.service.settle("2026-09-26");
+    expect(h.claims.has("futures-settle:USDF:2026-09-26:long")).toBe(true);
   });
 });

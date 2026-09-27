@@ -13,9 +13,16 @@ function harness(options: { balance?: bigint; mark?: number } = {}) {
   const state = {
     balance: options.balance ?? 10_000_000n,
     mark: options.mark ?? 14_000,
-    positions: [{ accountId: "a", symbol: "USDF", qty: 10, entryValue: 140_000n, marginHeld: 7_000_000n }],
+    positions: [{ accountId: "a", symbol: "USDF", positionSide: "NET", qty: 10, entryValue: 140_000n, marginHeld: 7_000_000n }] as {
+      accountId: string;
+      symbol: string;
+      positionSide: string;
+      qty: number;
+      entryValue: bigint;
+      marginHeld: bigint;
+    }[],
     calls: [] as { id: string; accountId: string; startedAt: Date; deadline: Date; required: bigint; resolvedAt: Date | null; outcome: string | null }[],
-    orders: [] as { id: string; accountId: string; symbol: string; side: string; type: string; qty: number; holdPerUnit: bigint; status: string }[],
+    orders: [] as { id: string; accountId: string; symbol: string; side: string; type: string; qty: number; holdPerUnit: bigint; status: string; positionSide?: string | null }[],
     liquidations: [] as { orderId: string; accountId: string; reason: string; createdAt: Date; qty: number; side: string }[],
     outbox: [] as { topic: string; payload: any }[],
   };
@@ -178,5 +185,25 @@ describe("futures margin call and forced liquidation", () => {
     const h = harness({ balance: 100_000_000n, mark: 13_370 });
     await h.service.tick(Date.parse("2026-09-25T19:15:00Z")); // 04:15 KST
     expect(h.placed()).toHaveLength(0);
+  });
+
+  it("liquidates only the hedge side in emergency, as a closing order on that side", async () => {
+    // 같은 USDF에 롱 10 @ 1,400.0원(1,337.0원에서 손실 90% 초과)과 숏 −3 @ 1,400.0원(이익)
+    const h = harness({ balance: 100_000_000n, mark: 13_370 });
+    h.state.positions = [
+      { accountId: "a", symbol: "USDF", positionSide: "LONG", qty: 10, entryValue: 140_000n, marginHeld: 7_000_000n },
+      { accountId: "a", symbol: "USDF", positionSide: "SHORT", qty: -3, entryValue: 42_000n, marginHeld: 2_100_000n },
+    ];
+    await h.service.tick(NOON);
+    expect(h.state.orders).toHaveLength(1);
+    expect(h.state.orders[0]).toMatchObject({ side: "SELL", qty: 10, positionSide: "LONG", holdPerUnit: 0n });
+    expect(h.placed()).toEqual([expect.objectContaining({ side: "SELL", qty: 10 })]);
+    expect(h.redis.publish).toHaveBeenCalledWith("mock-kabu2:account:a", expect.stringContaining('"symbols":["USDF:LONG"]'));
+  });
+
+  it("net-row liquidation orders carry no position side", async () => {
+    const h = harness({ balance: 100_000_000n, mark: 13_370 });
+    await h.service.tick(NOON);
+    expect(h.state.orders[0].positionSide ?? null).toBeNull();
   });
 });

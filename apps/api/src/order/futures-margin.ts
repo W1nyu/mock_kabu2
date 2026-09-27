@@ -131,8 +131,9 @@ export async function optionOrderHoldPerUnit(
     throw new UnprocessableEntityException("거래가 끝난 옵션입니다. 보유분 매도만 할 수 있습니다");
   }
   if (side === "BUY") return BigInt(priceUnits) * BigInt(def.unitValue);
+  // 옵션은 봇·사람 모두 순포지션(NET) 행 하나다.
   const position = (await db.futuresPosition.findUnique({
-    where: { accountId_symbol: { accountId, symbol: def.symbol } },
+    where: { accountId_symbol_positionSide: { accountId, symbol: def.symbol, positionSide: "NET" } },
   })) as { qty: number } | null;
   const held = Math.max(0, position?.qty ?? 0);
   if (held > 0) {

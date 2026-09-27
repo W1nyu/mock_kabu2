@@ -11,16 +11,19 @@ import {
   nextFuturesSettlementAt,
   futureMarginPerContract,
   futureUnrealized,
+  hedgeCloseSide,
   indexLevel,
   KEYS,
   REFERENCE_ASSETS,
+  rowSideOf,
   type FutureDef,
+  type FuturesPositionRowSide,
   type ReferenceTick,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
 import { MemoCache } from "../core/memo-cache";
 import { BALANCE_MUTATOR, PRISMA, REDIS } from "../core/tokens";
-import { futuresEncumbrance } from "../order/futures-margin";
+import { futuresEncumbrance, isBotAccount } from "../order/futures-margin";
 
 const OVERVIEW_TTL_MS = 2_000;
 const DAY_MS = 86_400_000;
@@ -190,13 +193,18 @@ export class FuturesService {
 
   /** 내 선물 포지션: 평균가·평가손익·증거금, 계좌 전체의 유지증거금 대비 여유. */
   async positions(accountId: string) {
-    const [positionRows, marks, encumbrance, account, marginCall, liquidations] = await Promise.all([
+    const [positionRows, marks, encumbrance, account, marginCall, liquidations, liveOrders] = await Promise.all([
       this.prisma.futuresPosition.findMany({ where: { accountId } }),
       this.marks(),
       futuresEncumbrance(this.prisma, accountId),
       this.prisma.account.findUnique({ where: { id: accountId }, select: { balance: true, holdAmount: true } }),
       this.prisma.futuresMarginCall.findFirst({ where: { accountId, resolvedAt: null } }),
       this.prisma.futuresLiquidation.findMany({ where: { accountId }, orderBy: { createdAt: "desc" }, take: 10 }),
+      // 증거금 0 미체결 = 청산 주문(사용자 청산·반대매매) — 청산 가능 수량에서 뺀다.
+      this.prisma.order.findMany({
+        where: { accountId, symbol: { in: FUTURES.map((f) => f.symbol) }, status: { in: ["OPEN", "PARTIAL"] }, holdPerUnit: 0n },
+        select: { symbol: true, side: true, positionSide: true, qty: true, filledQty: true },
+      }),
     ]);
     // 평가손익·유지증거금은 반대매매 감시와 같은 평가가격으로(최근가 한 건이 아니라)
     const markBySymbol = marks;
@@ -218,9 +226,17 @@ export class FuturesService {
       unrealizedTotal += unrealized;
       maintenanceTotal += maintenance;
       initialTotal += futureMarginPerContract(def, mark, position.leverage) * BigInt(Math.abs(qty));
+      const positionSide: FuturesPositionRowSide = rowSideOf(position.positionSide);
+      const closeSide = positionSide === "NET" ? (qty > 0 ? "SELL" : "BUY") : hedgeCloseSide(positionSide);
+      const reserved = liveOrders
+        .filter((o) => o.symbol === position.symbol && o.side === closeSide && rowSideOf(o.positionSide) === positionSide)
+        .reduce((sum, o) => sum + (o.qty - o.filledQty), 0);
       return {
         symbol: position.symbol,
+        positionSide,
         qty,
+        /** 아직 청산 주문이 걸리지 않은 수량(절댓값) */
+        closableQty: Math.max(0, Math.abs(qty) - reserved),
         avgPrice: Number(position.entryValue) / Math.abs(qty),
         markPrice: mark,
         unrealized,
@@ -272,18 +288,21 @@ export class FuturesService {
       throw new BadRequestException(`레버리지는 1~${MAX_FUTURES_LEVERAGE}배 정수입니다`);
     }
     const apply = async (tx: { [key: string]: any }) => {
-      const where = { accountId_symbol: { accountId, symbol } };
-      const position = await tx.futuresPosition.findUnique({ where });
-      if (position && position.qty !== 0) {
+      const rows = (await tx.futuresPosition.findMany({ where: { accountId, symbol } })) as { qty: number }[];
+      if (rows.some((row) => row.qty !== 0)) {
         throw new UnprocessableEntityException("포지션이 있는 동안에는 레버리지를 바꿀 수 없습니다. 청산한 뒤 바꿔 주세요");
       }
       const live = await tx.order.count({ where: { accountId, symbol, status: { in: ["OPEN", "PARTIAL"] } } });
       if (live > 0) throw new UnprocessableEntityException("미체결 주문이 있는 동안에는 레버리지를 바꿀 수 없습니다");
-      await tx.futuresPosition.upsert({
-        where,
-        update: { leverage },
-        create: { accountId, symbol, qty: 0, entryValue: 0n, marginHeld: 0n, leverage },
-      });
+      // 사람 계정은 롱·숏이 같은 레버리지를 쓰도록 두 방향 행에 모두, 봇은 순포지션 행에.
+      const sides = (await isBotAccount(tx, accountId)) ? (["NET"] as const) : (["LONG", "SHORT"] as const);
+      for (const positionSide of sides) {
+        await tx.futuresPosition.upsert({
+          where: { accountId_symbol_positionSide: { accountId, symbol, positionSide } },
+          update: { leverage },
+          create: { accountId, symbol, positionSide, qty: 0, entryValue: 0n, marginHeld: 0n, leverage },
+        });
+      }
     };
     if (this.mutator) await this.mutator.withAccountLock([accountId], (ctx) => apply(ctx.tx));
     else await this.prisma.$transaction((tx) => apply(tx));

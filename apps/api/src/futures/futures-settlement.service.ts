@@ -14,7 +14,9 @@ import {
   ALL_OPTIONS,
   optionIntrinsic,
   optionUnderlyingUnits,
+  rowSideOf,
   type FutureDef,
+  type FuturesPositionRowSide,
   type OptionDef,
   type OrderCancelRequestedEvent,
 } from "@mock-kabu/shared";
@@ -129,7 +131,7 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
       let positions = 0;
       let realizedTotal = 0n;
       for (const position of open) {
-        const realized = await this.settlePosition(def, tradingDay, price, position.accountId);
+        const realized = await this.settlePosition(def, tradingDay, price, position.accountId, rowSideOf(position.positionSide));
         if (realized != null) {
           positions += 1;
           realizedTotal += realized;
@@ -190,16 +192,23 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
     return { tradingDay, canceledOrders, symbols };
   }
 
-  /** 한 계좌의 한 종목 포지션을 결제가격으로 닫는다. 이미 이 거래일에 정산했으면 null. */
-  private async settlePosition(def: FutureDef, tradingDay: string, price: number, accountId: string): Promise<bigint | null> {
-    const eventId = `futures-settle:${def.symbol}:${tradingDay}:${accountId}`;
+  /** 한 계좌의 한 종목·한 방향 포지션을 결제가격으로 닫는다. 이미 이 거래일에 정산했으면 null. */
+  private async settlePosition(
+    def: FutureDef,
+    tradingDay: string,
+    price: number,
+    accountId: string,
+    positionSide: FuturesPositionRowSide = "NET",
+  ): Promise<bigint | null> {
+    // NET은 예전 키 그대로(이미 정산한 거래일을 다시 정산하지 않게), 양방향 행은 방향을 붙인다.
+    const eventId = `futures-settle:${def.symbol}:${tradingDay}:${accountId}${positionSide === "NET" ? "" : `:${positionSide}`}`;
     let realizedOut: bigint | null = null;
     await this.mutator.withAccountLock([accountId], async (ctx) => {
       const claimed = await ctx.tx.processedEvent.findUnique({ where: { eventId } });
       if (claimed) return;
       await ctx.tx.processedEvent.create({ data: { eventId } });
 
-      const where = { accountId_symbol: { accountId, symbol: def.symbol } };
+      const where = { accountId_symbol_positionSide: { accountId, symbol: def.symbol, positionSide } };
       const position = await ctx.tx.futuresPosition.findUnique({ where });
       if (!position || position.qty === 0) return;
       const closeSide = position.qty > 0 ? "SELL" : "BUY";
@@ -228,7 +237,7 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
       this.redis
         .publish(
           CHANNELS.account(accountId),
-          JSON.stringify({ type: "futures_settled", symbol: def.symbol, tradingDay, price, realized }),
+          JSON.stringify({ type: "futures_settled", symbol: def.symbol, positionSide, tradingDay, price, realized }),
         )
         .catch(() => undefined);
     }
@@ -247,7 +256,8 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
       if (claimed) return;
       await ctx.tx.processedEvent.create({ data: { eventId } });
 
-      const where = { accountId_symbol: { accountId, symbol: def.symbol } };
+      // 옵션은 순포지션(NET) 행 하나다.
+      const where = { accountId_symbol_positionSide: { accountId, symbol: def.symbol, positionSide: "NET" } };
       const position = await ctx.tx.futuresPosition.findUnique({ where });
       if (!position || position.qty === 0) return;
       const closeSide = position.qty > 0 ? "SELL" : "BUY";

@@ -1,5 +1,5 @@
 import { futureDef, futureMarginPerContract } from "@mock-kabu/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { futuresOrderHoldPerUnit } from "../../order/futures-margin";
 import { FuturesService } from "../futures.service";
 
@@ -52,14 +52,16 @@ describe("futures order hold", () => {
 });
 
 describe("setting leverage", () => {
-  function service(position: { qty: number } | null, liveOrders = 0) {
-    const saved: unknown[] = [];
+  function service(position: { qty: number } | null, liveOrders = 0, isBot = false) {
+    const saved: { where: unknown; update: unknown; create: unknown }[] = [];
     const tx = {
       futuresPosition: {
-        findUnique: async () => position,
-        upsert: async (args: unknown) => saved.push(args),
+        findMany: async () => (position ? [position] : []),
+        upsert: async (args: { where: unknown; update: unknown; create: unknown }) => saved.push(args),
       },
       order: { count: async () => liveOrders },
+      account: { findUnique: async () => ({ userId: "u" }) },
+      user: { findUnique: async () => ({ isBot }) },
     };
     const prisma = { $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) };
     return { svc: new FuturesService(prisma as never, {} as never), saved };
@@ -69,7 +71,8 @@ describe("setting leverage", () => {
     const { svc, saved } = service(null);
     await expect(svc.setLeverage("a", "USDF", 20)).resolves.toEqual({ symbol: "USDF", leverage: 20 });
     await expect(svc.setLeverage("a", "USDF", null)).resolves.toEqual({ symbol: "USDF", leverage: null });
-    expect(saved).toHaveLength(2);
+    // 사람 계정은 두 번 × 롱·숏 두 행
+    expect(saved).toHaveLength(4);
   });
 
   it("rejects values outside 1~20 and unknown symbols", async () => {
@@ -83,5 +86,52 @@ describe("setting leverage", () => {
   it("cannot change while a position or a live order exists", async () => {
     await expect(service({ qty: 1 }).svc.setLeverage("a", "USDF", 10)).rejects.toThrow(/포지션이 있는 동안/);
     await expect(service({ qty: 0 }, 1).svc.setLeverage("a", "USDF", 10)).rejects.toThrow(/미체결 주문/);
+  });
+
+  it("stores the leverage on both hedge sides for a person, and on the net row for a bot", async () => {
+    const human = service(null);
+    await human.svc.setLeverage("a", "USDF", 10);
+    expect(human.saved.map((s) => (s.where as any).accountId_symbol_positionSide.positionSide)).toEqual(["LONG", "SHORT"]);
+    const bot = service(null, 0, true);
+    await bot.svc.setLeverage("a", "USDF", 10);
+    expect(bot.saved.map((s) => (s.where as any).accountId_symbol_positionSide.positionSide)).toEqual(["NET"]);
+  });
+
+  it("refuses to change leverage while either side holds a position", async () => {
+    await expect(service({ qty: -1 }).svc.setLeverage("a", "USDF", 10)).rejects.toThrow(/포지션이 있는 동안/);
+  });
+});
+
+describe("futures positions view", () => {
+  it("lists each hedge side with its direction and the quantity not yet covered by closing orders", async () => {
+    const prisma = {
+      futuresPosition: {
+        findMany: async () => [
+          { accountId: "a", symbol: "USDF", positionSide: "LONG", qty: 3, entryValue: 42_000n, marginHeld: 2_100_000n, leverage: null },
+          { accountId: "a", symbol: "USDF", positionSide: "SHORT", qty: -2, entryValue: 28_000n, marginHeld: 1_400_000n, leverage: null },
+        ],
+        aggregate: async () => ({ _sum: { marginHeld: 3_500_000n } }),
+      },
+      futuresDebt: { findUnique: async () => null },
+      account: { findUnique: async () => ({ balance: 10_000_000n, holdAmount: 0n }) },
+      futuresMarginCall: { findFirst: async () => null },
+      futuresLiquidation: { findMany: async () => [] },
+      order: {
+        findMany: async () => [
+          // 롱 청산(매도) 2 중 1 체결 → 1 남음. 숏 진입 매도(positionSide SHORT)는 롱 청산이 아니다.
+          { symbol: "USDF", side: "SELL", positionSide: "LONG", qty: 2, filledQty: 1 },
+          { symbol: "USDF", side: "SELL", positionSide: "SHORT", qty: 5, filledQty: 0 },
+          { symbol: "USDF", side: "BUY", positionSide: "SHORT", qty: 2, filledQty: 0 },
+        ],
+      },
+    };
+    const svc = new FuturesService(prisma as never, {} as never);
+    vi.spyOn(svc, "marks").mockResolvedValue(new Map([["USDF", 14_000]]));
+    const view = await svc.positions("a");
+    expect(view.positions.map((p) => [p.symbol, p.positionSide, p.qty, p.closableQty])).toEqual([
+      ["USDF", "LONG", 3, 2],
+      ["USDF", "SHORT", -2, 0],
+    ]);
+    expect(view.positions[0]).toMatchObject({ avgPrice: 14_000, markPrice: 14_000, marginHeld: 2_100_000n });
   });
 });

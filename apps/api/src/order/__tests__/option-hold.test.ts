@@ -7,7 +7,11 @@ function fakeDb(options: { isBot: boolean; held?: number; strike?: number }) {
   return {
     account: { findUnique: async () => ({ userId: "u1" }) },
     user: { findUnique: async () => ({ isBot: options.isBot }) },
-    futuresPosition: { findUnique: async () => (options.held != null ? { qty: options.held } : null) },
+    futuresPosition: {
+      // 옵션은 순포지션(NET) 행 하나 — 다른 키로 찾으면 행이 없다.
+      findUnique: async ({ where }: any) =>
+        where?.accountId_symbol_positionSide?.positionSide === "NET" && options.held != null ? { qty: options.held } : null,
+    },
     order: { findMany: async () => [] },
     optionSeries: { findUnique: async () => ({ strike: options.strike ?? 10_000 }) },
   };

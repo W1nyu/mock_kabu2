@@ -7,8 +7,11 @@ import {
   FUTURES,
   FUTURES_MARGIN_CALL_GRACE_MS,
   futureDef,
+  futuresPositionKey,
   MARKET_BUY_HOLD_FACTOR,
   marginCallLiquidationQty,
+  rowSideOf,
+  type FuturesPositionRowSide,
   type FuturesRiskPosition,
   type OrderCancelRequestedEvent,
   type OrderPlacedEvent,
@@ -121,7 +124,9 @@ export class FuturesRiskService implements OnModuleInit, OnModuleDestroy {
         .flatMap((p) => {
           const def = futureDef(p.symbol);
           const mark = markBySymbol.get(p.symbol) ?? def?.initialPrice;
-          return def && mark ? [{ def, qty: p.qty, entryValue: p.entryValue, marginHeld: p.marginHeld, mark, leverage: p.leverage }] : [];
+          return def && mark
+            ? [{ def, qty: p.qty, entryValue: p.entryValue, marginHeld: p.marginHeld, mark, leverage: p.leverage, positionSide: rowSideOf(p.positionSide) }]
+            : [];
         });
 
       if (riskPositions.length === 0) {
@@ -142,8 +147,8 @@ export class FuturesRiskService implements OnModuleInit, OnModuleDestroy {
         const callId = call?.id ?? (await this.openCall(accountId, risk.shortfall, now, "EMERGENCY"));
         if (call) await this.closeCall(call.id, "EMERGENCY", now);
         const targets = riskPositions
-          .filter((p) => risk.emergency.includes(p.def.symbol))
-          .map((p) => ({ symbol: p.def.symbol, qty: p.qty, mark: p.mark }));
+          .filter((p) => risk.emergency.includes(futuresPositionKey(p.def.symbol, p.positionSide ?? "NET")))
+          .map((p) => ({ symbol: p.def.symbol, qty: p.qty, mark: p.mark, positionSide: p.positionSide ?? "NET" }));
         result.liquidations += await this.liquidate(accountId, targets, "EMERGENCY", callId);
         this.notify(accountId, { type: "futures_margin_call", status: "EMERGENCY", symbols: risk.emergency });
         continue;
@@ -156,9 +161,15 @@ export class FuturesRiskService implements OnModuleInit, OnModuleDestroy {
           result.resolved += 1;
         } else if (now >= call.deadline.getTime()) {
           const targets = riskPositions
-            .map((p) => ({ symbol: p.def.symbol, qty: p.qty, mark: p.mark, close: marginCallLiquidationQty(p.qty, risk.shortfall, risk.initial) }))
+            .map((p) => ({
+              symbol: p.def.symbol,
+              qty: p.qty,
+              mark: p.mark,
+              positionSide: p.positionSide ?? "NET",
+              close: marginCallLiquidationQty(p.qty, risk.shortfall, risk.initial),
+            }))
             .filter((p) => p.close > 0)
-            .map((p) => ({ symbol: p.symbol, qty: Math.sign(p.qty) * p.close, mark: p.mark }));
+            .map((p) => ({ symbol: p.symbol, qty: Math.sign(p.qty) * p.close, mark: p.mark, positionSide: p.positionSide }));
           await this.closeCall(call.id, "LIQUIDATED", now);
           result.liquidations += await this.liquidate(accountId, targets, "DEADLINE", call.id);
           this.notify(accountId, { type: "futures_margin_call", status: "LIQUIDATED" });
@@ -220,11 +231,12 @@ export class FuturesRiskService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * 계좌의 선물 미체결 주문을 모두 취소 요청하고, 각 대상 포지션의 반대 방향 시장가를 낸다.
-   * qty는 줄일 포지션 부호 그대로(롱 +n → SELL n). 낸 주문 수를 돌려준다.
+   * qty는 줄일 포지션 부호 그대로(롱 +n → SELL n). 양방향 행은 그 방향(positionSide)의 청산 주문으로 낸다.
+   * 낸 주문 수를 돌려준다.
    */
   private async liquidate(
     accountId: string,
-    targets: { symbol: string; qty: number; mark: number }[],
+    targets: { symbol: string; qty: number; mark: number; positionSide: FuturesPositionRowSide }[],
     reason: LiquidationReason,
     marginCallId: string,
   ): Promise<number> {
@@ -253,7 +265,17 @@ export class FuturesRiskService implements OnModuleInit, OnModuleDestroy {
         const bound =
           side === "BUY" ? Math.ceil(target.mark * MARKET_BUY_HOLD_FACTOR) : Math.max(1, Math.floor(target.mark / MARKET_BUY_HOLD_FACTOR));
         const order = await tx.order.create({
-          data: { accountId, symbol: target.symbol, side, type: "MARKET", price: null, qty, holdPerUnit: 0n },
+          data: {
+            accountId,
+            symbol: target.symbol,
+            side,
+            type: "MARKET",
+            price: null,
+            qty,
+            holdPerUnit: 0n,
+            // 양방향 행은 그 방향의 청산 주문으로(롱 행 +는 SELL, 숏 행 −는 BUY). 순포지션은 방향 없음.
+            positionSide: target.positionSide === "NET" ? null : target.positionSide,
+          },
         });
         await tx.futuresLiquidation.create({
           data: { orderId: order.id, accountId, symbol: target.symbol, side, qty, reason, marginCallId },
