@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { clearSession, getUser, onSessionChange, type SessionUser } from "@/lib/api";
+import { getUser, onSessionChange, type SessionUser } from "@/lib/api";
 import { loadSavedTheme, setTheme, useTheme } from "@/lib/theme";
 import NotificationBell from "./NotificationBell";
+import UserMenu from "./UserMenu";
 import { useT } from "@/lib/i18n";
 import LanguageSelect from "./LanguageSelect";
 
@@ -38,7 +39,6 @@ const PRIMARY_NAV_LINKS = [
 export default function Nav() {
   const t = useT();
   const pathname = usePathname();
-  const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
   const theme = useTheme();
 
@@ -84,7 +84,8 @@ export default function Nav() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <LanguageSelect compact />
+          {/* 로그인 후 언어 변경은 계정 설정(사용자 칩)에서 한다. 로그인 전 화면에만 남긴다. */}
+          {user ? null : <LanguageSelect compact />}
           <button
             type="button"
             className="btn btn-ghost btn-sm"
@@ -98,31 +99,8 @@ export default function Nav() {
           {user ? (
             <>
               <NotificationBell accountId={user.accountId} />
-              {/* 사용자 칩은 계정 설정으로 가는 유일한 입구다 — 기본 메뉴 목록은 늘리지 않는다. */}
-              <Link
-                href="/settings"
-                title={t("계정 설정 (닉네임·비밀번호)")}
-                aria-current={pathname === "/settings" ? "page" : undefined}
-                className={`flex items-center gap-2 rounded-full border py-1 pr-1 pl-1 transition-colors sm:pr-3 ${
-                  pathname === "/settings"
-                    ? "border-sky/40 bg-sky/10"
-                    : "border-hairline bg-surface-2/60 hover:border-hairline-strong hover:bg-surface-3/70"
-                }`}
-              >
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-linear-to-br from-sky/80 to-indigo/80 text-[11px] font-bold text-abyss">
-                  {user.nickname.slice(0, 1).toUpperCase()}
-                </span>
-                <span className="hidden text-[13px] text-ink-muted sm:inline">{user.nickname}</span>
-              </Link>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => {
-                  clearSession();
-                  router.push("/login");
-                }}
-              >
-                {t("로그아웃")}
-              </button>
+              {/* 사용자 칩: 계정 설정(언어 포함)·로그아웃 메뉴. 기본 메뉴 목록은 늘리지 않는다. */}
+              <UserMenu user={user} />
             </>
           ) : null}
         </div>
