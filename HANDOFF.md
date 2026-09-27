@@ -1,5 +1,12 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-27 15:59 KST — 증권 화면 현물 검색·상단 메뉴 검색창 제거 운영 적용 (9a99502·b9c1bbf, web만 무점검)
+
+- **증권 화면 현물 검색**(사용자 요청 "종목 검색은 증권창에서도, 현물만"): `/market` 현물 탭의 산업군 칩 위 검색칸. 상단 검색과 같은 매칭(코드·한영일 이름·초성)으로 `matchStockCodes`(`symbol-search.ts`, 현물만·상장 폐지 제외)가 코드 집합을 돌려주고, 검색어가 있으면 산업군 선택과 상관없이 전체 현물에서 거른다(정렬은 사용자가 고른 순서 유지). 제목 "검색 결과", 결과 없으면 "검색 결과가 없습니다", ✕·Esc로 지우기.
+- **상단 메뉴 검색창 제거**(b9c1bbf, 다른 세션, 헤더 UI 깨짐): `NavSearch.tsx` 삭제·`Nav.tsx`에서 제거. 서버에서도 `NavSearch.tsx`를 지웠다.
+- 운영: web만 교체, 롤백 태그 `pre-marketsearch-20260927`(+서비스별), 원본 `/tmp/src-before-pre-marketsearch-20260927.tgz`(NavSearch.tsx 포함). `DEPLOYED_COMMIT` = b9c1bbf. 확인: jobradar.my `/market`(브라우저 요청 헤더) ko·en·ja 모두 검색칸 1개, `/symbol/KABU`에 상단 검색 없음, web healthy, 5분 오류 로그 0.
+- 참고: curl로 확인할 때 `Accept: text/html`이 없으면 Caddy가 `/market`을 API로 보내 JSON 404가 나온다(정상).
+
 ## 2026-09-27 — 상단 메뉴 종목 검색·일본어 금액 ₩ 표기 운영 적용 (4ea4256·dc37ca0, web·bots만 무점검)
 
 - **종목 검색**(사용자 피드백 "검색 창이 없어 불편"): `NavSearch` — lg 이상은 메뉴 줄 입력칸, 좁은 화면·폰은 돋보기 버튼 → 헤더 아래 패널. `/` 키로 열기, 방향키·Enter. 대상은 현물 15·선물 7·환율/원자재 6(상장 폐지·옵션 제외). 코드·한영일 이름·한글 초성(`ㄷㅇ` → 다온반도체). 로직 `apps/web/src/lib/symbol-search.ts`(NFKC가 호환 자모를 바꾸므로 초성은 정규화 전 입력으로 비교), 테스트 `symbol-search.test.ts`. 전역 `:focus-visible`이 레이어 밖이라 입력칸 테두리는 인라인 `outline: none`으로 끈다.
