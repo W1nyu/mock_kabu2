@@ -3,17 +3,23 @@ import test from "node:test";
 import {
   applyFutureFill,
   applyFuturesCash,
+  applyHedgeFill,
   assessFuturesRisk,
   futureDef,
   futureMaintenanceMargin,
   futureMarginBps,
   futureMarkPrice,
+  futuresPositionKey,
+  hedgeCloseSide,
+  isFuturesPositionSide,
+  isOpeningHedgeOrder,
   isOption,
   liquidityReserveBotNumber,
   isValidLeverage,
   futureMarginPerContract,
   futurePositionMargin,
   marginCallLiquidationQty,
+  rowSideOf,
   tickSizeOf,
   TRADABLE_SYMBOLS,
 } from "../dist/index.js";
@@ -169,4 +175,42 @@ test("mark price is the median of underlying, recent trades and last — one str
   // 기초자산이 없으면 최근 체결 중앙값, 체결도 없으면 최근가
   assert.equal(futureMarkPrice({ underlying: null, recent: [100, 300, 200], last: 900 }), 200);
   assert.equal(futureMarkPrice({ underlying: null, recent: [], last: 900 }), 900);
+});
+
+test("hedge order intent: buy long / sell short open, the opposite sides close", () => {
+  assert.equal(isOpeningHedgeOrder("BUY", "LONG"), true);
+  assert.equal(isOpeningHedgeOrder("SELL", "LONG"), false);
+  assert.equal(isOpeningHedgeOrder("SELL", "SHORT"), true);
+  assert.equal(isOpeningHedgeOrder("BUY", "SHORT"), false);
+  assert.equal(hedgeCloseSide("LONG"), "SELL");
+  assert.equal(hedgeCloseSide("SHORT"), "BUY");
+  assert.equal(isFuturesPositionSide("LONG"), true);
+  assert.equal(isFuturesPositionSide("NET"), false);
+  assert.equal(rowSideOf(null), "NET");
+  assert.equal(rowSideOf("SHORT"), "SHORT");
+  assert.equal(futuresPositionKey("KABUF", "NET"), "KABUF");
+  assert.equal(futuresPositionKey("KABUF", "SHORT"), "KABUF:SHORT");
+});
+
+test("hedge fill: opening adds, closing only reduces and never flips", () => {
+  // 숏 −3 @ 88,000 에 숏 진입 2 @ 89,000 → −5
+  const opened = applyHedgeFill(KABUF, { qty: -3, entryValue: 264_000n }, "SHORT", "SELL", 89_000, 2);
+  assert.deepEqual([opened.qty, opened.entryValue, opened.closedQty, opened.overflow], [-5, 442_000n, 0, 0]);
+  // 롱 3 @ 88,000 에 롱 청산 2 @ 89,000 → 1, 실현 (89,000−88,000)×2×100(unitValue)
+  const closed = applyHedgeFill(KABUF, { qty: 3, entryValue: 264_000n }, "LONG", "SELL", 89_000, 2);
+  assert.deepEqual([closed.qty, closed.closedQty, closed.realized, closed.overflow], [1, 2, 200_000n, 0]);
+  // 롱 3에 롱 청산 5가 체결돼도 3만 닫고 숏을 열지 않는다
+  const over = applyHedgeFill(KABUF, { qty: 3, entryValue: 264_000n }, "LONG", "SELL", 88_000, 5);
+  assert.deepEqual([over.qty, over.entryValue, over.closedQty, over.overflow], [0, 0n, 3, 2]);
+  // 포지션이 없으면 청산 체결은 전부 overflow
+  const none = applyHedgeFill(KABUF, { qty: 0, entryValue: 0n }, "SHORT", "BUY", 88_000, 1);
+  assert.deepEqual([none.qty, none.closedQty, none.overflow], [0, 0, 1]);
+});
+
+test("risk: emergency is reported per position side", () => {
+  const long = { def: KABUF, qty: 1, entryValue: 88_000n, marginHeld: 1_914_000n, mark: 70_000, positionSide: "LONG" };
+  const short = { def: KABUF, qty: -1, entryValue: 88_000n, marginHeld: 1_914_000n, mark: 70_000, positionSide: "SHORT" };
+  const risk = assessFuturesRisk([long, short], { balance: 100_000_000n, debt: 0n });
+  // 롱 평가손실 180만((88,000−70,000)×100) ≥ 증거금 191.4만 × 90%(172.26만) → 롱만 긴급, 숏은 이익
+  assert.deepEqual(risk.emergency, ["KABUF:LONG"]);
 });

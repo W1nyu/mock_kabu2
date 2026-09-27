@@ -188,6 +188,34 @@ export function futureMaintenanceMargin(def: FutureDef, qty: number, markUnits: 
   return ceilBps(BigInt(Math.abs(qty)) * BigInt(markUnits) * BigInt(def.unitValue), futureMarginBps(def, leverage).maintenance);
 }
 
+/** 양방향(헤지) 포지션 방향. 사람 계정의 선물 주문·포지션은 LONG/SHORT, 봇·옵션은 NET(순포지션). */
+export type FuturesPositionSide = "LONG" | "SHORT";
+export type FuturesPositionRowSide = FuturesPositionSide | "NET";
+
+export function isFuturesPositionSide(value: unknown): value is FuturesPositionSide {
+  return value === "LONG" || value === "SHORT";
+}
+
+/** 양방향 주문의 뜻: 매수+LONG·매도+SHORT는 진입, 매도+LONG·매수+SHORT는 청산 */
+export function isOpeningHedgeOrder(side: "BUY" | "SELL", positionSide: FuturesPositionSide): boolean {
+  return (side === "BUY") === (positionSide === "LONG");
+}
+
+/** 그 방향 포지션을 닫는 주문 방향 */
+export function hedgeCloseSide(positionSide: FuturesPositionSide): "BUY" | "SELL" {
+  return positionSide === "LONG" ? "SELL" : "BUY";
+}
+
+/** 주문·조건부 주문 행의 position_side(null = 순포지션) → 포지션 행 방향 */
+export function rowSideOf(positionSide: string | null | undefined): FuturesPositionRowSide {
+  return isFuturesPositionSide(positionSide) ? positionSide : "NET";
+}
+
+/** 포지션 하나를 가리키는 키 — NET은 종목 코드 그대로(기존 위험 판정·알림과 호환) */
+export function futuresPositionKey(symbol: string, positionSide: FuturesPositionRowSide): string {
+  return positionSide === "NET" ? symbol : `${symbol}:${positionSide}`;
+}
+
 export interface FuturePositionState {
   /** 부호 있는 계약 수: + 매수(롱), − 매도(숏) */
   qty: number;
@@ -237,6 +265,25 @@ export function applyFutureFill(
     closedQty,
     realized: realizedUnits * BigInt(def.unitValue),
   };
+}
+
+/**
+ * 양방향 포지션(LONG 행은 qty ≥ 0, SHORT 행은 qty ≤ 0)에 체결 하나를 적용한다.
+ * 진입은 applyFutureFill과 같고, 청산은 보유만큼만 닫는다 — 반대 포지션을 열지 않는다.
+ * 보유보다 많이 체결된 청산 수량은 overflow로 돌려준다(접수 단계에서 막히므로 정상이면 0).
+ */
+export function applyHedgeFill(
+  def: Pick<FutureDef, "unitValue">,
+  position: FuturePositionState,
+  positionSide: FuturesPositionSide,
+  side: "BUY" | "SELL",
+  price: number,
+  fillQty: number,
+): FutureFillResult & { overflow: number } {
+  if (isOpeningHedgeOrder(side, positionSide)) return { ...applyFutureFill(def, position, side, price, fillQty), overflow: 0 };
+  const closeQty = Math.min(fillQty, Math.abs(position.qty));
+  if (closeQty === 0) return { qty: position.qty, entryValue: position.entryValue, closedQty: 0, realized: 0n, overflow: fillQty };
+  return { ...applyFutureFill(def, position, side, price, closeQty), overflow: fillQty - closeQty };
 }
 
 /** 정수 단위 → 화면 문자열 */
@@ -317,6 +364,8 @@ export interface FuturesRiskPosition {
   mark: number;
   /** 포지션 레버리지(null = 거래소 기준 증거금) */
   leverage?: number | null;
+  /** 포지션 행 방향 — 없으면 NET */
+  positionSide?: FuturesPositionRowSide;
 }
 
 export interface FuturesRiskAssessment {
@@ -331,7 +380,7 @@ export interface FuturesRiskAssessment {
   belowMaintenance: boolean;
   /** 위탁증거금까지 모자란 금액(0 이상) */
   shortfall: bigint;
-  /** 평가손실이 위탁증거금의 90%에 닿은 종목 */
+  /** 평가손실이 위탁증거금의 90%에 닿은 포지션 키(futuresPositionKey) */
   emergency: string[];
 }
 
@@ -356,7 +405,9 @@ export function assessFuturesRisk(
     unrealized += pnl;
     maintenance += futureMaintenanceMargin(p.def, p.qty, p.mark, p.leverage);
     initial += futureMarginPerContract(p.def, p.mark, p.leverage) * BigInt(Math.abs(p.qty));
-    if (p.marginHeld > 0n && -pnl * 10_000n >= p.marginHeld * BigInt(FUTURES_EMERGENCY_LOSS_BPS)) emergency.push(p.def.symbol);
+    if (p.marginHeld > 0n && -pnl * 10_000n >= p.marginHeld * BigInt(FUTURES_EMERGENCY_LOSS_BPS)) {
+      emergency.push(futuresPositionKey(p.def.symbol, p.positionSide ?? "NET"));
+    }
   }
   const equity = cash.balance + unrealized - cash.debt;
   const shortfall = initial > equity ? initial - equity : 0n;
