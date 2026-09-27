@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, fmt, getToken, getUser } from "@/lib/api";
+import { api, fmt, getToken, getUser, sharedGet } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
@@ -173,7 +173,8 @@ export default function Orderbook({
       .catch(() => {});
 
     const loadSummary = () => {
-      api<SummaryDto>(`/market/summary/${symbol}`, { auth: false })
+      // 시세 헤더도 같은 요약을 부른다 — 동시에 나가는 요청은 하나로 합친다.
+      sharedGet<SummaryDto>(`/market/summary/${symbol}`)
         .then((summary) => {
           if (disposed) return;
           if (summary.sessionStart < kstSessionStartMs()) return;

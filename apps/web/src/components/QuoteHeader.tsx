@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, fmt, won } from "@/lib/api";
+import { fmt, sharedGet, won } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { everyVisible } from "@/lib/visible-interval";
@@ -110,7 +110,7 @@ export default function QuoteHeader({ symbol, name, fallbackPrice, referencePric
     setStats(null);
 
     const loadSummary = () => {
-      api<SummaryDto>(`/market/summary/${symbol}`, { auth: false })
+      sharedGet<SummaryDto>(`/market/summary/${symbol}`)
         .then((summary) => {
           if (disposed) return;
           if (summary.sessionStart < kstSessionStartMs()) return;
