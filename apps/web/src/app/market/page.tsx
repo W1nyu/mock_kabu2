@@ -13,6 +13,7 @@ import { indexSessionBase, type IndexPoint } from "@/lib/index-session";
 import { cleanSparks } from "@/lib/sparks";
 import { ALL_INDUSTRIES, INDUSTRY_STORAGE_KEY, industryChipItems } from "@/lib/industry-chips";
 import { liveIndexLevel, type IndexMeta } from "@/lib/index-meta";
+import { matchStockCodes } from "@/lib/symbol-search";
 import { subscribe } from "@/lib/socket";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { readQueryParam, writeQueryParams } from "@/lib/url-query";
@@ -74,6 +75,7 @@ export default function MarketPage() {
   const [sort, setSort] = useState<SortKey>("change");
   const [industry, setIndustry] = useState<string>(ALL_INDUSTRIES);
   const [kind, setKind] = useState<MarketKind>("stock");
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     try {
@@ -228,7 +230,13 @@ export default function MarketPage() {
   const industryItems = useMemo(() => industryChipItems(new Map(list.map((row) => [row.symbol, row.change]))), [list, tr]);
 
   const selectedIndustry = industryById(industry);
-  const shown = selectedIndustry ? list.filter((row) => selectedIndustry.symbols.includes(row.symbol)) : list;
+  // 검색어가 있으면 산업군과 상관없이 전체 현물에서 찾는다.
+  const matched = useMemo(() => matchStockCodes(query), [query]);
+  const shown = matched
+    ? list.filter((row) => matched.has(row.symbol))
+    : selectedIndustry
+      ? list.filter((row) => selectedIndustry.symbols.includes(row.symbol))
+      : list;
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
@@ -281,6 +289,42 @@ export default function MarketPage() {
 
       {kind === "stock" && (
         <>
+          {/* ── 현물 종목 검색 (코드·한영일 이름·초성) ─────────────────── */}
+          <label className="flex h-10 items-center gap-2 rounded-full border border-hairline bg-surface-2/60 px-3.5 text-ink-muted transition-colors focus-within:border-sky/50 focus-within:bg-surface-2">
+            <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setQuery("");
+              }}
+              placeholder={tr("종목 검색")}
+              aria-label={tr("종목 검색")}
+              autoComplete="off"
+              spellCheck={false}
+              // 전역 :focus-visible 테두리는 레이어 밖이라 클래스로 못 끈다 — 테두리는 감싼 label이 보여 준다.
+              style={{ outline: "none" }}
+              // 폰은 16px 미만이면 iOS가 확대한다.
+              className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-faint sm:text-sm [&::-webkit-search-cancel-button]:hidden"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label={tr("검색어 지우기")}
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-ink-faint hover:text-ink"
+              >
+                <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
+              </button>
+            )}
+          </label>
+
           {/* ── 산업군 태그 ───────────────────────────────────────── */}
           <ChipTabs label={tr("산업군")} items={industryItems} value={industry} onChange={chooseIndustry} />
 
@@ -288,7 +332,11 @@ export default function MarketPage() {
           <section className="glass overflow-hidden">
             <div className="panel-head">
               <span className="panel-title">
-                {selectedIndustry ? names.industry(selectedIndustry.id, selectedIndustry.label) : tr("전체 종목")}
+                {matched
+                  ? tr("검색 결과")
+                  : selectedIndustry
+                    ? names.industry(selectedIndustry.id, selectedIndustry.label)
+                    : tr("전체 종목")}
                 <span className="num ml-1.5 font-medium text-ink-faint">{shown.length}</span>
               </span>
               <div className="flex gap-1" role="group" aria-label={tr("정렬")}>
@@ -324,7 +372,7 @@ export default function MarketPage() {
                         <span className="block truncate font-semibold">{names.symbol(s.symbol, s.name)}</span>
                         <span className="num block truncate text-xs text-ink-faint">
                           {s.symbol}
-                          {!selectedIndustry && industryOf(s.symbol) && (
+                          {(matched || !selectedIndustry) && industryOf(s.symbol) && (
                             <span className="hidden sm:inline"> · {names.industry(industryOf(s.symbol)!.id, industryOf(s.symbol)!.label)}</span>
                           )}
                           {/* 폰은 폭이 좁아 거래대금을 빼고 종목 코드만 둔다. */}
@@ -349,6 +397,9 @@ export default function MarketPage() {
                 );
               })}
               {list.length === 0 && <li className="py-10 text-center text-sm text-ink-faint">{tr("종목을 불러오는 중…")}</li>}
+              {list.length > 0 && matched && shown.length === 0 && (
+                <li className="py-10 text-center text-sm text-ink-faint">{tr("검색 결과가 없습니다")}</li>
+              )}
             </ul>
           </section>
         </>

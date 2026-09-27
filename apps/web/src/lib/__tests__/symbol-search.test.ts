@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchSymbols } from "../symbol-search";
+import { matchStockCodes, searchSymbols } from "../symbol-search";
 
 const codes = (q: string) => searchSymbols(q).map((r) => r.code);
 
@@ -30,5 +30,19 @@ describe("searchSymbols", () => {
     expect(searchSymbols("COPPER")[0].href).toBe("/reference/COPPER");
     expect(codes("MOCK")).toEqual([]);
     expect(codes("   ")).toEqual([]);
+  });
+});
+
+describe("matchStockCodes", () => {
+  it("returns null for an empty query so the list is not filtered", () => {
+    expect(matchStockCodes("")).toBeNull();
+    expect(matchStockCodes("  ")).toBeNull();
+  });
+
+  it("matches only spot stocks by code, names and initials", () => {
+    expect([...matchStockCodes("kabu")!]).toEqual(["KABU"]);
+    expect([...matchStockCodes("ㄷㅇㅂ")!]).toEqual(["DAON"]);
+    expect([...matchStockCodes("goldf")!]).toEqual([]);
+    expect([...matchStockCodes("MOCK")!]).toEqual([]);
   });
 });

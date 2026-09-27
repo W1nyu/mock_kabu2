@@ -90,3 +90,11 @@ export function searchSymbols(query: string, entries: readonly SearchEntry[] = S
     .slice(0, limit)
     .map((r) => r.item);
 }
+
+const STOCK_ENTRIES = SEARCH_ENTRIES.filter((e) => e.kind === "stock");
+
+/** 증권 화면 현물 목록 거르기 — 검색어에 맞는 현물 종목 코드. 검색어가 비어 있으면 null(거르지 않음). */
+export function matchStockCodes(query: string): Set<string> | null {
+  if (!normalize(query)) return null;
+  return new Set(searchSymbols(query, STOCK_ENTRIES, STOCK_ENTRIES.length).map((e) => e.code));
+}

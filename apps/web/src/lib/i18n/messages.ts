@@ -497,6 +497,8 @@ export const MESSAGES: Readonly<Record<string, readonly [string, string]>> = {
   "현물": ["Stocks", "現物"],
   "종목 검색": ["Search symbols", "銘柄検索"],
   "검색 결과가 없습니다": ["No results", "該当なし"],
+  "검색 결과": ["Results", "検索結果"],
+  "검색어 지우기": ["Clear search", "検索語を消去"],
   "환율·원자재": ["FX · Commodities", "為替・原資材"],
   "전체 종목": ["All stocks", "全銘柄"],
   "정렬": ["Sort", "並べ替え"],
