@@ -8,6 +8,7 @@ import { loadSavedTheme, setTheme, useTheme } from "@/lib/theme";
 import NotificationBell from "./NotificationBell";
 import { useT } from "@/lib/i18n";
 import LanguageSelect from "./LanguageSelect";
+import NavSearch from "./NavSearch";
 
 /**
  * Primary customer navigation is deliberately limited to these flows.
@@ -84,6 +85,7 @@ export default function Nav() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <NavSearch />
           <LanguageSelect compact />
           <button
             type="button"
