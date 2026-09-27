@@ -53,19 +53,22 @@ interface SymbolProfile {
   meanReversion: number;
 }
 
+/** Spot reference moves are 50% gentler; scale amplitudes before squaring into variance. */
+const SPOT_PRICE_MOVE_SCALE = 0.5;
+
 const REGIME: Record<
   MarketRegime,
   { drift: number; marketVolatility: number; minTicks: number; maxTicks: number }
 > = {
-  CALM: { drift: 0, marketVolatility: 0.00035, minTicks: 50, maxTicks: 160 },
-  UPTREND: { drift: 0.00012, marketVolatility: 0.00055, minTicks: 45, maxTicks: 130 },
-  DOWNTREND: { drift: -0.00012, marketVolatility: 0.0006, minTicks: 45, maxTicks: 130 },
-  VOLATILE: { drift: 0, marketVolatility: 0.00135, minTicks: 25, maxTicks: 80 },
+  CALM: { drift: 0, marketVolatility: 0.00035 * SPOT_PRICE_MOVE_SCALE, minTicks: 50, maxTicks: 160 },
+  UPTREND: { drift: 0.00012 * SPOT_PRICE_MOVE_SCALE, marketVolatility: 0.00055 * SPOT_PRICE_MOVE_SCALE, minTicks: 45, maxTicks: 130 },
+  DOWNTREND: { drift: -0.00012 * SPOT_PRICE_MOVE_SCALE, marketVolatility: 0.0006 * SPOT_PRICE_MOVE_SCALE, minTicks: 45, maxTicks: 130 },
+  VOLATILE: { drift: 0, marketVolatility: 0.00135 * SPOT_PRICE_MOVE_SCALE, minTicks: 25, maxTicks: 80 },
 };
 
 const DEFAULT_PROFILE: SymbolProfile = {
   beta: 1,
-  idiosyncraticVolatility: 0.00055,
+  idiosyncraticVolatility: 0.00055 * SPOT_PRICE_MOVE_SCALE,
   meanReversion: 0.012,
 };
 
@@ -77,10 +80,11 @@ const EVENT_COOLDOWN_MIN_TICKS = 80;
 const EVENT_COOLDOWN_MAX_TICKS = 160;
 export const MIN_EVENT_STRENGTH = 0.2;
 export const MAX_EVENT_STRENGTH = 1;
-const MIN_EVENT_LOG_IMPACT = 0.006;
-const MAX_EVENT_LOG_IMPACT = 0.04;
+const MIN_EVENT_LOG_IMPACT = 0.006 * SPOT_PRICE_MOVE_SCALE;
+const MAX_EVENT_LOG_IMPACT = 0.04 * SPOT_PRICE_MOVE_SCALE;
 const PERMANENT_EQUILIBRIUM_SHARE = 0.4;
-const MIN_REMAINING_EVENT_IMPULSE = 0.00008;
+// Keep event lifetimes/flow timing when reducing the price impulse.
+const MIN_REMAINING_EVENT_IMPULSE = 0.00008 * SPOT_PRICE_MOVE_SCALE;
 const MAX_EVENT_FLOW_INTENSITY = 4;
 const MAX_SIDE_FLIP_CHANCE = 0.78;
 /**
@@ -415,7 +419,7 @@ export class MarketModel {
       const variation = ((index * 37) % 11) / 100;
       this.profiles.set(symbol.symbol, {
         beta: 0.88 + variation * 2,
-        idiosyncraticVolatility: 0.00042 + variation * 0.02,
+        idiosyncraticVolatility: (0.00042 + variation * 0.02) * SPOT_PRICE_MOVE_SCALE,
         meanReversion: 0.009 + variation * 0.12,
       });
     }
@@ -436,8 +440,8 @@ export class MarketModel {
     );
     this.marketReturn = clamp(
       regime.drift + 0.18 * this.marketReturn + Math.sqrt(this.marketVariance) * marketShock,
-      -0.007,
-      0.007,
+      -0.007 * SPOT_PRICE_MOVE_SCALE,
+      0.007 * SPOT_PRICE_MOVE_SCALE,
     );
 
     this.maybeStartHiddenEvent();
@@ -455,7 +459,7 @@ export class MarketModel {
       const displacement = Math.log(state.price / state.anchor);
       const jump =
         this.random.next() < (this.regime === "VOLATILE" ? 0.012 : 0.0025)
-          ? gaussian(this.random) * (this.regime === "VOLATILE" ? 0.004 : 0.0018)
+          ? gaussian(this.random) * (this.regime === "VOLATILE" ? 0.004 : 0.0018) * SPOT_PRICE_MOVE_SCALE
           : 0;
       const eventReturn = this.consumeEventReturn(state);
       const nextReturn = clamp(
@@ -465,8 +469,8 @@ export class MarketModel {
           Math.sqrt(state.variance) * gaussian(this.random) +
           jump +
           eventReturn,
-        -0.012,
-        0.012,
+        -0.012 * SPOT_PRICE_MOVE_SCALE,
+        0.012 * SPOT_PRICE_MOVE_SCALE,
       );
 
       state.previousReturn = nextReturn;
