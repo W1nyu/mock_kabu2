@@ -7,6 +7,8 @@ import { optionDef } from "./options";
 export type Locale = "ko" | "en" | "ja";
 export const LOCALES: readonly Locale[] = ["ko", "en", "ja"];
 export const DEFAULT_LOCALE: Locale = "ko";
+/** 브라우저 언어가 한국어·일본어·영어 어디에도 해당하지 않을 때 */
+export const FALLBACK_LOCALE: Locale = "en";
 /** 웹이 언어를 저장하는 쿠키, API에 알려 주는 헤더 */
 export const LOCALE_COOKIE = "mk_locale";
 export const LOCALE_HEADER = "x-locale";
@@ -15,9 +17,9 @@ export function isLocale(value: unknown): value is Locale {
   return value === "ko" || value === "en" || value === "ja";
 }
 
-/** Accept-Language 등 언어 태그 목록에서 지원 언어를 고른다(없으면 한국어). */
+/** Accept-Language 등 언어 태그 목록에서 지원 언어를 고른다(없으면 영어). */
 export function pickLocale(acceptLanguage: string | null | undefined): Locale {
-  if (!acceptLanguage) return DEFAULT_LOCALE;
+  if (!acceptLanguage) return FALLBACK_LOCALE;
   const tags = acceptLanguage
     .split(",")
     .map((part) => {
@@ -29,7 +31,7 @@ export function pickLocale(acceptLanguage: string | null | undefined): Locale {
     const base = tag.split("-")[0];
     if (isLocale(base)) return base;
   }
-  return DEFAULT_LOCALE;
+  return FALLBACK_LOCALE;
 }
 
 type Names = Readonly<Record<string, { en: string; ja: string }>>;

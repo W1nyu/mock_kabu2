@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
-    "test": "pnpm run build && node --test test/replay.node-test.mjs test/industries.node-test.mjs test/futures.node-test.mjs test/options.node-test.mjs"
+    "test": "pnpm run build && node --test test/replay.node-test.mjs test/industries.node-test.mjs test/futures.node-test.mjs test/options.node-test.mjs test/i18n.node-test.mjs"
   },
   "devDependencies": {
     "typescript": "^5.8.0"
