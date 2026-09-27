@@ -21,6 +21,7 @@ import { ALL_INDUSTRIES, INDUSTRY_STORAGE_KEY, industryChipItems } from "@/lib/i
 import { mergeNews, parseNewsItem } from "@/lib/news";
 import { readSnapshot, SNAP_OVERVIEW, SNAP_SPARKS, SNAPSHOT_MAX_AGE_MS, writeSnapshot } from "@/lib/snapshot";
 import { cleanSparks } from "@/lib/sparks";
+import { createTickBatcher } from "@/lib/tick-batch";
 import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
@@ -182,6 +183,8 @@ export default function DashboardPage() {
   }
   const turnoverWatermarksRef = useRef(new Map<string, number>());
   const pendingTurnoverTicksRef = useRef(new Map<string, Map<string, TradeTick>>());
+  /** 스냅샷을 반영할 때마다 올린다 — 그 전에 모아 둔 체결은 스냅샷 재계산에 이미 들어갔다. */
+  const overviewGenerationRef = useRef(0);
 
   const refreshAccount = useCallback(() => {
     api<AccountInfo>("/account").then(setAccount).catch(() => {});
@@ -211,6 +214,7 @@ export default function DashboardPage() {
       turnoverWatermarksRef.current.set(symbol, watermark);
     }
     // 스냅샷과 동시에 도착한 tick은 watermark 뒤의 것만 다시 더한다.
+    overviewGenerationRef.current += 1;
     setTurnovers(() => nextTurnovers);
   }, []);
 
@@ -300,7 +304,26 @@ export default function DashboardPage() {
     const channels = symbols.map(({ symbol }) => `trades:${symbol}`);
     if (channels.length === 0) return;
 
-    return subscribe(channels, ({ channel, data }) => {
+    // 체결마다 대시보드 전체를 다시 그리지 않도록 0.2초씩 모아 가격·거래대금을 한 번에 반영한다.
+    const batcher = createTickBatcher<{ symbol: string; price: number; turnover: number; generation: number }>((items) => {
+      setLivePrices((current) => {
+        let next = current;
+        for (const { symbol, price } of items) {
+          if (next[symbol] !== price) next = next === current ? { ...current, [symbol]: price } : { ...next, [symbol]: price };
+        }
+        return next;
+      });
+      // 모으는 사이 스냅샷이 새로 반영됐으면 그 체결은 재계산에 이미 포함됐다 — 두 번 더하지 않는다.
+      const added = items.filter((item) => item.turnover > 0 && item.generation === overviewGenerationRef.current);
+      if (added.length) {
+        setTurnovers((current) => {
+          const next = { ...current };
+          for (const { symbol, turnover } of added) next[symbol] = (next[symbol] ?? 0) + turnover;
+          return next;
+        });
+      }
+    });
+    const unsubscribe = subscribe(channels, ({ channel, data }) => {
       const tick = parseTradeTick(data);
       if (!tick) return;
       if (tick.ts < kstSessionStartMs()) return;
@@ -313,18 +336,20 @@ export default function DashboardPage() {
       if (pending.has(tick.id)) return;
       pending.set(tick.id, tick);
 
-      setLivePrices((current) =>
-        current[symbol] === tick.price ? current : { ...current, [symbol]: tick.price },
-      );
-
+      // 스냅샷 watermark 뒤의 체결만 거래대금에 더한다(판단은 도착 시점에).
       const watermark = turnoverWatermarksRef.current.get(symbol);
-      if (watermark == null || tick.ts > watermark) {
-        setTurnovers((current) => ({
-          ...current,
-          [symbol]: (current[symbol] ?? 0) + tick.price * tick.qty,
-        }));
-      }
+      const counts = watermark == null || tick.ts > watermark;
+      batcher.push({
+        symbol,
+        price: tick.price,
+        turnover: counts ? tick.price * tick.qty : 0,
+        generation: overviewGenerationRef.current,
+      });
     });
+    return () => {
+      unsubscribe();
+      batcher.cancel();
+    };
   }, [symbols]);
 
   const liveSymbols = useMemo(() => {
