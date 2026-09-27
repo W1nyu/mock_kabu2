@@ -12,6 +12,7 @@ import {
   type ReferenceTick,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
+import { mapWithConcurrency } from "../common/map-with-concurrency";
 import { koreaSessionStart } from "../common/market-time";
 import { MemoCache } from "../core/memo-cache";
 import { PRISMA, REDIS } from "../core/tokens";
@@ -19,6 +20,7 @@ import { liquidityBootstrapToken } from "../liquidity/liquidity-reserve";
 
 const BASE_INTERVAL = "1m";
 const OVERVIEW_TTL_MS = 5_000;
+const OVERVIEW_CONCURRENCY = 3;
 const CANDLE_TTL_MS = 2_000;
 /** 1분봉으로 쓰는 값은 실제값 × scale 정수. 이 범위를 벗어난 값은 봇 오류로 보고 버린다. */
 const MAX_UNITS = 2_000_000_000;
@@ -102,26 +104,25 @@ export class ReferenceService {
     const session = koreaSessionStart();
     return this.cache.getOrCompute(`reference:overview:${session.getTime()}`, OVERVIEW_TTL_MS, async () => {
       const latest = await this.redis.mget(...REFERENCE_ASSETS.map((asset) => KEYS.referenceLatest(asset.code)));
-      return Promise.all(
-        REFERENCE_ASSETS.map(async (asset, index) => {
-          const tick = parseTick(latest[index]);
-          const [base, spark] = await Promise.all([
-            this.sessionBase(asset.code, session),
-            this.aggregate(asset.code, 300, 72),
-          ]);
-          return {
-            code: asset.code,
-            name: asset.name,
-            unit: asset.unit,
-            scale: asset.scale,
-            decimals: asset.decimals,
-            value: tick?.value ?? spark.at(-1)?.close ?? null,
-            ts: tick?.ts ?? null,
-            base,
-            spark: spark.map((row) => row.close),
-          };
-        }),
-      );
+      // 자산마다 쿼리 2개 — 한꺼번에 보내지 않고 몇 개씩만(커넥션 풀 독점 방지).
+      return mapWithConcurrency([...REFERENCE_ASSETS.entries()], OVERVIEW_CONCURRENCY, async ([index, asset]) => {
+        const tick = parseTick(latest[index]);
+        const [base, spark] = await Promise.all([
+          this.sessionBase(asset.code, session),
+          this.aggregate(asset.code, 300, 72),
+        ]);
+        return {
+          code: asset.code,
+          name: asset.name,
+          unit: asset.unit,
+          scale: asset.scale,
+          decimals: asset.decimals,
+          value: tick?.value ?? spark.at(-1)?.close ?? null,
+          ts: tick?.ts ?? null,
+          base,
+          spark: spark.map((row) => row.close),
+        };
+      });
     });
   }
 

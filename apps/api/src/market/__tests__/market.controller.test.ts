@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoCache } from "../../core/memo-cache";
-import { MarketController, mapWithConcurrency, mergeSessionStats } from "../market.controller";
+import { mapWithConcurrency } from "../../common/map-with-concurrency";
+import { MarketController, mergeSessionStats } from "../market.controller";
 import { SYMBOLS } from "@mock-kabu/shared";
 
 afterEach(() => vi.useRealTimers());

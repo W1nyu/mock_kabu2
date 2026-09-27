@@ -13,6 +13,7 @@ import {
   TRADABLE_SYMBOLS,
 } from "@mock-kabu/shared";
 import type Redis from "ioredis";
+import { mapWithConcurrency } from "../common/map-with-concurrency";
 import { koreaSessionStart } from "../common/market-time";
 import { MemoCache } from "../core/memo-cache";
 import { PRISMA, REDIS } from "../core/tokens";
@@ -32,20 +33,6 @@ const SUMMARY_STALE = { staleMs: 10_000 };
 const OVERVIEW_BASE_STEP_MS = 5 * 60_000;
 const OVERVIEW_BASE_TTL_MS = OVERVIEW_BASE_STEP_MS + 60_000;
 const OVERVIEW_COMMIT_SLACK_MS = 30_000;
-
-/** 결과 순서를 유지하며 최대 limit개씩만 동시에 실행한다. */
-export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await fn(items[index]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
 
 /** trades/latest 한 행 — 체결이 없는 종목도 listedSymbol로 빈 목록을 만든다. */
 interface LatestTradeRow {
