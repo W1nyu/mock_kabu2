@@ -14,6 +14,8 @@ import { useT } from "@/lib/i18n";
 export default function FuturesPositionActions({
   symbol,
   qty,
+  positionSide,
+  closableQty,
   markPrice,
   avgPrice,
   refreshKey,
@@ -22,6 +24,10 @@ export default function FuturesPositionActions({
   symbol: string;
   /** 포지션 수량(롱 +, 숏 −) */
   qty: number;
+  /** LONG/SHORT(양방향), NET(봇) — 청산 주문에 그대로 싣는다 */
+  positionSide: "LONG" | "SHORT" | "NET";
+  /** 지금 청산 주문을 낼 수 있는 계약 수 */
+  closableQty: number;
   markPrice: number;
   /** 평균 진입가(정수 단위) — 손절·익절 % 빠른 입력의 기준 */
   avgPrice: number;
@@ -32,26 +38,22 @@ export default function FuturesPositionActions({
   const def = futureDef(symbol)!;
   const long = qty > 0;
   const closeSide = long ? "SELL" : "BUY";
-  const [confirming, setConfirming] = useState(false);
+  const hedge = positionSide !== "NET";
+  const [closeQty, setCloseQty] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [stopText, setStopText] = useState("");
   const [takeText, setTakeText] = useState("");
   const [waiting, setWaiting] = useState<ConditionalOrderDto[]>([]);
 
+  useEffect(() => setCloseQty((q) => Math.max(1, Math.min(q, closableQty || 1))), [closableQty]);
+
   const loadWaiting = useCallback(() => {
     api<ConditionalOrderDto[]>(`/orders/conditional?symbol=${symbol}&status=WAITING&limit=20`)
-      .then(setWaiting)
+      .then((rows) => setWaiting(rows.filter((row) => row.side === closeSide)))
       .catch(() => {});
-  }, [symbol]);
+  }, [symbol, closeSide]);
   useEffect(loadWaiting, [loadWaiting, refreshKey]);
-
-  // 두 번 눌러야 청산 — 브라우저 확인 창을 쓰지 않고 실수로 누르는 것만 막는다. 4초 지나면 풀린다.
-  useEffect(() => {
-    if (!confirming) return;
-    const id = window.setTimeout(() => setConfirming(false), 4_000);
-    return () => window.clearTimeout(id);
-  }, [confirming]);
 
   async function run(action: () => Promise<unknown>, ok: string) {
     setBusy(true);
@@ -68,20 +70,17 @@ export default function FuturesPositionActions({
     }
   }
 
-  function closeAll() {
-    if (!confirming) {
-      setConfirming(true);
-      return;
-    }
-    setConfirming(false);
+  function closePart() {
+    const n = Math.min(closeQty, closableQty);
+    if (n < 1) return;
     void run(
       () =>
         api("/orders", {
           method: "POST",
           headers: { "idempotency-key": newIdempotencyKey() },
-          body: { symbol, side: closeSide, type: "MARKET", qty: Math.abs(qty) },
+          body: { symbol, side: closeSide, type: "MARKET", qty: n, ...(hedge ? { positionSide } : {}) },
         }),
-      t("{n}계약 시장가 청산을 접수했습니다", { n: Math.abs(qty) }),
+      t("{n}계약 시장가 청산을 접수했습니다", { n }),
     );
   }
 
@@ -132,16 +131,47 @@ export default function FuturesPositionActions({
 
   return (
     <div className="space-y-3 border-t border-hairline-soft pt-3">
-      <button
-        type="button"
-        disabled={busy}
-        onClick={closeAll}
-        className={`min-h-10 w-full rounded-xl text-sm font-semibold disabled:opacity-50 ${
-          confirming ? (long ? "bg-down text-white" : "bg-up text-white") : "ring-1 ring-hairline ring-inset"
-        }`}
-      >
-        {confirming ? t("한 번 더 누르면 시장가로 전량 청산") : t("{n}계약 전량 청산 (시장가)", { n: Math.abs(qty) })}
-      </button>
+      <div>
+        <div className="mb-1.5 flex items-center justify-between text-xs text-ink-muted">
+          <span>{t("청산 수량 (계약)")}</span>
+          <span className="num text-[11px] text-ink-faint">
+            {t("청산 가능 {n}계약", { n: closableQty })}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            inputMode="numeric"
+            value={closeQty}
+            onChange={(e) =>
+              setCloseQty(
+                Math.max(1, Math.min(closableQty || 1, Number(e.target.value.replace(/\D/g, "")) || 1)),
+              )
+            }
+            className="num w-20 rounded-lg border border-hairline bg-surface-2/60 px-2.5 py-1.5 text-center"
+          />
+          <div className="grid flex-1 grid-cols-4 gap-1">
+            {[0.25, 0.5, 0.75, 1].map((pct) => (
+              <button
+                key={pct}
+                type="button"
+                disabled={closableQty < 1}
+                onClick={() => setCloseQty(Math.max(1, Math.floor(closableQty * pct)))}
+                className="num rounded-md py-1 text-[11px] ring-1 ring-hairline ring-inset disabled:opacity-40"
+              >
+                {pct * 100}%
+              </button>
+            ))}
+          </div>
+        </div>
+        <button
+          type="button"
+          disabled={busy || closableQty < 1}
+          onClick={closePart}
+          className={`mt-2 min-h-10 w-full rounded-xl text-sm font-semibold text-white disabled:opacity-50 ${long ? "bg-down" : "bg-up"}`}
+        >
+          {t("{n}계약 시장가 청산", { n: Math.min(closeQty, closableQty) })}
+        </button>
+      </div>
 
       <div>
         <p className="mb-1.5 text-xs text-ink-muted">{t("손절·익절 (하나만 입력해도 됨 · 둘 다면 한쪽 발동 시 다른 쪽 취소 · 전량 시장가 청산)")}</p>

@@ -118,7 +118,10 @@ export default function FuturesPositionPanel({
   }, [load, refreshKey]);
 
   if (!loggedIn) return null;
-  const position = account?.positions.find((p) => p.symbol === symbol) ?? null;
+  // 사람 계정은 같은 종목에 롱·숏 두 행이 있을 수 있다 — 롱 먼저
+  const positions = (account?.positions ?? [])
+    .filter((p) => p.symbol === symbol && p.qty !== 0)
+    .sort((a, b) => b.qty - a.qty);
   const def = futureDef(symbol)!;
   const ratio =
     account && account.maintenanceMargin > 0
@@ -162,63 +165,71 @@ export default function FuturesPositionPanel({
             </p>
           </div>
         )}
-        {position ? (
-          <dl className="num grid grid-cols-2 gap-x-4 gap-y-1.5">
-            <dt className="text-ink-muted">{t("포지션")}</dt>
-            <dd
-              className={`text-right font-semibold ${position.qty > 0 ? "text-up" : "text-down"}`}
-            >
-              {position.qty > 0 ? t("롱") : t("숏")} {t("{n}계약", { n: Math.abs(position.qty) })}
-            </dd>
-            <dt className="text-ink-muted">{t("레버리지")}</dt>
-            <dd className="text-right">{leverageLabel(symbol, position.leverage)}</dd>
-            <dt className="text-ink-muted">{t("평균가")}</dt>
-            <dd className="text-right">{fmtFuture(symbol, Math.round(position.avgPrice))}</dd>
-            <dt
-              className="text-ink-muted"
-              title={t(
-                "기초자산·최근 체결 중앙값·최근가의 중앙값 — 튀는 체결 한 건으로 반대매매되지 않게",
-              )}
-            >
-              {t("평가가격")}
-            </dt>
-            <dd className="text-right">{fmtFuture(symbol, position.markPrice)}</dd>
-            <dt className="text-ink-muted">{t("평가손익")}</dt>
-            <dd className={`text-right font-semibold ${tone(position.unrealized)}`}>
-              {position.unrealized > 0 ? "+" : ""}
-              {krw(position.unrealized)}
-            </dd>
-            <dt className="text-ink-muted">{t("증거금")}</dt>
-            <dd className="text-right">{krw(position.marginHeld)}</dd>
-            <dt className="text-ink-muted">{t("긴급 반대매매가")}</dt>
-            <dd className="text-right text-ink-muted">
-              {fmtFuture(
-                symbol,
-                Math.round(
-                  emergencyPrice(
-                    position.qty,
-                    position.avgPrice,
-                    position.marginHeld,
-                    def.unitValue,
-                  ),
-                ),
-              )}
-            </dd>
-          </dl>
-        ) : (
+        {positions.length === 0 ? (
           <p className="text-ink-faint">
             {t("{name} 포지션이 없습니다.", { name: names.future(def.symbol, def.name) })}
           </p>
-        )}
-        {position && (
-          <FuturesPositionActions
-            symbol={symbol}
-            qty={position.qty}
-            markPrice={position.markPrice}
-            avgPrice={position.avgPrice}
-            refreshKey={refreshKey}
-            onChanged={load}
-          />
+        ) : (
+          positions.map((position) => (
+            <div
+              key={position.positionSide}
+              className="space-y-3 rounded-xl border border-hairline-soft p-3"
+            >
+              <dl className="num grid grid-cols-2 gap-x-4 gap-y-1.5">
+                <dt className="text-ink-muted">{t("포지션")}</dt>
+                <dd
+                  className={`text-right font-semibold ${position.qty > 0 ? "text-up" : "text-down"}`}
+                >
+                  {position.qty > 0 ? t("롱") : t("숏")}{" "}
+                  {t("{n}계약", { n: Math.abs(position.qty) })}
+                </dd>
+                <dt className="text-ink-muted">{t("레버리지")}</dt>
+                <dd className="text-right">{leverageLabel(symbol, position.leverage)}</dd>
+                <dt className="text-ink-muted">{t("평균가")}</dt>
+                <dd className="text-right">{fmtFuture(symbol, Math.round(position.avgPrice))}</dd>
+                <dt
+                  className="text-ink-muted"
+                  title={t(
+                    "기초자산·최근 체결 중앙값·최근가의 중앙값 — 튀는 체결 한 건으로 반대매매되지 않게",
+                  )}
+                >
+                  {t("평가가격")}
+                </dt>
+                <dd className="text-right">{fmtFuture(symbol, position.markPrice)}</dd>
+                <dt className="text-ink-muted">{t("평가손익")}</dt>
+                <dd className={`text-right font-semibold ${tone(position.unrealized)}`}>
+                  {position.unrealized > 0 ? "+" : ""}
+                  {krw(position.unrealized)}
+                </dd>
+                <dt className="text-ink-muted">{t("증거금")}</dt>
+                <dd className="text-right">{krw(position.marginHeld)}</dd>
+                <dt className="text-ink-muted">{t("긴급 반대매매가")}</dt>
+                <dd className="text-right text-ink-muted">
+                  {fmtFuture(
+                    symbol,
+                    Math.round(
+                      emergencyPrice(
+                        position.qty,
+                        position.avgPrice,
+                        position.marginHeld,
+                        def.unitValue,
+                      ),
+                    ),
+                  )}
+                </dd>
+              </dl>
+              <FuturesPositionActions
+                symbol={symbol}
+                qty={position.qty}
+                positionSide={position.positionSide}
+                closableQty={position.closableQty}
+                markPrice={position.markPrice}
+                avgPrice={position.avgPrice}
+                refreshKey={refreshKey}
+                onChanged={load}
+              />
+            </div>
+          ))
         )}
 
         {account && (account.positions.length > 0 || account.debt > 0) && (

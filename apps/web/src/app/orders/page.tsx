@@ -16,6 +16,7 @@ interface OrderRow {
   id: string;
   symbol: string;
   side: "BUY" | "SELL";
+  positionSide?: "LONG" | "SHORT" | null;
   type: string;
   price: number | null;
   qty: number;
@@ -285,7 +286,19 @@ function OrdersTable({ orders, onCancel }: { orders: OrderRow[]; onCancel: (id: 
             <td className="font-semibold">{o.symbol}</td>
             <td>
               <span className={`font-medium ${o.side === "BUY" ? "text-up" : "text-down"}`}>
-                {o.side === "BUY" ? t("매수") : t("매도")}
+                {o.positionSide
+                  ? t(
+                      o.positionSide === "LONG"
+                        ? o.side === "BUY"
+                          ? "롱 진입"
+                          : "롱 청산"
+                        : o.side === "SELL"
+                          ? "숏 진입"
+                          : "숏 청산",
+                    )
+                  : o.side === "BUY"
+                    ? t("매수")
+                    : t("매도")}
               </span>
               <span className="ml-1.5 text-xs text-ink-faint">
                 {o.type === "LIMIT" ? t("지정가") : t("시장가")}
