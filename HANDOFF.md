@@ -1,5 +1,14 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-28 05:00~08:30 KST — 서버 부하·목록 로딩 최적화 (로컬 커밋, 운영 미배포)
+
+- 운영 실측(읽기 전용): Postgres CPU 154%. 가장 큰 읽기는 `/market/overview` 세션 통계가 체결 223만 행을 **병렬 순차 스캔**(비용 ~86,800, 분당 ~12회). 계정별 미체결 주문 조회 1회 113ms(옵션 MM이 주기마다). 대기 이벤트 1위는 커밋 WALSync, 다음이 계좌 행 잠금(설계상 경합), 인서트 중 DataFileRead(캐시 부족).
+- API: `MemoCache` stale-while-revalidate(`staleMs`) — 랭킹 5분·overview/symbols/summary 10초·지수·추세선은 만료 뒤에도 이전 값을 즉시 주고 뒤에서 갱신(9623066). overview·summary 세션 통계는 5분 경계(30초 여유)까지 캐시 + 이후 체결만 합산(9623066·f099cd4, 최근분은 인덱스 스캔 비용 ~858). `trades/latest`를 LATERAL 쿼리 1개로(0c0bf9d, 운영 4ms; 예전엔 19개 동시 쿼리로 풀 12 독점). 추세선·원자재 개요는 `mapWithConcurrency`로 4/3개씩(78ed295·81d1976). 계좌·보유 조회 병렬화(74d4fea).
+- DB: 부분 인덱스 `orders_live_account_created_idx`(마이그레이션 20260928100000, CONCURRENTLY; 합성 200만 행 39ms→0.025ms, prepared 8회째도 사용)(3b57da8). GCP compose: postgres 메모리 3GB·shared_buffers 768MB·effective_cache_size 2GB·random_page_cost 1.1(2647c64) — **적용 시 postgres 재시작(수 초 중단)**.
+- 웹: `lib/snapshot`(탭 sessionStorage) — 대시보드·증권·랭킹·종목 화면이 마지막 응답을 먼저 그림(a6f037c), 상단 메뉴가 목록 스냅샷을 미리 받아 둠(75b15f0). `sharedGet`으로 같은 공개 GET 합치기(2dd8aeb·2f38bdb). 폰트 CDN preconnect(fb401e7·a656d8c).
+- 봇: 시장 관찰 루프 중복 실행 방지(00f93ec). 운영 로그 오류 0, 현물·선물 전 종목 거래 중, 무체결 옵션은 retired K 계열·깊은 ITM/먼 OTM.
+- 배포 시: api·web·bots 재빌드 + `prisma migrate deploy`(인덱스). 웹 변경은 단위 테스트·타입 검사만(로컬 API가 꺼져 있어 화면 확인은 못 함).
+
 ## 2026-09-28 04:21 KST — 수수료 + 현물 변동폭 50% 축소 운영 적용, '원' 줄바꿈 수정 (e0b8596·aa5bab6)
 
 - 사용자 요청으로 변동폭 축소를 30% → **50%**(`SPOT_PRICE_MOVE_SCALE = 0.5`)로 바꾸고 예약 대신 바로 적용. 수수료 시작은 원래대로 **2026-09-28 04:20 KST** 체결부터(`TRADING_FEES_EFFECTIVE_AT`).

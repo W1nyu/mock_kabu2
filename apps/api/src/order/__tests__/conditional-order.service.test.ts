@@ -436,4 +436,32 @@ describe("human futures conditional orders close a hedge side (LONG/SHORT), not 
       positionSide: "SHORT",
     });
   });
+
+  it("stamps both OCO legs with the closing position side and clamps qty to what that side holds", async () => {
+    const positions = new Map([
+      ["acct-1|KABUF|LONG", 3],
+      ["acct-1|KABUF|SHORT", -2],
+    ]);
+    const { service } = buildForPlace(87_000, 0, { positions, isBot: false });
+
+    const rows = await service.placeOco("acct-1", {
+      symbol: "KABUF",
+      side: "BUY",
+      qty: 2,
+      lowerPrice: 86_000,
+      upperPrice: 88_000,
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.positionSide)).toEqual(["SHORT", "SHORT"]);
+
+    await expect(
+      service.placeOco("acct-1", {
+        symbol: "KABUF",
+        side: "BUY",
+        qty: 3,
+        lowerPrice: 86_000,
+        upperPrice: 88_000,
+      }),
+    ).rejects.toThrow(/청산할 수 있는 수량은 2계약/);
+  });
 });
