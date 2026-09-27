@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { changePct, fmtFuture, type FutureRow } from "@/lib/futures";
-import { subscribe } from "@/lib/socket";
+import { subscribeLivePrices } from "@/lib/live-prices";
 import { everyVisible } from "@/lib/visible-interval";
 import { useNames, useT } from "@/lib/i18n";
 
@@ -38,15 +38,8 @@ export default function FuturesList() {
   const symbols = rows.map((row) => row.symbol).join(",");
   useEffect(() => {
     if (!symbols) return;
-    return subscribe(
-      symbols.split(",").map((symbol) => `trades:${symbol}`),
-      ({ channel, data }) => {
-        const price = Number((data as { price?: unknown })?.price);
-        if (!Number.isFinite(price)) return;
-        const symbol = channel.slice("trades:".length);
-        setLive((prev) => (prev[symbol] === price ? prev : { ...prev, [symbol]: price }));
-      },
-    );
+    // 체결마다 다시 그리지 않도록 0.2초씩 모아서 반영한다.
+    return subscribeLivePrices(symbols.split(","), setLive);
   }, [symbols]);
 
   const list = useMemo(
