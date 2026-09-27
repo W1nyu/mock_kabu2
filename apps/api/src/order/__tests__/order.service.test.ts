@@ -1,5 +1,5 @@
-import { futureDef, futureMarginPerContract } from "@mock-kabu/shared";
-import { describe, expect, it, vi } from "vitest";
+import { futureDef, futureMarginPerContract, TRADING_FEES_EFFECTIVE_AT } from "@mock-kabu/shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrderService } from "../order.service";
 
 describe("OrderService.myOrders", () => {
@@ -104,11 +104,14 @@ describe("OrderService.amend", () => {
 });
 
 describe("OrderService.place for futures", () => {
+  beforeEach(() => { vi.spyOn(Date, "now").mockReturnValue(TRADING_FEES_EFFECTIVE_AT - 1); });
+  afterEach(() => { vi.restoreAllMocks(); });
   function harness(balance: bigint, holdAmount = 0n, positionMargin = 0n, debt = 0n) {
     const accounts: Record<string, { balance: bigint; holdAmount: bigint }> = { a: { balance, holdAmount } };
     const created: Record<string, unknown>[] = [];
     const outbox: Record<string, unknown>[] = [];
     const tx = {
+      $queryRawUnsafe: vi.fn(async () => [{ isBot: false }]),
       futuresPosition: {
         aggregate: vi.fn(async () => ({ _sum: { marginHeld: positionMargin } })),
         // 포지션 없음(신규 주문) — 청산 판정·레버리지는 leverage.test.ts에서 따로 본다.
@@ -138,6 +141,32 @@ describe("OrderService.place for futures", () => {
     expect(tx.holding.findUnique).not.toHaveBeenCalled();
   });
 
+  it("reserves human fees on both futures sides after activation, while bots reserve only margin", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(TRADING_FEES_EFFECTIVE_AT);
+    for (const side of ["BUY", "SELL"] as const) {
+      const human = harness(10_000_000n);
+      await human.service.place("a", { symbol: "KABUF", side, type: "LIMIT", price: 88_000, qty: 2 });
+      expect(human.created[0].holdPerUnit).toBe(1_914_880n);
+      const bot = harness(10_000_000n);
+      bot.tx.$queryRawUnsafe.mockResolvedValue([{ isBot: true }]);
+      await bot.service.place("a", { symbol: "KABUF", side, type: "LIMIT", price: 88_000, qty: 2 });
+      expect(bot.created[0].holdPerUnit).toBe(1_914_000n);
+    }
+  });
+
+  it("reserves spot buy fees, rejects an underfunded human buy, and preserves the bot limit", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(TRADING_FEES_EFFECTIVE_AT);
+    const human = harness(100_010n);
+    await human.service.place("a", { symbol: "KABU", side: "BUY", type: "LIMIT", price: 100_000, qty: 1 });
+    expect(human.created[0].holdPerUnit).toBe(100_010n);
+    const short = harness(100_000n);
+    await expect(short.service.place("a", { symbol: "KABU", side: "BUY", type: "LIMIT", price: 100_000, qty: 1 })).rejects.toThrow(/주문 가능 금액/);
+    const bot = harness(100_000n);
+    bot.tx.$queryRawUnsafe.mockResolvedValue([{ isBot: true }]);
+    await bot.service.place("a", { symbol: "KABU", side: "BUY", type: "LIMIT", price: 100_000, qty: 1 });
+    expect(bot.created[0].holdPerUnit).toBe(100_000n);
+  });
+
   it("counts position margin and debt against the available cash", async () => {
     const { service } = harness(3_000_000n, 0n, 1_000_000n, 200_000n);
     // 가용 = 300만 − 100만(포지션 증거금) − 20만(미수) = 180만 < 1계약 증거금 191만4천
@@ -163,6 +192,8 @@ describe("OrderService.place for futures", () => {
 });
 
 describe("OrderService.place market option limits", () => {
+  beforeEach(() => { vi.spyOn(Date, "now").mockReturnValue(TRADING_FEES_EFFECTIVE_AT - 1); });
+  afterEach(() => { vi.restoreAllMocks(); });
   function harness(lastPrice: number, theo: number | null, heldQty = 0) {
     const accounts: Record<string, { balance: bigint; holdAmount: bigint }> = { a: { balance: 100_000_000n, holdAmount: 0n } };
     const outbox: Record<string, unknown>[] = [];

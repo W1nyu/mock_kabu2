@@ -2,6 +2,7 @@
 
 import {
   MARKET_BUY_HOLD_FACTOR,
+  orderHoldWithFee,
   TRAIL_BPS_MAX,
   TRAIL_BPS_MIN,
   describeCondition,
@@ -17,8 +18,10 @@ import { subscribe } from "@/lib/socket";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { everyVisible } from "@/lib/visible-interval";
 import { useT } from "@/lib/i18n";
+import TradingFeeNotice from "./TradingFeeNotice";
 
 interface AccountInfo {
+  tradingFeeExempt?: boolean;
   balance: number;
   holdAmount: number;
   available: number;
@@ -261,19 +264,21 @@ export default function OrderForm({
         : null;
   const estimatePrice = side === "BUY" ? buyRefPrice : type === "LIMIT" ? limitPrice : null;
   const estimate = validQty && estimatePrice != null ? estimatePrice * parsedQty : null;
+  const buyHoldPerUnit = buyRefPrice != null ? (account?.tradingFeeExempt ? buyRefPrice : Number(orderHoldWithFee(BigInt(buyRefPrice), symbol, buyRefPrice))) : null;
+  const cashHold = validQty && buyHoldPerUnit != null ? buyHoldPerUnit * parsedQty : null;
   const maxBuyQty =
-    buyRefPrice != null && account != null ? Math.floor(account.available / buyRefPrice) : null;
+    buyHoldPerUnit != null && account != null ? Math.floor(account.available / buyHoldPerUnit) : null;
   const pctDisabled = side === "BUY" ? buyRefPrice == null || buyRefPrice <= 0 : availableQty <= 0;
   const exceedsAvailableCash =
-    side === "BUY" && estimate != null && account != null && estimate > account.available;
+    side === "BUY" && cashHold != null && account != null && cashHold > account.available;
   const exceedsAvailableShares = side === "SELL" && validQty && parsedQty > availableQty;
 
   function applyPct(pct: number) {
     let computed = 0;
     if (side === "SELL") {
       computed = Math.floor(availableQty * pct);
-    } else if (buyRefPrice != null && buyRefPrice > 0) {
-      computed = Math.floor(((account?.available ?? 0) * pct) / buyRefPrice);
+    } else if (buyHoldPerUnit != null && buyHoldPerUnit > 0) {
+      computed = Math.floor(((account?.available ?? 0) * pct) / buyHoldPerUnit);
     }
     if (computed <= 0) {
       setQty("");
@@ -672,13 +677,14 @@ export default function OrderForm({
           {estimate != null && (
             <p className="flex items-baseline justify-between gap-2 border-t border-hairline-soft pt-1.5">
               <span className="text-ink-muted">
-                {side === "BUY" && type !== "LIMIT" ? tr("예상 최대 홀드") : tr("예상 주문금액")}
+                {side === "BUY" ? tr("주문 예약금 (수수료 포함)") : tr("예상 주문금액")}
               </span>
-              <span className="font-semibold text-sky">{won(estimate)}</span>
+              <span className="font-semibold text-sky">{won(side === "BUY" ? cashHold ?? estimate : estimate)}</span>
             </p>
           )}
         </div>
 
+        <TradingFeeNotice symbol={symbol} price={type === "LIMIT" ? limitPrice : lastPrice} qty={parsedQty} exempt={account?.tradingFeeExempt} />
         {/* Advisories */}
         <div className="space-y-1 text-xs">
           {type === "MARKET" && side === "BUY" && (

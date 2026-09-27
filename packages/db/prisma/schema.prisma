@@ -455,7 +455,7 @@ model FuturesSettlement {
   @@schema("market")
 }
 
-/// 선물 미수금(원). 손실이 잔액을 넘은 부분 — 이후 선물 이익으로 먼저 갚는다.
+/// 미수금(원). 파생 손실·매매 수수료가 가용 잔액을 넘은 부분 — 이후 선물 이익으로 먼저 갚는다.
 model FuturesDebt {
   accountId String   @id @map("account_id")
   amount    BigInt   @default(0)

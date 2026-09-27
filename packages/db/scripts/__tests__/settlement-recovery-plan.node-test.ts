@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { TRADING_FEES_EFFECTIVE_AT } from "@mock-kabu/shared";
 import {
   buildRecoveryPlan,
   type RecoveryAccount,
@@ -12,6 +13,15 @@ import {
 const BUYER = "buyer";
 const SELLER = "seller";
 const SYMBOL = "KABU";
+
+test("legacy recovery refuses fee-bearing fills from the exact cutover", () => {
+  for (const offset of [-1, 0, 1]) {
+    const plan = buildRecoveryPlan(input({ unsettledTrades: [trade({
+      createdAt: new Date(TRADING_FEES_EFFECTIVE_AT + offset),
+    })] }));
+    assert.equal(plan.issues.some(issue => issue.code === "FEE_AWARE_REPLAY_REQUIRED"), offset >= 0);
+  }
+});
 
 function order(overrides: Partial<RecoveryOrder> = {}): RecoveryOrder {
   return {

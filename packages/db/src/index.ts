@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 
 export * from "@prisma/client";
+export * from "./trading-fees";
 
 let client: PrismaClient | undefined;
 

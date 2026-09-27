@@ -70,7 +70,7 @@ export default function DailyPerformance({ refreshKey }: { refreshKey?: number }
                 {tr("전일 대비")}
               </th>
               <th className="text-right" title={tr("그날 매도 체결에서 확정된 손익")}>
-                {tr("실현손익")}
+                {tr("실현손익 (수수료 전)")}
               </th>
             </tr>
           </thead>

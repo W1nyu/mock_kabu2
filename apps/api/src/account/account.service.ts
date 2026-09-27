@@ -1,6 +1,6 @@
 import { Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
-import { Prisma, type PrismaClient } from "@mock-kabu/db";
-import { ADMIN_NICKNAME, futureDef, optionDef, SYMBOLS } from "@mock-kabu/shared";
+import { isTradingFeeExempt, Prisma, type PrismaClient } from "@mock-kabu/db";
+import { ADMIN_NICKNAME, futureDef, optionDef, SYMBOLS, tradeNotional, tradingFee } from "@mock-kabu/shared";
 import { koreaDayStart } from "../common/market-time";
 import { MemoCache } from "../core/memo-cache";
 import { futuresEncumbrance } from "../order/futures-margin";
@@ -69,6 +69,7 @@ export class AccountService {
       futuresDebt: futures.debt,
       available,
       availableExact: available.toString(),
+      tradingFeeExempt: await isTradingFeeExempt(this.prisma, accountId),
     };
   }
 
@@ -222,6 +223,7 @@ export class AccountService {
   /** 내 체결 내역. 매수·매도 양쪽 원장을 계정 기준 한 줄로 합쳐 최신순으로 돌려준다. */
   async getTrades(accountId: string, limit = 100, symbol?: string) {
     const take = Math.min(Math.max(1, limit), 200);
+    const feeExempt = await isTradingFeeExempt(this.prisma, accountId);
     const [trades, realized, futuresRealized] = await Promise.all([
       this.prisma.trade.findMany({
         where: {
@@ -252,6 +254,7 @@ export class AccountService {
       const isSeller = trade.sellerAccountId === accountId;
       // 자기 체결은 매칭 엔진이 막지만, 만약 있다면 매수·매도 양쪽 원장이므로 SELF로 표시한다.
       const side = isBuyer && isSeller ? "SELF" : isBuyer ? "BUY" : "SELL";
+      const fee = feeExempt ? 0 : Number(tradingFee(tradeNotional(trade.symbol, trade.price, trade.qty), trade.createdAt.getTime())) * (side === "SELF" ? 2 : 1);
       const realizedRow = isSeller ? realizedByTrade.get(trade.id) : undefined;
       // 선물·옵션: 가격은 정수 단위라 체결금액(명목) = 가격 × 수량 × 승수
       const unitValue = futureDef(trade.symbol)?.unitValue ?? optionDef(trade.symbol)?.unitValue ?? null;
@@ -264,6 +267,7 @@ export class AccountService {
           price: trade.price,
           qty: trade.qty,
           amount: trade.price * trade.qty * unitValue,
+          fee,
           orderId: isBuyer ? trade.buyOrderId : trade.sellOrderId,
           taker: trade.takerSide === (isBuyer ? "BUY" : "SELL"),
           realized: futureRealized != null ? Number(futureRealized) : null,
@@ -278,6 +282,7 @@ export class AccountService {
         price: trade.price,
         qty: trade.qty,
         amount: trade.price * trade.qty,
+        fee,
         orderId: isBuyer ? trade.buyOrderId : trade.sellOrderId,
         /** 내가 taker(주문을 넣어 체결시킨 쪽)였는지 */
         taker: trade.takerSide === (isBuyer ? "BUY" : "SELL"),

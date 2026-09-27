@@ -10,7 +10,7 @@ import {
 import { ModuleRef } from "@nestjs/core";
 import { randomUUID } from "node:crypto";
 import type { BalanceMutator } from "@mock-kabu/concurrency";
-import type { PrismaClient } from "@mock-kabu/db";
+import { isTradingFeeExempt, type PrismaClient } from "@mock-kabu/db";
 import {
   KEYS,
   MARKET_BUY_HOLD_FACTOR,
@@ -21,6 +21,8 @@ import {
   formatFuturePrice,
   futureDef,
   optionDef,
+  orderHoldWithFee,
+  TRADING_FEES_EFFECTIVE_AT,
   isOnTick,
   tickSizeOf,
   type OrderCancelRequestedEvent,
@@ -178,6 +180,9 @@ export class OrderService {
         holdPerUnit = await futuresOrderHoldPerUnit(ctx.tx, accountId, future, side, qty, type === "LIMIT" ? price! : marketCap);
       } else if (option) {
         holdPerUnit = await optionOrderHoldPerUnit(ctx.tx, accountId, option, side, qty, type === "LIMIT" ? price! : marketCap);
+      }
+      if (holdPerUnit > 0n && Date.now() >= TRADING_FEES_EFFECTIVE_AT && !(await isTradingFeeExempt(ctx.tx, accountId))) {
+        holdPerUnit = orderHoldWithFee(holdPerUnit, symbol, type === "LIMIT" ? price! : marketCap);
       }
       if (future || option || side === "BUY") {
         const acc = ctx.accounts[accountId];

@@ -1,7 +1,8 @@
 "use client";
 
-import { MAX_FUTURES_ORDER_QTY, optionDef } from "@mock-kabu/shared";
+import { MAX_FUTURES_ORDER_QTY, optionDef, orderHoldWithFee, tradeNotional } from "@mock-kabu/shared";
 import Link from "next/link";
+import TradingFeeNotice from "./TradingFeeNotice";
 import { useEffect, useState } from "react";
 import { api, getUser, newIdempotencyKey } from "@/lib/api";
 import { krw } from "@/lib/futures";
@@ -34,9 +35,11 @@ export default function OptionOrderPanel({
   priceHint,
   onPlaced,
   retired = false,
+  feeExempt = false,
 }: {
   /** 거래 종료 — 매수 불가, 보유분 매도만 */
   retired?: boolean;
+  feeExempt?: boolean;
   symbol: string;
   lastPrice: number | null;
   position: OptionPosition | null;
@@ -74,7 +77,7 @@ export default function OptionOrderPanel({
   // 서버가 매수에 묶는 금액: 지정가는 그 가격, 시장가는 최근가 × 1.5 + 10호가(체결 상한)
   const holdUnits = type === "LIMIT" ? priceUnits : lastPrice != null ? Math.ceil(lastPrice * 1.5) + def.tickUnits * 10 : null;
   const premium = priceUnits != null ? priceUnits * def.unitValue * qty : null;
-  const hold = holdUnits != null ? holdUnits * def.unitValue * qty : null;
+  const hold = holdUnits != null ? Number(feeExempt ? tradeNotional(symbol, holdUnits) : orderHoldWithFee(tradeNotional(symbol, holdUnits), symbol, holdUnits)) * qty : null;
 
   function stepPrice(direction: 1 | -1) {
     const base = toUnits(symbol, priceText) ?? lastPrice;
@@ -196,14 +199,15 @@ export default function OptionOrderPanel({
         </div>
       </label>
 
+      <TradingFeeNotice symbol={symbol} price={priceUnits} qty={qty} exempt={feeExempt} />
       <dl className="num space-y-1 text-[13px]">
         <div className="flex justify-between">
           <dt className="text-ink-muted">{side === "BUY" ? tr("프리미엄 (낼 금액)") : tr("프리미엄 (받을 금액)")}</dt>
           <dd className="font-semibold">{premium == null ? "—" : type === "MARKET" ? tr("약 {amount}", { amount: krw(premium) }) : krw(premium)}</dd>
         </div>
-        {side === "BUY" && type === "MARKET" && (
+        {side === "BUY" && (
           <div className="flex justify-between text-ink-faint">
-            <dt>{tr("주문 때 묶는 금액 (체결 상한)")}</dt>
+            <dt>{tr("주문 예약금 (수수료 포함)")}</dt>
             <dd>{hold == null ? "—" : krw(hold)}</dd>
           </div>
         )}

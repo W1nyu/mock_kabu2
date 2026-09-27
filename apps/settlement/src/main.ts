@@ -25,6 +25,7 @@ import Redis from "ioredis";
 import { readSettlementRuntimeConfig } from "./env";
 import { settleOptionTrade } from "./options";
 import { settleFuturesTrade } from "./futures";
+import { settleTradingFees } from "./trading-fees";
 
 type StreamReply = [key: string, messages: StreamMessages][] | null;
 type StreamMessages = [id: string, fields: string[]][];
@@ -102,7 +103,7 @@ function isTradeStreamEvent(value: unknown): value is TradeStreamEvent {
  * now continue independently of how many stateless API replicas are serving
  * REST/WebSocket traffic.
  */
-class SettlementWorker {
+export class SettlementWorker {
   private running = false;
   private heartbeatTimer: NodeJS.Timeout | undefined;
   private streamTrimTimer: NodeJS.Timeout | undefined;
@@ -362,14 +363,6 @@ class SettlementWorker {
       addDelta(event.buyerAccountId, -cost, -holdConsumed);
       addDelta(event.sellerAccountId, cost, 0n);
 
-      for (const [accountId, delta] of deltas) {
-        const account = ctx.accounts[accountId];
-        await ctx.updateAccount(accountId, {
-          balance: account.balance + delta.balance,
-          holdAmount: account.holdAmount + delta.hold,
-        });
-      }
-
       const runningBalances = new Map<string, bigint>(
         parties.map((accountId) => [accountId, ctx.accounts[accountId].balance]),
       );
@@ -382,6 +375,15 @@ class SettlementWorker {
       };
       await ledger(event.buyerAccountId, -cost, "TRADE_BUY");
       await ledger(event.sellerAccountId, cost, "TRADE_SELL");
+
+      for (const [accountId, delta] of deltas) {
+        const account = ctx.accounts[accountId];
+        const holdAmount = account.holdAmount + delta.hold;
+        const balance = await settleTradingFees(ctx, event, accountId, {
+          balance: account.balance + delta.balance, holdAmount,
+        });
+        await ctx.updateAccount(accountId, { balance, holdAmount });
+      }
 
       await ctx.tx.holding.upsert({
         where: { accountId_symbol: { accountId: event.buyerAccountId, symbol: event.symbol } },
@@ -545,7 +547,7 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
+if (require.main === module) main().catch((error) => {
   console.error("[settlement] fatal", error);
   process.exitCode = 1;
 });

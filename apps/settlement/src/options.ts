@@ -6,6 +6,7 @@ import {
   type TradeExecutedEvent,
 } from "@mock-kabu/shared";
 import type { FuturesLockContext } from "./futures";
+import { settleTradingFees } from "./trading-fees";
 
 interface Leg {
   accountId: string;
@@ -71,12 +72,14 @@ export async function settleOptionTrade(
   for (const [accountId, delta] of cash) {
     const account = ctx.accounts[accountId];
     const balance = account.balance + delta.balance;
-    await ctx.updateAccount(accountId, { balance, holdAmount: account.holdAmount - delta.release });
     if (delta.balance !== 0n) {
       await ctx.tx.ledgerEntry.create({
         data: { accountId, delta: delta.balance, balanceAfter: balance, reason: "OPTION_PREMIUM", refId: event.tradeId },
       });
     }
+    const holdAmount = account.holdAmount - delta.release;
+    const afterFees = await settleTradingFees(ctx, event, accountId, { balance, holdAmount });
+    await ctx.updateAccount(accountId, { balance: afterFees, holdAmount });
   }
 
   for (const order of [buyOrder, sellOrder]) {

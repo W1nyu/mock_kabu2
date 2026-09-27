@@ -3,6 +3,15 @@
  * 빠진 키 찾기: `node scripts/i18n-missing.mjs`
  */
 export const MESSAGES: Readonly<Record<string, readonly [string, string]>> = {
+  "수수료": ["Fee", "手数料"],
+  "예상 수수료 (매수·매도 각각 0.01%)": ["Estimated fee (0.01% on each buy/sell)", "手数料目安（売買それぞれ0.01%）"],
+  "{n}배: 증거금 대비 각 {pct}%": ["{n}x: {pct}% of margin on each side", "{n}倍：証拠金に対して片道{pct}%"],
+  "실제 체결금액 기준 · 체결별 원 미만 올림 · 부분 체결 시 합계가 달라질 수 있습니다.": ["Based on executed value; each fill rounds up to ₩1. Partial fills may change the total.", "約定金額基準・約定ごとに₩1未満切り上げ。分割約定で合計が変わる場合があります。"],
+  "주문 예약금 (수수료 포함)": ["Order reserve (including fees)", "注文拘束額（手数料込み）"],
+  "실현손익 (수수료 전)": ["Realized P&L (before fees)", "実現損益（手数料前）"],
+  "오늘 실현손익 (수수료 전)": ["Today's realized P&L (before fees)", "本日の実現損益（手数料前）"],
+  "누적 실현손익 (수수료 전)": ["Total realized P&L (before fees)", "累計実現損益（手数料前）"],
+  "매매 성과는 수수료 전 기준입니다. 수수료는 현금·총자산에 반영됩니다.": ["Trading statistics are before fees. Fees are reflected in cash and total equity.", "売買成績は手数料控除前です。手数料は現金・総資産に反映されます。"],
   "로그인이 필요합니다": ["Please log in", "ログインが必要です"],
   "요청 실패 ({status})": ["Request failed ({status})", "リクエスト失敗 ({status})"],
   "언어": ["Language", "言語"],

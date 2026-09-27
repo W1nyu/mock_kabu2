@@ -456,7 +456,7 @@ export default function DashboardPage() {
               })}
             />
             <Metric
-              label={t("오늘 실현손익")}
+              label={t("오늘 실현손익 (수수료 전)")}
               value={realized ? signedWon(realizedToday) : "—"}
               tone={realized ? toneOf(realizedToday) : undefined}
               title={t("KST 당일 확정 손익 — 주식 {stock} · 선물·옵션 {futures}", {
@@ -465,7 +465,7 @@ export default function DashboardPage() {
               })}
             />
             <Metric
-              label={t("누적 실현손익")}
+              label={t("누적 실현손익 (수수료 전)")}
               value={realized ? signedWon(realizedTotal) : "—"}
               tone={realized ? toneOf(realizedTotal) : undefined}
               title={t("지금까지 확정된 손익 — 주식 {stock} · 선물·옵션 {futures}", {

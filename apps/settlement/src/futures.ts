@@ -6,6 +6,7 @@ import {
   type FutureDef,
   type TradeExecutedEvent,
 } from "@mock-kabu/shared";
+import { settleTradingFees } from "./trading-fees";
 
 /**
  * 선물 체결 정산. 현물과 달리 체결 대금이 오가지 않는다 — 포지션을 갱신하고, 주문 증거금을 풀고,
@@ -86,7 +87,6 @@ export async function settleFuturesTrade(
       { balance: account.balance, holdAmount, debt: debtRow?.amount ?? 0n },
       realized.get(accountId) ?? 0n,
     );
-    await ctx.updateAccount(accountId, { balance: cash.balance, holdAmount });
     if (cash.ledgerDelta !== 0n) {
       await ctx.tx.ledgerEntry.create({
         data: {
@@ -105,6 +105,8 @@ export async function settleFuturesTrade(
         create: { accountId, amount: cash.debt },
       });
     }
+    const balance = await settleTradingFees(ctx, event, accountId, { balance: cash.balance, holdAmount });
+    await ctx.updateAccount(accountId, { balance, holdAmount });
   }
 
   for (const order of [buyOrder, sellOrder]) {

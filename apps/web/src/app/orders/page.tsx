@@ -31,6 +31,7 @@ interface FillRow {
   price: number;
   qty: number;
   amount: number;
+  fee: number;
   taker: boolean;
   realized: number | null;
   costBasis: number | null;
@@ -105,6 +106,7 @@ function downloadFillsCsv(fills: FillRow[]) {
     "체결가",
     "수량",
     "체결금액",
+    "수수료",
     "실현손익",
     "차감원가",
     "테이커",
@@ -116,6 +118,7 @@ function downloadFillsCsv(fills: FillRow[]) {
     priceOf(f.symbol, f.price),
     f.qty,
     f.amount,
+    f.fee ?? 0,
     f.realized,
     f.costBasis,
     f.taker ? tr("테이커") : tr("메이커"),
@@ -337,11 +340,12 @@ function FillsTable({ fills }: { fills: FillRow[] }) {
           <th className="text-right">{t("체결가")}</th>
           <th className="text-right">{t("수량")}</th>
           <th className="text-right">{t("체결금액")}</th>
+          <th className="text-right">{t("수수료")}</th>
           <th
             className="text-right"
             title={t("주식은 매도 체결의 평단가 대비 손익, 선물·옵션은 포지션을 줄인 체결의 손익")}
           >
-            {t("실현손익")}
+            {t("실현손익 (수수료 전)")}
           </th>
         </tr>
       </thead>
@@ -369,6 +373,7 @@ function FillsTable({ fills }: { fills: FillRow[] }) {
               <td className="num text-right">{priceOf(f.symbol, f.price)}</td>
               <td className="num text-right">{fmt.format(f.qty)}</td>
               <td className="num text-right">{won(f.amount)}</td>
+              <td className="num text-right">{won(f.fee ?? 0)}</td>
               <td className="num text-right">
                 {f.realized == null ? (
                   <span className="text-ink-faint">—</span>
@@ -381,7 +386,7 @@ function FillsTable({ fills }: { fills: FillRow[] }) {
         })}
         {fills.length === 0 && (
           <tr>
-            <td colSpan={7} className="py-14 text-center text-sm text-ink-faint">
+            <td colSpan={8} className="py-14 text-center text-sm text-ink-faint">
               {t("체결 내역이 없습니다")}
             </td>
           </tr>

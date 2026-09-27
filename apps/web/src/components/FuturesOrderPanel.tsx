@@ -3,11 +3,13 @@
 import {
   futureDef,
   futureMarginPerContract,
+  orderHoldWithFee,
   FUTURES_EMERGENCY_LOSS_BPS,
   MARKET_BUY_HOLD_FACTOR,
   MAX_FUTURES_ORDER_QTY,
 } from "@mock-kabu/shared";
 import Link from "next/link";
+import TradingFeeNotice from "./TradingFeeNotice";
 import { useCallback, useEffect, useState } from "react";
 import { api, getUser, newIdempotencyKey } from "@/lib/api";
 import { everyVisible } from "@/lib/visible-interval";
@@ -15,6 +17,7 @@ import { fmtFuture, krw, LEVERAGE_CHOICES, leverageLabel, toFutureUnits, unitsTo
 import { rich, useT } from "@/lib/i18n";
 
 interface AccountInfo {
+  tradingFeeExempt?: boolean;
   available: number;
 }
 
@@ -42,6 +45,7 @@ export default function FuturesOrderPanel({
   const [priceText, setPriceText] = useState("");
   const [qty, setQty] = useState(1);
   const [available, setAvailable] = useState<number | null>(null);
+  const [feeExempt, setFeeExempt] = useState(false);
   const [futures, setFutures] = useState<FuturesAccount | null>(null);
   const [liveOrders, setLiveOrders] = useState(0);
   const [leverageBusy, setLeverageBusy] = useState(false);
@@ -62,7 +66,7 @@ export default function FuturesOrderPanel({
   const refreshAccount = useCallback(() => {
     if (!getUser()) return;
     api<AccountInfo>("/account")
-      .then((a) => setAvailable(a.available))
+      .then((a) => { setAvailable(a.available); setFeeExempt(a.tradingFeeExempt ?? false); })
       .catch(() => {});
     api<FuturesAccount>("/account/futures")
       .then(setFutures)
@@ -101,7 +105,8 @@ export default function FuturesOrderPanel({
   const priceUnits = type === "LIMIT" ? toFutureUnits(symbol, priceText) : lastPrice;
   // 서버가 증거금을 잡는 가격: 지정가는 그 가격, 시장가는 최근가 × 1.1(체결 상한)
   const holdPriceUnits = type === "LIMIT" ? priceUnits : lastPrice != null ? Math.ceil(lastPrice * MARKET_BUY_HOLD_FACTOR) : null;
-  const perContract = holdPriceUnits != null ? Number(futureMarginPerContract(def, holdPriceUnits, leverage)) : null;
+  const marginPerContract = holdPriceUnits != null ? futureMarginPerContract(def, holdPriceUnits, leverage) : null;
+  const perContract = holdPriceUnits != null && marginPerContract != null ? Number(feeExempt ? marginPerContract : orderHoldWithFee(marginPerContract, symbol, holdPriceUnits)) : null;
   // 수량 % 버튼의 기준: 청산 방향이면 보유 포지션, 아니면 주문 가능 금액으로 열 수 있는 최대 계약
   const sizingBase = closing
     ? Math.min(Math.abs(positionQty), MAX_FUTURES_ORDER_QTY)
@@ -182,6 +187,7 @@ export default function FuturesOrderPanel({
   const sideTone = side === "BUY" ? "bg-up text-white" : "bg-down text-white";
   return (
     <div className="glass space-y-3 p-4">
+      <TradingFeeNotice symbol={symbol} price={priceUnits} qty={qty} leverage={leverage} exempt={feeExempt} />
       <div>
         <div className="flex items-center justify-between text-xs text-ink-muted">
           <span>{tr("레버리지")}</span>
@@ -346,7 +352,7 @@ export default function FuturesOrderPanel({
       <dl className="num space-y-1 text-[13px]">
         <div className="flex justify-between">
           <dt className="text-ink-muted">
-            {closingOnly ? tr("필요 증거금 (청산 주문)") : tr("필요 증거금 ({lev})", { lev: leverageLabel(symbol, leverage) })}
+            {closingOnly ? tr("필요 증거금 (청산 주문)") : tr("주문 예약금 (수수료 포함)")}
           </dt>
           <dd className="font-semibold">{closingOnly ? tr("없음") : margin == null ? "—" : krw(margin)}</dd>
         </div>

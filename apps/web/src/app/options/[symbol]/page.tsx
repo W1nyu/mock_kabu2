@@ -35,6 +35,7 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
   const [last, setLast] = useState<number | null>(null);
   const [account, setAccount] = useState<FuturesAccount | null>(null);
   const [available, setAvailable] = useState<number | null>(null);
+  const [feeExempt, setFeeExempt] = useState(false);
   const [priceHint, setPriceHint] = useState<{ price: number; seq: number } | null>(null);
   const [orderRefreshKey, setOrderRefreshKey] = useState(0);
 
@@ -65,8 +66,8 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
     api<FuturesAccount>("/account/futures")
       .then(setAccount)
       .catch(() => {});
-    api<{ available: number }>("/account")
-      .then((a) => setAvailable(a.available))
+    api<{ available: number; tradingFeeExempt: boolean }>("/account")
+      .then((a) => { setAvailable(a.available); setFeeExempt(a.tradingFeeExempt); })
       .catch(() => {});
   }, []);
   useEffect(() => {
@@ -205,6 +206,7 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
               lastPrice={price}
               position={position}
               available={available}
+              feeExempt={feeExempt}
               priceHint={priceHint}
               onPlaced={() => {
                 refreshAccount();

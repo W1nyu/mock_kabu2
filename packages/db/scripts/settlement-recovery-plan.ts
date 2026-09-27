@@ -8,6 +8,8 @@
  * apply a plan with any issue.
  */
 
+import { TRADING_FEES_EFFECTIVE_AT } from "@mock-kabu/shared";
+
 export interface RecoveryTrade {
   id: string;
   symbol: string;
@@ -71,6 +73,7 @@ export interface RecoveryIssue {
     | "ORDER_OVERFILLED"
     | "ORDER_FILLED_QTY_MISMATCH"
     | "TRADE_INVALID"
+    | "FEE_AWARE_REPLAY_REQUIRED"
     | "INSUFFICIENT_RESERVED_CASH"
     | "INSUFFICIENT_CASH"
     | "INSUFFICIENT_HOLDING"
@@ -731,6 +734,17 @@ export function buildRecoveryPlan(input: RecoveryInput): RecoveryPlan {
     holdings: prestate.holdings,
   });
   const issues = [...prestate.issues, ...settlement.issues];
+  // This legacy repair planner has no bot identity or fee/debt accounting.
+  // Never mark a new fill processed without its fees; use the settlement consumer.
+  for (const trade of input.unsettledTrades) {
+    if (trade.createdAt.getTime() >= TRADING_FEES_EFFECTIVE_AT) {
+      addIssue(issues, {
+        code: "FEE_AWARE_REPLAY_REQUIRED",
+        tradeId: trade.id,
+        message: `체결 ${trade.id}은 수수료 적용 이후입니다. 기존 복구 도구 대신 정산 컨슈머로 이벤트를 재처리하세요.`,
+      });
+    }
+  }
 
   const finalAccountsById = new Map(prestate.accounts.map((account) => [account.id, account]));
   for (const account of settlement.accounts) finalAccountsById.set(account.id, account);

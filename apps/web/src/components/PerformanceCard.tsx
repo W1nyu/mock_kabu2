@@ -157,6 +157,7 @@ export default function PerformanceCard({
           />
         </dl>
       )}
+      <p className="px-5 pb-3 text-[11px] text-ink-faint">{tr("매매 성과는 수수료 전 기준입니다. 수수료는 현금·총자산에 반영됩니다.")}</p>
     </section>
   );
 }
