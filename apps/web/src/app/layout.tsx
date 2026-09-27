@@ -33,11 +33,15 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, view
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await requestLocale();
+  // CSP가 nonce 없는 인라인 스크립트를 막는다(middleware가 요청마다 x-nonce로 넘긴다). 없으면 아래 테마
+  // 스크립트가 실행되지 않아 다크 테마 사용자에게 매번 라이트 화면이 번쩍였다.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang={locale} data-theme="light" suppressHydrationWarning>
       <body>
         {/* 첫 화면을 그리기 전에 저장된 테마를 적용한다 — 다크를 고른 사람에게 라이트가 번쩍이지 않게. */}
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: `try{var t=localStorage.getItem("mock-kabu2:theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}`,
           }}
