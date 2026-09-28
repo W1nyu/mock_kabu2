@@ -118,7 +118,7 @@ async function main() {
     });
   }
   console.log(`futures: ${FUTURES.length} upserted`);
-  // 옵션 20종목 — 행사가(market.option_series)와 첫 가격은 API가 기초자산을 보고 정한다.
+  // 옵션(거래 중인 계열만, 주가지수 42 + 원/달러 22) — 행사가(market.option_series)와 첫 가격은 API가 기초자산을 보고 정한다.
   for (const o of OPTIONS) {
     await prisma.marketSymbol.upsert({
       where: { symbol: o.symbol },

@@ -235,8 +235,8 @@ describe("OrderService.place market option limits", () => {
         fn({ accounts, tx, updateAccount: async (id: string, next: { balance: bigint; holdAmount: bigint }) => (accounts[id] = next) }),
       ),
     };
-    const prisma = { marketSymbol: { findUnique: vi.fn(async () => ({ symbol: "KCOMC8", lastPrice })) } };
-    const options = { overview: vi.fn(async () => [{ symbol: "KCOMC8", theo }]) };
+    const prisma = { marketSymbol: { findUnique: vi.fn(async () => ({ symbol: "UC8", lastPrice })) } };
+    const options = { overview: vi.fn(async () => [{ symbol: "UC8", theo }]) };
     const moduleRef = { get: vi.fn(() => options) };
     const service = new OrderService(prisma as never, mutator as never, {} as never, { notifyAccount: vi.fn() } as never, undefined, moduleRef as never);
     return { service, outbox };
@@ -246,20 +246,20 @@ describe("OrderService.place market option limits", () => {
   it("caps a market buy from the current theoretical price, not a stale last trade", async () => {
     // 최근가 3호가에 머문 사이 이론가가 20호가로 올랐다 — 예전 상한(3 × 1.5 + 10 = 15)은 매도 호가(~21)에 닿지 못했다.
     const { service, outbox } = harness(3, 20);
-    await service.place("a", { symbol: "KCOMC8", side: "BUY", type: "MARKET", qty: 1 });
+    await service.place("a", { symbol: "UC8", side: "BUY", type: "MARKET", qty: 1 });
     expect(sentPrice(outbox)).toBe(20 * 1.5 + 10);
   });
 
   it("floors a market sell at half the theoretical price so a decayed option can still be closed", async () => {
     // 최근가 40호가 → 이론가 12호가(시간가치 감소). 예전 하한 20은 매수 호가(~11)보다 높아 청산이 안 됐다.
     const { service, outbox } = harness(40, 12, 3);
-    await service.place("a", { symbol: "KCOMC8", side: "SELL", type: "MARKET", qty: 1 });
+    await service.place("a", { symbol: "UC8", side: "SELL", type: "MARKET", qty: 1 });
     expect(sentPrice(outbox)).toBe(6);
   });
 
   it("falls back to the last trade price when no theoretical price is available", async () => {
     const { service, outbox } = harness(40, null, 3);
-    await service.place("a", { symbol: "KCOMC8", side: "SELL", type: "MARKET", qty: 1 });
+    await service.place("a", { symbol: "UC8", side: "SELL", type: "MARKET", qty: 1 });
     expect(sentPrice(outbox)).toBe(20);
   });
 });

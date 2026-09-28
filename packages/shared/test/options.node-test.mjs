@@ -20,15 +20,17 @@ import {
   TRADABLE_SYMBOLS,
 } from "../dist/index.js";
 
-test("44 live option series (KCOM·USD × call/put × 11 strikes) plus the retired index options, all tradable", () => {
-  assert.equal(OPTIONS.length, 44);
-  assert.ok(isOption("KCOMC11") && isOption("UP11") && !isOption("KC6"));
-  assert.deepEqual([...new Set(OPTIONS.map((o) => o.family.code))], ["KCOM", "U"]);
-  assert.ok(isOption("KCOMC3") && isOption("UP5") && !isOption("KABUF"));
-  assert.equal(optionDef("KCOMC3").name, "원자재지수 콜 3");
-  // 주가지수 옵션은 거래 종료 — 체결·정산을 위해 정의는 남는다
-  assert.equal(RETIRED_OPTIONS.length, 10);
-  assert.ok(isOption("KC3") && optionDef("KC3").family.retired);
+test("64 live option series (index × 21 strikes, USD × 11, call/put) plus the retired KCOM options, all tradable", () => {
+  assert.equal(OPTIONS.length, 64);
+  assert.ok(isOption("KC21") && isOption("KP21") && !isOption("KC22") && isOption("UP11") && !isOption("UP12"));
+  assert.deepEqual([...new Set(OPTIONS.map((o) => o.family.code))], ["K", "U"]);
+  assert.ok(isOption("KC11") && isOption("UP5") && !isOption("KABUF"));
+  assert.equal(optionDef("KC11").name, "주가지수 콜 11");
+  assert.equal(optionDef("KC11").family.futures[0], "KABUF");
+  assert.ok(!optionDef("KC3").family.retired);
+  // 원자재지수 옵션은 거래 종료 — 체결·정산을 위해 정의는 남는다
+  assert.equal(RETIRED_OPTIONS.length, 22);
+  assert.ok(isOption("KCOMC11") && optionDef("KCOMC3").family.retired);
   assert.ok([...OPTIONS, ...RETIRED_OPTIONS].every((o) => TRADABLE_SYMBOLS.includes(o.symbol)));
   assert.equal(tickSizeOf("KCOMP1"), 1);
   assert.equal(tickSizeOf("KC1"), 5);
@@ -62,9 +64,13 @@ test("widening today's ladder keeps existing strikes and adds new ones outside t
 
 test("strikes center on the rounded underlying, one step apart", () => {
   const k = optionFamily("K");
-  const atm = atmStrike(k, 91_640); // 916.40pt → 920.00
-  assert.equal(atm, 92_000);
-  assert.deepEqual([1, 2, 3, 4, 5].map((slot) => strikeForSlot(k, atm, slot)), [90_000, 91_000, 92_000, 93_000, 94_000]);
+  const atm = atmStrike(k, 91_640); // 916.40pt → 917.50(2.5pt 간격)
+  assert.equal(atm, 91_750);
+  // 21개 — 11번이 등가격, 위아래 10개씩(±25pt)
+  assert.deepEqual([1, 10, 11, 12, 21].map((slot) => strikeForSlot(k, atm, slot)), [89_250, 91_500, 91_750, 92_000, 94_250]);
+  const ladder = Array.from({ length: 21 }, (_, index) => strikeForSlot(k, atm, index + 1));
+  assert.equal(ladder.filter((strike) => strike < atm).length, 10);
+  assert.equal(ladder.filter((strike) => strike > atm).length, 10);
   const u = optionFamily("U");
   assert.equal(atmStrike(u, 14_023), 14_000); // 1,402.3원 → 1,400원
 });

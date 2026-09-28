@@ -16,13 +16,9 @@ function harness(rows: { symbol: string; strike: number; tradingDay: string }[])
     },
     marketSymbol: { update: vi.fn(async () => undefined) },
   };
-  // KCOM 기초자산 = 5종 평균 100.50pt, 원/달러 1,405.0원
+  // 주가지수 916.40pt, 원/달러 1,405.0원
   const prices = new Map([
-    ["OILF", 10_050],
-    ["GASF", 10_050],
-    ["CPRF", 10_050],
-    ["GOLDF", 10_050],
-    ["CORNF", 10_050],
+    ["KABUF", 91_640],
     ["USDF", 14_050],
   ]);
   const futures = { underlyingUnits: vi.fn(async () => prices) };
@@ -31,12 +27,12 @@ function harness(rows: { symbol: string; strike: number; tradingDay: string }[])
 }
 
 describe("OptionsService.ensureSeries", () => {
-  it("widening 5 → 11 strikes mid-day keeps today's strikes and adds new ones outside them", async () => {
-    const today = [9_950, 10_000, 10_050, 10_100, 10_150];
+  it("widening 11 → 21 strikes mid-day keeps today's strikes and adds new ones outside them", async () => {
+    const today = Array.from({ length: 11 }, (_, index) => 90_500 + index * 250);
     const rows = [
       ...today.flatMap((strike, index) => [
-        { symbol: `KCOMC${index + 1}`, strike, tradingDay: DAY },
-        { symbol: `KCOMP${index + 1}`, strike, tradingDay: DAY },
+        { symbol: `KC${index + 1}`, strike, tradingDay: DAY },
+        { symbol: `KP${index + 1}`, strike, tradingDay: DAY },
       ]),
       // 원/달러는 이미 11개가 다 있다
       ...Array.from({ length: 11 }, (_, index) => [
@@ -48,22 +44,40 @@ describe("OptionsService.ensureSeries", () => {
     await h.service.ensureSeries(NOW);
 
     expect(h.upserts).toEqual([]); // 기존 행사가는 건드리지 않는다
-    expect(h.created).toHaveLength(12); // KCOM 콜·풋 6..11
+    expect(h.created).toHaveLength(20); // 주가지수 콜·풋 12..21
     const strikes = [...new Set(h.created.map((row) => row.strike))].sort((a, b) => a - b);
-    expect(strikes).toEqual([9_800, 9_850, 9_900, 10_200, 10_250, 10_300]);
+    expect(strikes).toEqual([89_250, 89_500, 89_750, 90_000, 90_250, 93_250, 93_500, 93_750, 94_000, 94_250]);
     // 같은 자리의 콜·풋은 같은 행사가
-    for (let slot = 6; slot <= 11; slot++) {
-      const call = h.created.find((row) => row.symbol === `KCOMC${slot}`)!;
-      const put = h.created.find((row) => row.symbol === `KCOMP${slot}`)!;
+    for (let slot = 12; slot <= 21; slot++) {
+      const call = h.created.find((row) => row.symbol === `KC${slot}`)!;
+      const put = h.created.find((row) => row.symbol === `KP${slot}`)!;
       expect(call.strike).toBe(put.strike);
     }
   });
 
-  it("lays out a fresh 11-strike ladder around the money when the family has nothing for today", async () => {
-    const h = harness([{ symbol: "KCOMC1", strike: 9_000, tradingDay: "2026-01-01" }]);
+  it("reopening the index options lays a fresh 21-strike ladder even though yesterday's KC1..KP5 rows remain", async () => {
+    const stale = [1, 2, 3, 4, 5].flatMap((slot) => [
+      { symbol: `KC${slot}`, strike: 86_000 + slot * 1_000, tradingDay: "2026-09-26" },
+      { symbol: `KP${slot}`, strike: 86_000 + slot * 1_000, tradingDay: "2026-09-26" },
+    ]);
+    const current = Array.from({ length: 11 }, (_, index) => [
+      { symbol: `UC${index + 1}`, strike: 13_800 + index * 50, tradingDay: DAY },
+      { symbol: `UP${index + 1}`, strike: 13_800 + index * 50, tradingDay: DAY },
+    ]).flat();
+    const h = harness([...stale, ...current]);
     await h.service.ensureSeries(NOW);
     expect(h.created).toEqual([]);
-    // KCOM 22종목 + 원/달러 22종목을 모두 다시 깐다(정상 배치)
-    expect(h.upserts).toHaveLength(44);
+    // 주가지수 42종목만 정상 배치로 다시 깐다(원/달러는 그대로)
+    expect(h.upserts).toHaveLength(42);
+    expect(h.upserts.every((symbol) => /^K[CP]\d+$/.test(symbol))).toBe(true);
+  });
+
+  it("lays out fresh ladders for every live family when nothing is set for today", async () => {
+    const h = harness([{ symbol: "KC1", strike: 9_000, tradingDay: "2026-01-01" }]);
+    await h.service.ensureSeries(NOW);
+    expect(h.created).toEqual([]);
+    // 주가지수 42종목 + 원/달러 22종목(거래 종료한 KCOM은 깔지 않는다)
+    expect(h.upserts).toHaveLength(64);
+    expect(h.upserts.some((symbol) => symbol.startsWith("KCOM"))).toBe(false);
   });
 });

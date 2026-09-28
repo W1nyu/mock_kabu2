@@ -109,8 +109,8 @@ export class OptionsMarketView {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * 옵션 한 기초자산(콜·풋 × 행사가 11개) 전담 마켓메이커(bot43 원자재지수, bot42 원/달러).
- * 거래를 끝낸 계열(bot41 주가지수)은 만기까지 매수 호가만 두고, 만기가 지나면 남은 주문을 모두 거둔다.
+ * 옵션 한 기초자산(콜·풋 × 행사가 21·11개) 전담 마켓메이커(bot41 주가지수, bot42 원/달러).
+ * 거래를 끝낸 계열(bot43 원자재지수)은 만기까지 매수 호가만 두고, 만기가 지나면 남은 주문을 모두 거둔다.
  * 살아 있는 주문은 루프마다 한 번에 읽는다(종목마다 요청하지 않는다).
  */
 export async function runOptionsMarketMaker(client: ApiClient, family: OptionFamilyDef, market: OptionsMarketView): Promise<void> {

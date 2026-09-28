@@ -51,7 +51,7 @@ export default function ReferenceCards() {
           <p className="flex items-baseline justify-between gap-2 text-[13px] text-ink-muted">
             <span>{commodities.length > 0 ? t("원자재 {n}종", { n: commodities.length }) : t("원자재")}</span>
             {kcom && (
-              <span className="num" title={t("원자재지수 KCOM — 5종 평균(기준 100), KCOM 옵션의 기초자산")}>
+              <span className="num" title={t("원자재지수 KCOM — 5종 평균(기준 100)")}>
                 KCOM <span className="font-semibold text-ink">{kcom.value.toFixed(2)}</span>{" "}
                 <span className={toneClass(kcom.change)}>{pct(kcom.change)}</span>
               </span>

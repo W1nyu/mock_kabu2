@@ -719,7 +719,7 @@ async function main() {
     for (const index of [6, 7, 8]) void runFuturesTrader(clients[index], futuresMarket, `bot${index + 1}`);
     void runFuturesMomentumTrader(clients[9], futuresMarket, "bot10");
 
-    // 옵션: 기초자산별 마켓메이커(bot43 원자재지수, bot42 원/달러, 쓰기 가능; 거래 종료한 bot41 주가지수는 매수 호가만)
+    // 옵션: 기초자산별 마켓메이커(bot41 주가지수, bot42 원/달러, 쓰기 가능; 거래 종료한 bot43 원자재지수는 매수 호가만)
     // + 거래 흐름 4계정: 매수 위주(bot2·bot8·bot10) + 외가격 쓰기 위주(bot9). 2026-09-26 2 → 4계정, 간격 20~50초 → 8~25초.
     const optionsMarket = new OptionsMarketView(clients[0]);
     optionsMarket.start();

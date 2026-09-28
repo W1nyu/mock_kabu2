@@ -145,7 +145,7 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
     }
     // 옵션 만기 정산(선물 결제가로 내재가치 현금 정산) → 다음 거래일 행사가를 다시 깐다.
     const series = new Map((await this.prisma.optionSeries.findMany()).map((row) => [row.symbol, row.strike]));
-    // 거래를 끝낸 옵션(주가지수)도 남은 포지션을 만기에 정산한다.
+    // 거래를 끝낸 옵션(원자재지수)도 남은 포지션을 만기에 정산한다.
     for (const def of ALL_OPTIONS) {
       const done = doneBySymbol.get(def.symbol);
       if (done) {

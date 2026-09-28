@@ -18,26 +18,27 @@ function fakeDb(options: { isBot: boolean; held?: number; strike?: number }) {
 }
 
 describe("option order holds", () => {
-  it("KCOM buy holds the premium: price × 1,000원", async () => {
-    await expect(optionOrderHoldPerUnit(fakeDb({ isBot: false }), "a", optionDef("KCOMC3")!, "BUY", 2, 44)).resolves.toBe(44_000n);
+  it("index option buy holds the premium: price × 100원", async () => {
+    // 4.50pt = 450단위 × 100원 = 45,000원/계약
+    await expect(optionOrderHoldPerUnit(fakeDb({ isBot: false }), "a", optionDef("KC11")!, "BUY", 2, 450)).resolves.toBe(45_000n);
   });
 
-  it("KCOM writer margin for the market maker: strike notional × 4%", async () => {
-    // 100.00pt × 1,000원 × 4% = 400,000원/계약
+  it("index option writer margin for the market maker: strike notional × 8%", async () => {
+    // 917.50pt × 100원 × 8% = 734,000원/계약
     await expect(
-      optionOrderHoldPerUnit(fakeDb({ isBot: true, strike: 10_000 }), "a", optionDef("KCOMP3")!, "SELL", 1, 40),
-    ).resolves.toBe(400_000n);
+      optionOrderHoldPerUnit(fakeDb({ isBot: true, strike: 91_750 }), "a", optionDef("KP21")!, "SELL", 1, 40),
+    ).resolves.toBe(734_000n);
   });
 
-  it("retired index options: users cannot buy, can still sell what they hold", async () => {
-    const kc = optionDef("KC3")!;
-    await expect(optionOrderHoldPerUnit(fakeDb({ isBot: false }), "a", kc, "BUY", 1, 450)).rejects.toThrow(/거래가 끝난 옵션/);
-    await expect(optionOrderHoldPerUnit(fakeDb({ isBot: false, held: 3 }), "a", kc, "SELL", 3, 450)).resolves.toBe(0n);
+  it("retired KCOM options: users cannot buy, can still sell what they hold", async () => {
+    const kcom = optionDef("KCOMC3")!;
+    await expect(optionOrderHoldPerUnit(fakeDb({ isBot: false }), "a", kcom, "BUY", 1, 44)).rejects.toThrow(/거래가 끝난 옵션/);
+    await expect(optionOrderHoldPerUnit(fakeDb({ isBot: false, held: 3 }), "a", kcom, "SELL", 3, 44)).resolves.toBe(0n);
   });
 
-  it("retired index options: the market maker may bid (holders can exit) but not write", async () => {
-    const kc = optionDef("KC3")!;
-    await expect(optionOrderHoldPerUnit(fakeDb({ isBot: true }), "a", kc, "BUY", 1, 450)).resolves.toBe(45_000n);
-    await expect(optionOrderHoldPerUnit(fakeDb({ isBot: true, held: 0 }), "a", kc, "SELL", 1, 450)).rejects.toThrow(/새로 쓸 수 없습니다/);
+  it("retired KCOM options: the market maker may bid (holders can exit) but not write", async () => {
+    const kcom = optionDef("KCOMC3")!;
+    await expect(optionOrderHoldPerUnit(fakeDb({ isBot: true }), "a", kcom, "BUY", 1, 44)).resolves.toBe(44_000n);
+    await expect(optionOrderHoldPerUnit(fakeDb({ isBot: true, held: 0 }), "a", kcom, "SELL", 1, 44)).rejects.toThrow(/새로 쓸 수 없습니다/);
   });
 });

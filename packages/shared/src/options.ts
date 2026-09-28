@@ -1,12 +1,13 @@
 /**
- * 1일물 옵션 — 원자재지수(KCOM) 옵션·원/달러 옵션 (설계 docs/superpowers/specs/2026-09-26-options-design.md).
+ * 1일물 옵션 — 주가지수(K) 옵션·원/달러 옵션 (설계 docs/superpowers/specs/2026-09-26-options-design.md).
  *
- * 종목 이름은 고정(`KCOMC6` = 원자재지수 콜 6번 = 등가격)이고 행사가만 매일 04:11 정산 뒤 등가격 기준으로 다시 깐다.
- * 행사가는 계열마다 `strikes`개(홀수) — 가운데가 등가격. 2026-09-26 5개 → 11개(등가격 ±5).
+ * 종목 이름은 고정(`KC11` = 주가지수 콜 11번 = 등가격)이고 행사가만 매일 04:11 정산 뒤 등가격 기준으로 다시 깐다.
+ * 행사가는 계열마다 `strikes`개(홀수) — 가운데가 등가격. 주가지수 21개(±10), 원/달러 11개(±5).
  * 가격은 모두 기초자산과 같은 정수 단위(실제 × priceScale)다. 1계약의 원화 가치 = 가격 단위 × unitValue.
  *
- * 주가지수 옵션(K, `KC1`~`KP5`)은 2026-09-26 거래를 끝냈다(retired): 새 매수·쓰기는 받지 않고 보유분 매도와
- * 만기 정산만 한다. 같은 기초자산의 선물(KABUF)과 겹쳐 원자재 바스켓 지수로 바꿨다.
+ * 연혁: 주가지수 옵션(K)은 2026-09-26 원자재지수(KCOM) 옵션으로 바꿨다가 2026-09-29 다시 거래를 시작했다
+ * (행사가 5개·10pt 간격 → 21개·2.5pt 간격). KCOM(`KCOMC1`~`KCOMP11`)은 그날 거래를 끝냈다(retired):
+ * 새 매수·쓰기는 받지 않고 보유분 매도와 만기 정산만 한다.
  */
 export type OptionType = "CALL" | "PUT";
 export type OptionFamilyCode = "K" | "U" | "KCOM";
@@ -46,21 +47,23 @@ export const KCOM_COMPONENT_FUTURES = ["OILF", "GASF", "CPRF", "GOLDF", "CORNF"]
 /** 거래 중인 옵션 계열 */
 export const OPTION_FAMILIES: readonly OptionFamilyDef[] = [
   {
-    code: "KCOM",
-    name: "원자재지수",
-    futures: KCOM_COMPONENT_FUTURES,
+    // 2026-09-29 거래 재개 — KABU 지수(KABUF 기초자산) 옵션, 행사가 21개(등가격 ±10).
+    code: "K",
+    name: "주가지수",
+    futures: ["KABUF"],
     priceScale: 100,
     decimals: 2,
     unit: "pt",
-    // 0.01pt 호가, 1pt = 10만 원. 등가격 하루 옵션 ≈ 0.4 × 1.1% × 100pt ≈ 0.44pt(4.4만 원)
-    tickUnits: 1,
-    unitValue: 1_000,
-    strikeStepUnits: 50,
-    // 5종 평균이라 개별 원자재(1~3.5%)보다 낮다. 원자재 기사가 여러 품목을 함께 움직여 독립 가정(0.95%)보다 조금 높게.
-    dailyVol: 0.011,
-    writerMarginBps: 400,
-    reserve: "OPT_KCOM",
-    strikes: 11,
+    // 0.05pt 호가, 1pt = 1만 원. 등가격 하루 옵션 ≈ 0.4 × 1.2% × 880pt ≈ 4.2pt(4.2만 원)
+    tickUnits: 5,
+    unitValue: 100,
+    // 2.5pt 간격 × ±10 = 등가격 ±25pt(880pt에서 약 ±2.8%, 하루 변동성의 2배 남짓).
+    // 예전 10pt 간격 그대로면 ±100pt라 바깥 행사가 대부분이 가치 0이 된다.
+    strikeStepUnits: 250,
+    dailyVol: 0.012,
+    writerMarginBps: 800,
+    reserve: "OPT_KABU",
+    strikes: 21,
   },
   {
     code: "U",
@@ -82,26 +85,27 @@ export const OPTION_FAMILIES: readonly OptionFamilyDef[] = [
 /** 거래를 끝낸 옵션 계열 — 남은 포지션의 매도·만기 정산에만 쓴다. */
 export const RETIRED_OPTION_FAMILIES: readonly OptionFamilyDef[] = [
   {
-    code: "K",
-    name: "주가지수",
-    futures: ["KABUF"],
+    // 2026-09-29 거래 종료 — 주가지수 옵션(K) 재개로 대체
+    code: "KCOM",
+    name: "원자재지수",
+    futures: KCOM_COMPONENT_FUTURES,
     priceScale: 100,
     decimals: 2,
     unit: "pt",
-    tickUnits: 5,
-    unitValue: 100,
-    strikeStepUnits: 1_000,
-    dailyVol: 0.012,
-    writerMarginBps: 800,
-    reserve: "OPT_KABU",
+    tickUnits: 1,
+    unitValue: 1_000,
+    strikeStepUnits: 50,
+    dailyVol: 0.011,
+    writerMarginBps: 400,
+    reserve: "OPT_KCOM",
     retired: true,
-    strikes: 5,
+    strikes: 11,
   },
 ];
 
 export const ALL_OPTION_FAMILIES: readonly OptionFamilyDef[] = [...OPTION_FAMILIES, ...RETIRED_OPTION_FAMILIES];
 
-/** 계열의 등가격 자리(가운데). 11개면 6, 5개면 3. */
+/** 계열의 등가격 자리(가운데). 21개면 11, 11개면 6. */
 export function atmSlot(family: Pick<OptionFamilyDef, "strikes">): number {
   return (family.strikes + 1) / 2;
 }

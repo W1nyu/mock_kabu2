@@ -22,7 +22,7 @@ export class NewsController {
   ) {
     const take = limit ? Number(limit) : 40;
     // 선물·원자재 화면: 그 기초자산(USDKRW·OIL·GAS·COPPER·GOLD·CORN)을 움직인 기사.
-    // commodity = 원자재 아무거나(환율 제외) — 원자재지수(KCOM) 옵션 화면
+    // commodity = 원자재 아무거나(환율 제외) — 원자재지수(KCOM) 옵션(거래 종료) 화면
     if (reference !== undefined) {
       if (reference === COMMODITY) return this.news.list(undefined, take, undefined, false, COMMODITY_CODES);
       if (!referenceAsset(reference)) throw new NotFoundException(`없는 기초자산: ${reference}`);

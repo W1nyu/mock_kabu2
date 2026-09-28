@@ -110,10 +110,10 @@ describe("LiquidityService.ensureReserves", () => {
       // 2026-09-26 추가 상장
       ["GOLDF", "bot39@bots.local"],
       ["CORNF", "bot40@bots.local"],
-      // 옵션 마켓메이커(기초자산별) — 거래 종료한 주가지수 옵션(bot41)도 만기까지 매수 호가를 둔다
-      ["OPT_KCOM", "bot43@bots.local"],
-      ["OPT_USD", "bot42@bots.local"],
+      // 옵션 마켓메이커(기초자산별) — 거래 종료한 원자재지수 옵션(bot43)도 만기까지 매수 호가를 둔다
       ["OPT_KABU", "bot41@bots.local"],
+      ["OPT_USD", "bot42@bots.local"],
+      ["OPT_KCOM", "bot43@bots.local"],
     ]);
   });
 

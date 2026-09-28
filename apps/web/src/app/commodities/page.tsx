@@ -27,12 +27,6 @@ export default function CommoditiesPage() {
         <p className={`num mt-0.5 text-[13px] font-medium ${tone}`}>
           {kcom?.change == null ? "—" : `${kcom.change > 0 ? "+" : ""}${kcom.change.toFixed(2)}% ${t("오늘")}`}
         </p>
-        <p className="mt-2 text-[12px] text-ink-muted">
-          {t("KCOM 옵션(1일물 콜·풋)으로 원자재 전체 흐름에 투자할 수 있습니다")} —{" "}
-          <Link href="/options/KCOMC3" className="text-sky">
-            {t("옵션 보기")}
-          </Link>
-        </p>
       </div>
       <section className="glass overflow-hidden">
         <div className="panel-head">
