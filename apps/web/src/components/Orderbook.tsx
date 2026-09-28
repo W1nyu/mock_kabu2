@@ -7,6 +7,8 @@ import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { kstSessionStartMs, onKstSessionOpen } from "@/lib/time";
 import { everyVisible } from "@/lib/visible-interval";
 import { useT } from "@/lib/i18n";
+import { bookBarWidth, ORDERBOOK_VISIBLE_LEVELS, visibleBookMax } from "@/lib/orderbook-scale";
+import { useOrderbookScale } from "@/lib/use-orderbook-scale";
 
 interface Level {
   price: number;
@@ -150,6 +152,7 @@ export default function Orderbook({
 
   useEffect(() => {
     let disposed = false;
+    setSnap(null);
     previousRef.current = null;
     queuedOrderbookRef.current = null;
     orderbookBatchStartedAtRef.current = null;
@@ -160,6 +163,7 @@ export default function Orderbook({
     setDepthChanges({});
     api<Snapshot>(`/market/orderbook/${symbol}`, { auth: false })
       .then((initial) => {
+        if (disposed) return;
         // A socket snapshot can win the initial REST race. Never replace a
         // newer received sequence with the older bootstrap response.
         if (initial.seq < lastOrderbookSeqRef.current) return;
@@ -267,20 +271,16 @@ export default function Orderbook({
   const askDepth = (snap?.asks ?? []).reduce((sum, level) => sum + level.qty, 0);
   const depthTotal = bidDepth + askDepth;
   const bidShare = depthTotal > 0 ? bidDepth / depthTotal : null;
-  const maxQty = Math.max(
-    1,
-    ...(snap?.asks ?? []).map((l) => l.qty),
-    ...(snap?.bids ?? []).map((l) => l.qty),
-  );
+  const maxQty = useOrderbookScale(symbol, snap?.symbol === symbol ? visibleBookMax(snap) : null);
 
   // 항상 8행씩 렌더해 호가 수가 변해도 컴포넌트 높이가 흔들리지 않게 고정
   const pad = (levels: Level[]): (Level | null)[] => [
-    ...levels.slice(0, 8),
-    ...Array<null>(Math.max(0, 8 - levels.length)).fill(null),
+    ...levels.slice(0, ORDERBOOK_VISIBLE_LEVELS),
+    ...Array<null>(Math.max(0, ORDERBOOK_VISIBLE_LEVELS - levels.length)).fill(null),
   ];
 
   return (
-    <div className="glass flex flex-col overflow-hidden">
+    <div className="glass flex flex-col overflow-hidden" data-orderbook-symbol={symbol} data-orderbook-scale={maxQty}>
       <div className="panel-head">
         <span className="panel-title">{tr("호가창")}</span>
         <span
@@ -385,7 +385,7 @@ function Row({
   onClick?: (price: number) => void;
 }) {
   const tr = useT();
-  const width = Math.max(2, (level.qty / maxQty) * 100);
+  const width = bookBarWidth(level.qty, maxQty);
   return (
     <button
       className={`group relative flex w-full items-center justify-between px-4 py-1 transition-colors hover:bg-surface-3/45 ${
@@ -401,7 +401,7 @@ function Row({
         />
       )}
       <span
-        className={`absolute inset-y-px right-0 rounded-l-[3px] ${side === "ask" ? "bg-down/14" : "bg-up/14"}`}
+        className={`absolute inset-y-px right-0 rounded-l-[3px] transition-[width] duration-300 motion-reduce:transition-none ${side === "ask" ? "bg-down/14" : "bg-up/14"}`}
         style={{ width: `${width}%` }}
       />
       <span className={`relative font-medium ${side === "ask" ? "text-down" : "text-up"}`}>
