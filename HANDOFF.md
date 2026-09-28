@@ -1,5 +1,16 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-28 13:31 KST — 선물 양방향(헤지) 매매·일부 청산 운영 적용 (2695b80, 전체 절차·점검)
+
+- 사용자 요청: 선물도 보유 일부만 청산, 숏 보유 중 롱 매수가 숏을 줄이지 않고 롱·숏을 따로 보유. 설계 `docs/superpowers/specs/2026-09-28-futures-hedge-mode-design.md`, 계획 `docs/superpowers/plans/2026-09-28-futures-hedge-mode.md`.
+- 모델: `account.futures_positions` 기본키 (계좌, 종목, position_side LONG|SHORT|NET). 사람 계정 선물 주문은 `positionSide` 필수(매수+LONG 롱 진입, 매도+LONG 롱 청산, 매도+SHORT 숏 진입, 매수+SHORT 숏 청산), 청산은 증거금 0·청산 가능 수량(보유 − 걸린 청산 미체결) 초과 422. 봇·옵션은 NET 그대로. 증거금은 방향별, 레버리지는 두 방향 행에 같은 값. 일일 정산·긴급/기한 반대매매·손절·익절(매도 = 롱 청산, 매수 = 숏 청산) 모두 방향별. 웹: 주문 패널 [진입|청산] 탭 + 롱/숏 버튼, 포지션 카드 롱·숏 행과 수량·% 청산, 주문 내역 "롱 진입" 등.
+- 마이그레이션 `20260928090000_futures_hedge_mode`: 사람 계정 선물 행을 LONG/SHORT로(반대 방향 0 행에 같은 레버리지), 살아 있는 주문은 증거금 0 주문만 오래된 순 누적으로 청산 판정, 남는 증거금 0 진입은 취소 outbox. 적용 시점 사람 선물 미체결 0건이라 취소 없음.
+- 같은 배포에 다른 세션의 미배포 커밋(성능 개선 약 28개, `20260928100000_index_live_orders_by_account`, GCP Postgres 한도 3GB·shared_buffers 768MB·random_page_cost 1.1·jit off)도 포함 — 사용자 승인.
+- 운영: 점검 13:31~(해제 약 13:40) → 봇 정지 → pgBackRest diff `20260927-183000F_20260928-043155D` → postgres 재생성(설정 확인 768MB/off/1.1) → migrate(2개) → api·web·matching-engine·settlement → outbox 0 → 점검 해제 → 봇. 롤백 태그 `pre-hedge-20260928`(+서비스별), 원본 `/tmp/src-before-pre-hedge-20260928.tgz`. `DEPLOYED_COMMIT` = 2695b80. 서버의 HANDOFF.md·docs/api.md는 aa5bab6과 달랐다(문서라 무시하고 덮어씀).
+- 확인: 컨테이너 전부 Up/healthy, 정합성 12 PASS·FAIL 0, 호가 KABU·DAON 10/10, 6분간 선물 7종 59~84건·옵션 71건 체결, 봇·API·정산 오류 0. 방향 분포: 사람 LONG 26행(보유 2)·SHORT 26행(보유 1)·NET 3행(옵션), 봇 NET.
+- 로컬 스택 검증은 못 했다(로컬 Postgres 포트 55432가 Windows 예약 범위라 기존 컨테이너 기동 불가) — 마이그레이션은 일회용 DB(45432)로 검증, 전체 테스트 통과.
+- 남은 Minor(최종 리뷰): check 9가 주문·레버리지 일치까지는 안 봄, 예약 청산 합계 계산 3곳 중복, 대시보드 선물 포지션 수가 방향 행 수, 일부 테스트 보강 여지.
+
 ## 2026-09-28 05:00~08:30 KST — 서버 부하·목록 로딩 최적화 (로컬 커밋, 운영 미배포)
 
 - 운영 실측(읽기 전용): Postgres CPU 154%. 가장 큰 읽기는 `/market/overview` 세션 통계가 체결 223만 행을 **병렬 순차 스캔**(비용 ~86,800, 분당 ~12회). 계정별 미체결 주문 조회 1회 113ms(옵션 MM이 주기마다). 대기 이벤트 1위는 커밋 WALSync, 다음이 계좌 행 잠금(설계상 경합), 인서트 중 DataFileRead(캐시 부족).
