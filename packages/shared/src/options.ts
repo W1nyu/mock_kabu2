@@ -1,12 +1,13 @@
 /**
  * 1일물 옵션 — 주가지수(K) 옵션·원/달러 옵션 (설계 docs/superpowers/specs/2026-09-26-options-design.md).
  *
- * 종목 이름은 고정(`KC11` = 주가지수 콜 11번 = 등가격)이고 행사가만 매일 04:11 정산 뒤 등가격 기준으로 다시 깐다.
+ * 종목 이름은 고정(`KC11` = 주가지수 콜 11번 = 등가격)이고 행사가만 매일 04:20(04:11 만기 정산 뒤 점검 종료) 그 시각 기초자산의
+ * 등가격 기준으로 다시 깐다.
  * 행사가는 계열마다 `strikes`개(홀수) — 가운데가 등가격. 주가지수 21개(±10), 원/달러 11개(±5).
  * 가격은 모두 기초자산과 같은 정수 단위(실제 × priceScale)다. 1계약의 원화 가치 = 가격 단위 × unitValue.
  *
  * 연혁: 주가지수 옵션(K)은 2026-09-26 원자재지수(KCOM) 옵션으로 바꿨다가 2026-09-29 다시 거래를 시작했다
- * (행사가 5개·10pt 간격 → 21개·2.5pt 간격). KCOM(`KCOMC1`~`KCOMP11`)은 그날 거래를 끝냈다(retired):
+ * (행사가 5개·10pt 간격 → 21개·5pt 간격). KCOM(`KCOMC1`~`KCOMP11`)은 그날 거래를 끝냈다(retired):
  * 새 매수·쓰기는 받지 않고 보유분 매도와 만기 정산만 한다.
  */
 export type OptionType = "CALL" | "PUT";
@@ -57,9 +58,8 @@ export const OPTION_FAMILIES: readonly OptionFamilyDef[] = [
     // 0.05pt 호가, 1pt = 1만 원. 등가격 하루 옵션 ≈ 0.4 × 1.2% × 880pt ≈ 4.2pt(4.2만 원)
     tickUnits: 5,
     unitValue: 100,
-    // 2.5pt 간격 × ±10 = 등가격 ±25pt(880pt에서 약 ±2.8%, 하루 변동성의 2배 남짓).
-    // 예전 10pt 간격 그대로면 ±100pt라 바깥 행사가 대부분이 가치 0이 된다.
-    strikeStepUnits: 250,
+    // 5pt 간격 × ±10 = 등가격 ±50pt(1,100pt에서 약 ±4.5%).
+    strikeStepUnits: 500,
     dailyVol: 0.012,
     writerMarginBps: 800,
     reserve: "OPT_KABU",

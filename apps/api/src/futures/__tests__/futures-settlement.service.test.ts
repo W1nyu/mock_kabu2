@@ -103,17 +103,8 @@ function harness(options: { usdClose?: number | null; withOptions?: boolean; wit
       fn({ accounts, tx, updateAccount: async (accountId: string, next: any) => (accounts[accountId] = next) }),
   };
   const redis = { publish: vi.fn(async () => 1) };
-  const restrikeStale = vi.fn(async (load: () => Promise<ReadonlyMap<string, number>>) => void (await load()));
-  const optionsService = { restrikeStale };
-  const service = new FuturesSettlementService(
-    prisma as never,
-    mutator as never,
-    redis as never,
-    undefined,
-    undefined,
-    optionsService as never,
-  );
-  return { service, restrikeStale, accounts, positions, debts, ledger, settlements, outbox, marginCalls, claims, realized, redis };
+  const service = new FuturesSettlementService(prisma as never, mutator as never, redis as never);
+  return { service, accounts, positions, debts, ledger, settlements, outbox, marginCalls, claims, realized, redis };
 }
 
 describe("futures daily settlement", () => {
@@ -190,8 +181,6 @@ describe("futures daily settlement", () => {
     expect(result.symbols.find((s) => s.symbol === "UC3")).toMatchObject({ price: 100, positions: 2, realizedTotal: 0n });
     expect(result.symbols.find((s) => s.symbol === "UP3")).toMatchObject({ price: 0, positions: 2, realizedTotal: 0n });
     expect(h.settlements.get("KC3:2026-09-26")).toMatchObject({ price: 0, positions: 0 });
-    // 정산 뒤 다음 거래일 행사가를 다시 깐다.
-    expect(h.restrikeStale).toHaveBeenCalled();
 
     const ledgerBefore = h.ledger.length;
     await h.service.settle("2026-09-26");

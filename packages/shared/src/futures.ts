@@ -349,6 +349,27 @@ export function futuresSettlementDue(now: number): boolean {
   return kst >= dayStart + FUTURES_SETTLE_MINUTE_KST * 60_000;
 }
 
+/**
+ * 옵션 행사가 깔기 시각: 매일 04:20 KST(점검 종료) — 04:11 만기 정산 뒤 그 시각의 기초자산 값으로
+ * 등가격 위아래를 같은 개수로 깐다. 04:11~04:20 사이에는 깔지 않는다(주문도 막혀 있다).
+ */
+export const OPTIONS_RESTRIKE_MINUTE_KST = 4 * 60 + 20;
+
+/** now 이후(같으면 포함하지 않음) 다음 옵션 행사가 깔기 시각(epoch ms) */
+export function nextOptionsRestrikeAt(now: number): number {
+  const kst = now + KST_OFFSET_MS;
+  const dayStart = Math.floor(kst / 86_400_000) * 86_400_000;
+  let at = dayStart + OPTIONS_RESTRIKE_MINUTE_KST * 60_000;
+  if (at <= kst) at += 86_400_000;
+  return at - KST_OFFSET_MS;
+}
+
+/** 만기 정산(04:11) 뒤 행사가 깔기(04:20) 전 — 이 사이에는 새 행사가를 깔지 않는다. */
+export function inOptionsRestrikeGap(now: number): boolean {
+  const minute = Math.floor(((now + KST_OFFSET_MS) % 86_400_000) / 60_000);
+  return minute >= FUTURES_SETTLE_MINUTE_KST && minute < OPTIONS_RESTRIKE_MINUTE_KST;
+}
+
 /** 추가증거금 유예 시간 — 이 안에 위탁증거금 수준까지 채우지 않으면 반대매매한다. */
 export const FUTURES_MARGIN_CALL_GRACE_MS = 30 * 60_000;
 /** 한 포지션의 평가손실이 그 포지션 위탁증거금의 이 비율(bps)에 닿으면 유예 없이 전량 반대매매한다. */

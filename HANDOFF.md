@@ -3,7 +3,7 @@
 ## 2026-09-29 — 원자재지수(KCOM) 옵션 거래 종료, 주가지수 옵션 재개(행사가 21개) — 미배포·미커밋
 
 - 사용자 요청: 원자재지수 옵션은 없애고, KABU 지수 기반 주가지수 옵션을 행사가 21개(기준값 위아래 10개씩)로.
-- `packages/shared/src/options.ts`: K 계열을 `OPTION_FAMILIES`로 되돌림 — `KC1~21`·`KP1~21`(등가격 11번), 행사가 간격 10pt → **2.5pt**(±25pt ≈ ±2.8%; 10pt면 ±100pt라 바깥 대부분 가치 0), 호가 0.05pt × 100원·변동성 1.2%·쓰기 증거금 8%·MM bot41(`OPT_KABU`)은 예전 값. KCOM은 `RETIRED_OPTION_FAMILIES`(기존 retired 경로 그대로: 사용자 매수 422, 보유분 매도·만기 정산, bot43 매수 호가만, 체인·행사가 깔기 제외). KCOM 지수 표시(원자재 화면·카드)는 정보용으로 남기고 "KCOM 옵션" 안내·링크만 뺐다.
+- `packages/shared/src/options.ts`: K 계열을 `OPTION_FAMILIES`로 되돌림 — `KC1~21`·`KP1~21`(등가격 11번), 행사가 간격 10pt → **5pt**(±50pt), 행사가는 **04:20 KST 기초자산 기준**(04:11 정산 결제가 아님), 호가 0.05pt × 100원·변동성 1.2%·쓰기 증거금 8%·MM bot41(`OPT_KABU`)은 예전 값. KCOM은 `RETIRED_OPTION_FAMILIES`(기존 retired 경로 그대로: 사용자 매수 422, 보유분 매도·만기 정산, bot43 매수 호가만, 체인·행사가 깔기 제외). KCOM 지수 표시(원자재 화면·카드)는 정보용으로 남기고 "KCOM 옵션" 안내·링크만 뺐다.
 - 기존 `KC1~5` DB 행(9/26~27 행사가)은 재사용 — API `ensureSeries`가 오늘 행사가가 없는 계열로 보고 K 42종목을 정상 배치로 다시 깐다(테스트 추가).
 - 배포 시: **seed 필요**(`KC6~21`·`KP6~21` 종목 행 추가) → api·matching-engine(엔진 종목 목록)·settlement·web·bots 재생성. 스키마 변경 없음. 점검 공지 문구(server-messages) 필요하면 추가.
 - 검증: 전체 단위 테스트(shared 31·db 21·bots 129·web 44·engine 32·concurrency 10·settlement 23·api 211) PASS, api·web·bots tsc PASS. 로컬 스택 런타임 확인은 안 함.

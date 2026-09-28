@@ -24,7 +24,6 @@ import type Redis from "ioredis";
 import { BackgroundStatusRegistry } from "../core/background-status";
 import { BALANCE_MUTATOR, PRISMA, REDIS } from "../core/tokens";
 import { OutboxRelayer } from "../order/outbox.relayer";
-import { OptionsService } from "./options.service";
 
 /** 여러 API 인스턴스·재시작이 같은 거래일을 두 번 돌리지 않게 잡는 잠금 (정산은 이것과 별개로 멱등). */
 const LOCK_TTL_SECONDS = 15 * 60;
@@ -54,7 +53,6 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
     @Inject(REDIS) private redis: Redis,
     @Optional() private outboxRelayer?: OutboxRelayer,
     @Optional() private background?: BackgroundStatusRegistry,
-    @Optional() private options?: OptionsService,
   ) {}
 
   onModuleInit() {
@@ -178,9 +176,7 @@ export class FuturesSettlementService implements OnModuleInit, OnModuleDestroy {
       });
       symbols.push({ symbol: def.symbol, price: intrinsic, positions, realizedTotal });
     }
-    if (this.options) {
-      await this.options.restrikeStale(async () => (prices.size > 0 ? prices : await this.settlementPrices()));
-    }
+    // 다음 거래일 행사가는 여기서 깔지 않는다 — 04:20 점검 종료 때 그 시각 기초자산으로 OptionsService가 깐다.
     // 정산으로 포지션이 사라졌으니 진행 중이던 추가증거금도 끝낸다. 이번 실행이 실제로 포지션을 닫았을 때만 —
     // 낮의 재기동 따라잡기가 정산 뒤에 새로 걸린 추가증거금을 지우면 안 된다.
     if (symbols.some((s) => s.positions > 0)) {

@@ -64,10 +64,10 @@ test("widening today's ladder keeps existing strikes and adds new ones outside t
 
 test("strikes center on the rounded underlying, one step apart", () => {
   const k = optionFamily("K");
-  const atm = atmStrike(k, 91_640); // 916.40pt → 917.50(2.5pt 간격)
-  assert.equal(atm, 91_750);
-  // 21개 — 11번이 등가격, 위아래 10개씩(±25pt)
-  assert.deepEqual([1, 10, 11, 12, 21].map((slot) => strikeForSlot(k, atm, slot)), [89_250, 91_500, 91_750, 92_000, 94_250]);
+  const atm = atmStrike(k, 110_578); // 1,105.78pt → 1,105.00(5pt 간격)
+  assert.equal(atm, 110_500);
+  // 21개 — 11번이 등가격, 위아래 10개씩(±50pt)
+  assert.deepEqual([1, 10, 11, 12, 21].map((slot) => strikeForSlot(k, atm, slot)), [105_500, 110_000, 110_500, 111_000, 115_500]);
   const ladder = Array.from({ length: 21 }, (_, index) => strikeForSlot(k, atm, index + 1));
   assert.equal(ladder.filter((strike) => strike < atm).length, 10);
   assert.equal(ladder.filter((strike) => strike > atm).length, 10);
