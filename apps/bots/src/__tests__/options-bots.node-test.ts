@@ -1,15 +1,38 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { OPTION_MM_MAX_INVENTORY, closingOrder, heldToExpiry, pickOptionByOffset, pickStrikeOffset, planOptionLadder, strikeSteps } from "../options-bots";
+import { OPTION_MM_MAX_INVENTORY, closingOrder, heldToExpiry, pickOptionByOffset, pickStaleOption, pickStrikeOffset, planOptionLadder, strikeSteps } from "../options-bots";
 
 test("option ladder: 3 levels each side around theo with a 4% half-spread (min 1 tick)", () => {
-  // 이론가 50.00pt(5,000단위), 호가 5단위: 한쪽 스프레드 200 → 매수 4,800/4,795/4,790, 매도 5,200/5,205/5,210
-  const quotes = planOptionLadder({ tickUnits: 5 }, 5_000, 0);
+  // 이론가 5.00pt(500단위), 호가 5단위: 한쪽 스프레드 20 → 매수 480/475/470, 매도 520/525/530
+  const quotes = planOptionLadder({ tickUnits: 5 }, 500, 0);
   assert.deepEqual(
     quotes.filter((q) => q.side === "BUY").map((q) => [q.price, q.qty]),
-    [[4_800, 2], [4_795, 3], [4_790, 4]],
+    [[480, 2], [475, 3], [470, 4]],
   );
-  assert.deepEqual(quotes.filter((q) => q.side === "SELL").map((q) => q.price), [5_200, 5_205, 5_210]);
+  assert.deepEqual(quotes.filter((q) => q.side === "SELL").map((q) => q.price), [520, 525, 530]);
+});
+
+test("option ladder: deep in-the-money half-spread is capped at 10 ticks", () => {
+  // 이론가 50.00pt: 4%면 한쪽 2pt(40호가) → 10호가(0.5pt)로 묶는다
+  const quotes = planOptionLadder({ tickUnits: 5 }, 5_000, 0);
+  assert.equal(Math.max(...quotes.filter((q) => q.side === "BUY").map((q) => q.price)), 4_950);
+  assert.equal(Math.min(...quotes.filter((q) => q.side === "SELL").map((q) => q.price)), 5_050);
+});
+
+test("option flow finds the option whose last trade drifted furthest from theo", () => {
+  const row = (symbol: string, theo: number, lastPrice: number, extra = {}) => ({
+    symbol, family: "K", type: "CALL" as const, strike: 105_000, underlying: 110_000, theo, lastPrice, tickUnits: 5, ...extra,
+  });
+  const rows = [
+    row("KC11", 420, 435), // 스프레드 안 — 정상
+    row("KC3", 4_500, 3_900), // 깊은 내가격, 6pt 벌어짐
+    row("KC6", 2_500, 2_300),
+    row("KC21", 5, 60), // 가치 거의 0 — 제외
+    row("KCOMC6", 900, 100, { retired: true }),
+  ];
+  assert.equal(pickStaleOption(rows)?.symbol, "KC3");
+  assert.equal(pickStaleOption(rows, new Set(["KC3"]))?.symbol, "KC6");
+  assert.equal(pickStaleOption([rows[0], rows[3]]), null);
 });
 
 test("option ladder: cheap options never bid below one tick and ask at least two ticks", () => {

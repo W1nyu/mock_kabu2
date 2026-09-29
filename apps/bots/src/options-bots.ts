@@ -4,8 +4,10 @@ import { diffFuturesLadder, type FutureQuote } from "./futures-bots";
 
 /** 옵션 호가 단수(한쪽). 종목이 많아(44) 선물보다 적게 둔다. */
 export const OPTION_LADDER_LEVELS = 3;
-/** 스프레드(한쪽) = 이론가의 이 비율(bps), 최소 1호가 */
+/** 스프레드(한쪽) = 이론가의 이 비율(bps), 최소 1호가·최대 MAX_HALF_SPREAD_TICKS호가 */
 const HALF_SPREAD_BPS = 400;
+/** 깊은 내가격(이론가 수십 pt)은 4%면 수십 호가라 체결가가 이론가에서 크게 벗어난다 — 한쪽 10호가로 묶는다. */
+const MAX_HALF_SPREAD_TICKS = 10;
 /** 재고 10계약마다 중심을 1호가 반대로(최대 3호가). 이 계약 수를 넘으면 쌓는 쪽 호가를 내지 않는다. */
 const INVENTORY_PER_SKEW_TICK = 10;
 const MAX_SKEW_TICKS = 3;
@@ -41,8 +43,13 @@ function roundToTick(value: number, tick: number): number {
   return Math.max(tick, Math.round(value / tick) * tick);
 }
 
+/** 마켓메이커 한쪽 스프레드 = 이론가 × 4%, 1~10호가 */
+export function optionHalfSpread(tick: number, theo: number): number {
+  return Math.min(tick * MAX_HALF_SPREAD_TICKS, Math.max(tick, roundToTick((theo * HALF_SPREAD_BPS) / 10_000, tick)));
+}
+
 /**
- * 이론가·재고로 호가를 짠다. 중심 = 이론가 − 재고 기울기, 한쪽 스프레드 = max(1호가, 이론가 × 4%),
+ * 이론가·재고로 호가를 짠다. 중심 = 이론가 − 재고 기울기, 한쪽 스프레드 = 이론가 × 4%(1~10호가),
  * 바깥으로 1호가씩 levels단(2·3·4계약). 매수 호가는 1호가 아래로 내려가지 않는다.
  * 재고가 한도를 넘으면 더 쌓이는 쪽 호가는 내지 않는다(쓰기 증거금 폭주 방지).
  */
@@ -57,7 +64,7 @@ export function planOptionLadder(
   const tick = def.tickUnits;
   const skewTicks = Math.max(-MAX_SKEW_TICKS, Math.min(MAX_SKEW_TICKS, Math.trunc(inventory / INVENTORY_PER_SKEW_TICK)));
   const center = roundToTick(theo, tick) - skewTicks * tick;
-  const half = Math.max(tick, roundToTick((theo * HALF_SPREAD_BPS) / 10_000, tick));
+  const half = optionHalfSpread(tick, theo);
   const quotes: FutureQuote[] = [];
   for (let level = 1; level <= levels; level++) {
     const qty = level + 1;
@@ -198,6 +205,34 @@ export function pickOptionByOffset(
   return live.find((row) => row.strike === strike && row.type === type) ?? null;
 }
 
+/**
+ * 최근 체결가가 이론가에서 가장 멀리 벗어난 옵션 — 마켓메이커 스프레드 + 2호가보다 멀면 "오래된 가격"으로 본다.
+ * 등가격 근처만 고르는 흐름(pickStrikeOffset, ±5칸)으로는 깊은 내가격·먼 행사가가 몇십 분씩 체결이 없어
+ * 기초자산이 움직인 만큼 최근가가 이론가와 벌어진다(2026-09-29 주가지수 콜 1,050~1,120).
+ * 이론가 2호가 미만(가치 거의 0)은 제외한다. 없으면 null.
+ */
+export function pickStaleOption(
+  rows: readonly OptionOverviewRow[],
+  exclude: ReadonlySet<string> = new Set(),
+): OptionOverviewRow | null {
+  let best: OptionOverviewRow | null = null;
+  let bestScore = 1;
+  for (const row of rows) {
+    if (row.retired || row.expired || row.theo == null || row.strike == null || exclude.has(row.symbol)) continue;
+    if (row.theo < row.tickUnits * 2) continue;
+    const allowed = optionHalfSpread(row.tickUnits, row.theo) + row.tickUnits * 2;
+    const score = Math.abs(row.lastPrice - row.theo) / allowed;
+    if (score > bestScore) {
+      best = row;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/** 새로 열 때 오래된 가격의 옵션(pickStaleOption)을 먼저 고르는 비율 */
+export const STALE_PICK_RATIO = 0.5;
+
 /** 옵션 거래 흐름 한 계정의 성격 */
 export interface OptionsTraderStyle {
   /** 한 번 쉬는 시간(ms) [최소, 최대] */
@@ -232,7 +267,8 @@ export function heldToExpiry(position: { qty: number }, row: Pick<OptionOverview
 /**
  * 옵션 거래 흐름(사용자처럼 열고 → 1~6분 뒤 청산). `pauseMs`마다:
  * 보유 기간이 끝난 포지션이 있으면 전부 시장가로 닫고, 아니면 보유 종목이 `maxHeld` 미만일 때 1~3계약을 연다 —
- * `writeRatio` 확률로 매도(쓰기, 등가격 근처·외가격), 나머지는 매수. 닫을 때 보유 수량보다 많이 거래하지 않는다.
+ * `writeRatio` 확률로 매도(쓰기, 등가격 근처·외가격), 나머지는 매수. 절반은 최근가가 이론가에서 벗어난 옵션(pickStaleOption)을
+ * 먼저 거래해 행사가 전체의 최근가가 이론가를 따라가게 한다. 닫을 때 보유 수량보다 많이 거래하지 않는다.
  * 호가가 없어 닫지 못하면 1분 뒤 다시 시도한다. 가치가 거의 0인 매수 보유분(heldToExpiry)은 닫지 않고 보유 한도에서도 뺀다.
  */
 export async function runOptionsTrader(
@@ -265,6 +301,12 @@ export async function runOptionsTrader(
       const familyCode = families[Math.floor(Math.random() * families.length)];
       const rows = market.all().filter((row) => row.family === familyCode && !row.expired);
       const write = Math.random() < style.writeRatio;
+      const held = new Set(positions.map((p) => p.symbol));
+      const stale = Math.random() < STALE_PICK_RATIO ? pickStaleOption(rows, held) : null;
+      if (stale) {
+        await client.placeOrder({ symbol: stale.symbol, side: write ? "SELL" : "BUY", type: "MARKET", qty: 1 + Math.floor(Math.random() * 2) });
+        continue;
+      }
       const type = Math.random() < 0.5 ? "CALL" : "PUT";
       // 쓰기는 외가격 쪽(콜은 위, 풋은 아래)으로 0~3칸 — 내가격을 쓰면 만기 손실이 커 실제 흐름과 다르다.
       const offset = write

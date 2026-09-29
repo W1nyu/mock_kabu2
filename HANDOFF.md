@@ -1,5 +1,11 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
+## 2026-09-29 — 옵션 최근가가 이론가를 못 따라가던 문제 (봇만, 운영 미배포)
+
+- 증상(사용자): 주가지수 콜 1,050~1,120 등 이론가 0.05 초과 옵션의 최근 체결가가 이론가와 크게 벌어짐. 운영 조회는 권한 거부로 못 했고 코드로 원인 확인.
+- 원인: 거래 흐름이 등가격 ±5칸(pickStrikeOffset)만 고르고, 콜 ±4·5칸도 20분에 1번꼴 → 행사가 21개로 늘어난 뒤 ±6~10칸(깊은 내가격 콜·풋)은 아예 체결이 없어 04:20 깔 때의 최근가(=그때 이론가)에 머묾. 게다가 깊은 내가격은 MM 한쪽 스프레드 4%가 수십 호가(50pt → 2pt)라 체결돼도 이론가와 멀었다.
+- 수정(`apps/bots/src/options-bots.ts`): `pickStaleOption` — 새로 열 때 50%(`STALE_PICK_RATIO`)는 최근가가 이론가에서 (MM 한쪽 스프레드 + 2호가)보다 가장 많이 벗어난 옵션을 1~2계약 시장가로 거래(이론가 2호가 미만·retired 제외). MM 한쪽 스프레드 상한 10호가(`MAX_HALF_SPREAD_TICKS`). 봇 테스트 131 PASS. 배포는 bots만 재생성.
+
 ## 2026-09-29 02:06~02:50 KST — 주가지수 옵션 재개·KCOM 종료 운영 적용 (f64f31b + 2509f71)
 
 - 점검 02:06~(연장, 해제 약 02:47) → 봇 정지 → pgBackRest diff `20260927-183000F_20260928-170605D` → api·web → seed(`options: 64 upserted`) → matching-engine·settlement → (수정 2509f71 빌드) api·web 재교체 → 점검 해제 → 봇(새 이미지). 롤백 태그 `pre-kopt-20260929`(+서비스별), 원본 `/tmp/src-before-pre-kopt-20260929.tgz`·`/tmp/src-before-kopt2.tgz`. `DEPLOYED_COMMIT` = 2509f71.
