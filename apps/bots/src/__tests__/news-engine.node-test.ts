@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SYMBOLS } from "@mock-kabu/shared";
 import { MarketModel, type RandomSource } from "../market-model";
+import { ApiNewsSink } from "../news/api-sink";
 import { templateById } from "../news/catalog";
 import { generateMacroNews, generateSymbolNews, type GeneratorContext } from "../news/generator";
 import { RecentNewsMemory, TEMPLATE_COOLDOWN_MS } from "../news/memory";
@@ -256,3 +257,36 @@ function buildMacro(ctx: GeneratorContext, templateId: string): NewsItem {
   }
   throw new Error(`never drew ${templateId}`);
 }
+
+test("a restarted bot never reuses a story id the API has already stored", async () => {
+  const sent: { externalId: string; parentExternalId: string | null }[] = [];
+  const client = {
+    publishNews: async (draft: { externalId: string; parentExternalId: string | null }) => {
+      sent.push(draft);
+      return { id: draft.externalId };
+    },
+  };
+  const story = (id: string, parentItemId: string | null) =>
+    ({
+      id,
+      templateId: "risk.unfaithful",
+      scope: "SYMBOL",
+      category: "RISK",
+      symbol: "KABU",
+      industry: null,
+      headline: "h",
+      body: null,
+      publishedAtMs: 0,
+      slotValues: {},
+      parentItemId,
+      impact: [{ symbol: "KABU", sentiment: "NEGATIVE", strength: 0.4 }],
+    }) as const;
+  // Two runs both start counting at 1.
+  new ApiNewsSink(client as never, "run-a").publish(story("1:risk.unfaithful", null));
+  new ApiNewsSink(client as never, "run-b").publish(story("1:risk.unfaithful", null));
+  new ApiNewsSink(client as never, "run-b").publish(story("2:sequel.x", "1:risk.unfaithful"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.notEqual(sent[0].externalId, sent[1].externalId);
+  assert.equal(sent[2].parentExternalId, sent[1].externalId, "a sequel links to the same run's parent");
+  assert.equal(sent[0].parentExternalId, null);
+});

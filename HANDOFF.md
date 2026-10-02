@@ -1,6 +1,13 @@
 # HANDOFF — mock_kabu 작업 인수인계 (2026-09-22)
 
-## 2026-10-02 — 자동 장세 사이클: 상승장·하락장·횡보장 + 금리·환율·유가·원자재 사이클
+## 2026-10-02 19:40 KST — 자동 장세 사이클 운영 적용 (3983bcc, 무점검 api·web·bots)
+
+- Claude가 배포(사용자 "운영 배포 진행해줘"). 사전 확인에서 서버의 시나리오 API 3개·`/ops` 화면이 기준(4ecc70c)과 해시가 달랐는데, **내용은 같고 줄바꿈만 CRLF**였다(과거 배포가 CRLF로 올린 파일). 사전 확인을 `tr -d ''` 후 비교로 바꿔 통과.
+- 롤백 태그 `pre-cycle-20261002`(+`-api`·`-web`·`-bots`), 원본 `/tmp/src-before-pre-cycle-20261002.tgz` → 교체 확인 → `build api` → `up -d --no-deps api web`(api healthy) → `bots`. 매칭엔진·정산은 그대로. `DEPLOYED_COMMIT` = 3983bcc. 스크립트는 로컬 `tmp/deploy/cycle-step1.sh`·`cycle-step2.sh`·`cycle-check.sh`.
+- 확인: 첫 국면 `[cycle] market BULL · RATE FALLING · FX STEADY · OIL RISING · COMMODITY RISING (lean +0.146, good news 57%, index 1101.36 / fair 1010.88)` — 상승장 진입 직후라 기울기가 넘어오는 중이고 밸류에이션 −0.09가 섞였다. 보고 실패 0, 봇 치명 오류 0, 15종목 수 초 안 체결, 외부에서 `/internal/market-cycle` 404·`/admin/market-cycle` 비로그인 401. 재기동 직후 `[scenario]` 로그가 없어 진행 중·1시간 안 예정인 관리자 시나리오는 없다.
+- 롤백: `sudo tar xzf /tmp/src-before-pre-cycle-20261002.tgz -C /opt/mock-kabu2 --no-same-owner` → `sudo docker tag mock-kabu2-app:pre-cycle-20261002 mock-kabu2-app:gcp` → `$C up -d --no-deps api web` → `bots`(새로 생긴 market-cycle 파일은 남아도 쓰이지 않는다).
+
+## 2026-10-02 — 자동 장세 사이클: 상승장·하락장·횡보장 + 금리·환율·유가·원자재 사이클 (→ 19:40 운영 적용)
 
 - 사용자 요청: 최근 상승장만 와서 관리자 시나리오로 하락장을 강제로 만들었는데, 인위적으로 하지 않고 실제 증시처럼 알아서 장세가 바뀌고, 금리처럼 여러 사이클이 돌며 국면마다 호재/악재 비율이 달라지게.
 - 진단: 운영 지수 9/26 ~900 → 10/1 ~1,296(+40%/5일). 뉴스만 1주 시뮬레이션하면 오히려 순하락(시장 기사 약 −2%/일 — 하락 기사가 더 셈) → 상승 쏠림은 뉴스가 아니라 사용자 순매수 등 매매 흐름 쪽으로 보인다(운영 DB·로그 조회는 자동 모드가 막아 확인 못 함).

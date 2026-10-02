@@ -10,7 +10,21 @@ import type { NewsItem, NewsSink } from "./types";
  * costs the feed one headline but never desynchronises the market from it.
  */
 export class ApiNewsSink implements NewsSink {
-  constructor(private readonly client: ApiClient) {}
+  /**
+   * Story ids restart at 1 with every bot process ("1:risk.x"), while the API
+   * dedupes on externalId and answers a repeat with the stored row. Without a
+   * per-run prefix, a restarted bot's story that reused an old id was dropped
+   * from the feed — its price move landed with no headline — and the old story
+   * was broadcast again as if new.
+   */
+  private readonly runId: string;
+
+  constructor(
+    private readonly client: Pick<ApiClient, "publishNews">,
+    runId: string = Date.now().toString(36),
+  ) {
+    this.runId = runId;
+  }
 
   publish(item: NewsItem): void {
     const template = templateById(item.templateId);
@@ -24,8 +38,9 @@ export class ApiNewsSink implements NewsSink {
 
     void this.client
       .publishNews({
-        externalId: item.id,
-        parentExternalId: item.parentItemId,
+        externalId: `${this.runId}:${item.id}`,
+        // A sequel is only ever scheduled by the run that published its parent.
+        parentExternalId: item.parentItemId ? `${this.runId}:${item.parentItemId}` : null,
         symbol: item.symbol,
         industry: item.industry,
         category: item.category,
