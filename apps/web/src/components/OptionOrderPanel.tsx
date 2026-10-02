@@ -36,6 +36,7 @@ export default function OptionOrderPanel({
   onPlaced,
   retired = false,
   feeExempt = false,
+  initialSide = "BUY",
 }: {
   /** 거래 종료 — 매수 불가, 보유분 매도만 */
   retired?: boolean;
@@ -46,13 +47,16 @@ export default function OptionOrderPanel({
   available: number | null;
   priceHint: { price: number; seq: number } | null;
   onPlaced: () => void;
+  /** 폰 주문 시트를 연 버튼(매수/매도). 보유가 없으면 매수로 바뀐다. */
+  initialSide?: "BUY" | "SELL";
 }) {
   const tr = useT();
   const def = optionDef(symbol)!;
   const held = Math.max(0, position?.qty ?? 0);
-  const [side, setSide] = useState<"BUY" | "SELL">(retired ? "SELL" : "BUY");
+  const [side, setSide] = useState<"BUY" | "SELL">(retired ? "SELL" : initialSide);
   const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT");
   const [priceText, setPriceText] = useState("");
+  // 0 = 지우고 다시 입력하는 중(빈 칸). 주문 버튼은 1 이상일 때만.
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -189,8 +193,9 @@ export default function OptionOrderPanel({
           </button>
           <input
             inputMode="numeric"
-            value={qty}
-            onChange={(e) => setQty(Math.max(1, Math.min(maxQty || 1, Number(e.target.value.replace(/\D/g, "")) || 1)))}
+            value={qty === 0 ? "" : qty}
+            placeholder="0"
+            onChange={(e) => setQty(Math.min(maxQty || 1, Number(e.target.value.replace(/\D/g, "")) || 0))}
             className="num w-full rounded-lg border border-hairline bg-surface-2/60 px-3 py-2 text-center"
           />
           <button type="button" className="btn btn-ghost min-h-10 min-w-10" onClick={() => setQty((q) => Math.min(maxQty || 1, q + 1))}>
@@ -225,7 +230,7 @@ export default function OptionOrderPanel({
 
       <button
         type="button"
-        disabled={busy || invalidPrice || (side === "SELL" && held === 0) || (side === "BUY" && retired)}
+        disabled={busy || invalidPrice || qty < 1 || (side === "SELL" && held === 0) || (side === "BUY" && retired)}
         onClick={submit}
         className={`min-h-11 w-full rounded-xl text-sm font-semibold text-white disabled:opacity-50 ${side === "BUY" ? "bg-up" : "bg-down"}`}
       >

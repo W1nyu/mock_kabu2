@@ -32,6 +32,7 @@ import { subscribe } from "@/lib/socket";
 import { chartTheme, useTheme } from "@/lib/theme";
 import { averageAt, type AverageKind } from "@/lib/moving-average";
 import { getLocale, translate, useT } from "@/lib/i18n";
+import OhlcReadout, { asOhlc, sameOhlc, type Ohlc } from "./OhlcReadout";
 
 interface CandleDto {
   ts: string;
@@ -51,12 +52,7 @@ interface Candle {
   volume: number;
 }
 
-interface HoveredCandle {
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-}
+type HoveredCandle = Ohlc;
 
 interface MovingAverage {
   id: string;
@@ -145,27 +141,6 @@ function loadInterval(): string {
 
 function volumeColor(c: Candle): string {
   return c.close >= c.open ? "rgba(255, 90, 110, 0.42)" : "rgba(110, 138, 255, 0.42)";
-}
-
-function asHoveredCandle(value: unknown): HoveredCandle | null {
-  if (typeof value !== "object" || value == null) return null;
-  const data = value as Partial<HoveredCandle>;
-  if (![data.open, data.high, data.low, data.close].every(Number.isFinite)) return null;
-  return { open: data.open!, high: data.high!, low: data.low!, close: data.close! };
-}
-
-function sameCandle(a: HoveredCandle | null, b: HoveredCandle | null): boolean {
-  return a === b || (!!a && !!b && a.open === b.open && a.high === b.high && a.low === b.low && a.close === b.close);
-}
-
-function percentFromOpen(price: number, open: number): number {
-  return open > 0 ? ((price - open) / open) * 100 : 0;
-}
-
-function formatPercent(value: number): string {
-  // Avoid a visually noisy "-0.00%" when the difference is smaller than the display precision.
-  const normalized = Math.abs(value) < 0.005 ? 0 : value;
-  return `${normalized > 0 ? "+" : ""}${normalized.toFixed(2)}%`;
 }
 
 /**
@@ -389,7 +364,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
     volume.applyOptions({ visible: vis.volume });
 
     const setCrosshairCandle = (next: HoveredCandle | null) => {
-      if (sameCandle(hoveredCandleRef.current, next)) return;
+      if (sameOhlc(hoveredCandleRef.current, next)) return;
       hoveredCandleRef.current = next;
       setHoveredCandle(next);
     };
@@ -398,7 +373,7 @@ export default function CandleChart({ symbol }: { symbol: string }) {
     // including a still-forming realtime candle. This deliberately stays independent
     // from the WebSocket subscription below.
     const handleCrosshairMove = (param: MouseEventParams) => {
-      const candleData = asHoveredCandle(param.seriesData.get(candle));
+      const candleData = asOhlc(param.seriesData.get(candle));
       if (!param.point || !candleData || typeof param.time !== "number") {
         hoveredTimeRef.current = null;
         setCrosshairCandle(null);
@@ -621,38 +596,8 @@ export default function CandleChart({ symbol }: { symbol: string }) {
       </div>
       <div className="relative p-2">
         <div ref={containerRef} className="h-[20rem] w-full sm:h-[22rem] lg:h-[26rem]" />
-        {hoveredCandle && <OhlcReadout candle={hoveredCandle} />}
+        {hoveredCandle && <OhlcReadout candle={hoveredCandle} format={(value) => priceFormatter.format(value)} />}
       </div>
-    </div>
-  );
-}
-
-function OhlcReadout({ candle }: { candle: HoveredCandle }) {
-  const t = useT();
-  const values = [
-    { label: t("시"), value: candle.open },
-    { label: t("고"), value: candle.high },
-    { label: t("저"), value: candle.low },
-    { label: t("종"), value: candle.close },
-  ];
-
-  return (
-    <div
-      aria-live="polite"
-      className="num pointer-events-none absolute top-4 left-4 z-10 flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-x-2 gap-y-0.5 rounded-[10px] border border-hairline bg-abyss-deep/80 px-2.5 py-1.5 text-[11px] backdrop-blur-md sm:gap-x-3 sm:text-xs"
-      data-testid="chart-ohlc-readout"
-    >
-      {values.map(({ label, value }) => {
-        const rate = percentFromOpen(value, candle.open);
-        const tone = rate > 0 ? "text-up" : rate < 0 ? "text-down" : "text-ink-muted";
-        return (
-          <span key={label} className="whitespace-nowrap text-ink">
-            <span className="mr-1 text-ink-faint">{label}</span>
-            {priceFormatter.format(value)}
-            <span className={`ml-1 ${tone}`}>({formatPercent(rate)})</span>
-          </span>
-        );
-      })}
     </div>
   );
 }

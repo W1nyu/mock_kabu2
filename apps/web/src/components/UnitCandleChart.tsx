@@ -8,10 +8,12 @@ import {
   TickMarkType,
   type IChartApi,
   type ISeriesApi,
+  type MouseEventParams,
   type UTCTimestamp,
 } from "lightweight-charts";
 import { candleIntervalSeconds, DAILY_CANDLE_INTERVAL } from "@mock-kabu/shared";
 import ChipTabs from "@/components/ChipTabs";
+import OhlcReadout, { asOhlc, sameOhlc, type Ohlc } from "@/components/OhlcReadout";
 import { api } from "@/lib/api";
 import { subscribe } from "@/lib/socket";
 import { chartTheme, useTheme } from "@/lib/theme";
@@ -22,6 +24,7 @@ import { useT } from "@/lib/i18n";
  * 정수 단위 가격(실제값 × scale)을 쓰는 봉 차트 — 선물 기초자산(가상 지수)과 선물이 함께 쓴다.
  * 현물 CandleChart의 내 체결·평단가·거래량 기능이 없는 가벼운 차트다. 봉은 `candlesUrl`에서 읽고,
  * 실시간 값(`channel`의 메시지를 `tickFrom`이 {값, 시각}으로 바꾼 것)으로 마지막 봉을 움직인다.
+ * 봉을 가리키면(폰은 누르면) 현물 차트처럼 시·고·저·종과 시가 대비 등락률(%)을 보여 준다.
  */
 const INTERVALS = [
   { id: "1m", label: "1분" },
@@ -65,6 +68,8 @@ export default function UnitCandleChart({
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const [interval, setChartInterval] = useState("5m");
+  const [hovered, setHovered] = useState<Ohlc | null>(null);
+  const valueFormat = new Intl.NumberFormat("ko-KR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -105,6 +110,21 @@ export default function UnitCandleChart({
 
     let active = true;
     let last: { time: UTCTimestamp; open: number; high: number; low: number; close: number } | null = null;
+    // 크로스헤어가 가리키는 봉 — 실시간으로 움직이는 마지막 봉을 가리키고 있으면 값도 따라 바꾼다.
+    let hoveredTime: number | null = null;
+    const show = (next: Ohlc | null) => setHovered((previous) => (sameOhlc(previous, next) ? previous : next));
+    show(null);
+    const onCrosshairMove = (param: MouseEventParams) => {
+      const candle = asOhlc(param.seriesData.get(series));
+      if (!param.point || !candle || typeof param.time !== "number") {
+        hoveredTime = null;
+        show(null);
+        return;
+      }
+      hoveredTime = param.time;
+      show(candle);
+    };
+    chart.subscribeCrosshairMove(onCrosshairMove);
     api<CandleDto[]>(candlesUrl(interval, LIMIT), { auth: false })
       .then((rows) => {
         if (!active) return;
@@ -134,11 +154,13 @@ export default function UnitCandleChart({
         return;
       }
       series.update(last);
+      if (hoveredTime === last.time) show(last);
     });
 
     return () => {
       active = false;
       unsubscribe();
+      chart.unsubscribeCrosshairMove(onCrosshairMove);
       chart.remove();
     };
     // candlesUrl·tickFrom은 호출자가 매 렌더 새로 만들 수 있어 의존성에서 뺀다 — 채널이 같으면 같은 차트다.
@@ -154,7 +176,10 @@ export default function UnitCandleChart({
         value={interval}
         onChange={setChartInterval}
       />
-      <div ref={containerRef} className="h-[320px] w-full sm:h-[420px]" />
+      <div className="relative">
+        <div ref={containerRef} className="h-[320px] w-full sm:h-[420px]" />
+        {hovered && <OhlcReadout candle={hovered} format={(value) => valueFormat.format(value)} />}
+      </div>
     </div>
   );
 }

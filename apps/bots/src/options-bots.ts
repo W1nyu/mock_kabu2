@@ -8,10 +8,38 @@ export const OPTION_LADDER_LEVELS = 3;
 const HALF_SPREAD_BPS = 400;
 /** 깊은 내가격(이론가 수십 pt)은 4%면 수십 호가라 체결가가 이론가에서 크게 벗어난다 — 한쪽 10호가로 묶는다. */
 const MAX_HALF_SPREAD_TICKS = 10;
-/** 재고 10계약마다 중심을 1호가 반대로(최대 3호가). 이 계약 수를 넘으면 쌓는 쪽 호가를 내지 않는다. */
-const INVENTORY_PER_SKEW_TICK = 10;
+/** 재고가 한도의 1/4 쌓일 때마다 중심을 1호가 반대로(최대 3호가). 한도를 넘으면 쌓는 쪽 호가를 내지 않는다. */
 const MAX_SKEW_TICKS = 3;
+/** 재고 한도의 최솟값(계약). 싼 옵션은 호가 수량에 맞춰 늘어난다(optionMaxInventory). */
 export const OPTION_MM_MAX_INVENTORY = 40;
+/**
+ * 가장 안쪽 호가 수량 = 1,200 / √(계약당 이론가, 원), 2~20계약. 바깥 단은 ×1.5·×2.
+ * 2026-10-02 사용자 의견: 100pt짜리는 호가당 1~2계약이어도 되지만 0.1pt짜리도 1~2계약이면 너무 적다 — 몇십 계약은 있어야.
+ * 주가지수 100pt(100만 원) → 2·3·4, 4pt → 6·9·12, 1pt → 12·18·24, 0.1pt(1천 원) → 20·30·40.
+ * 매도 호가가 새 쓰기면 계약당 쓰기 증거금(주가지수 약 88만 원)을 잡으므로 상한을 둔다.
+ */
+const LEVEL_QTY_SCALE = 1_200;
+const MIN_LEVEL_QTY = 2;
+const MAX_LEVEL_QTY = 20;
+
+/** 가장 안쪽 호가 단의 계약 수 — 이론가가 쌀수록 많이 */
+export function optionLevelQty(theo: number, unitValue: number): number {
+  const premium = Math.max(1, theo * unitValue);
+  return Math.max(MIN_LEVEL_QTY, Math.min(MAX_LEVEL_QTY, Math.round(LEVEL_QTY_SCALE / Math.sqrt(premium))));
+}
+
+/** 걸린 호가의 남은 수량이 원하는 수량의 이 비율보다 적으면 취소하고 다시 건다 */
+const REFILL_BELOW_RATIO = 0.5;
+
+/** 원하는 호가와 걸린 주문 맞추기 — 남은 수량이 절반 아래로 준 호가(체결로 얇아졌거나 예전 2·3·4계약)는 다시 건다. */
+export function diffOptionLadder(desired: readonly FutureQuote[], live: readonly LiveOrder[]) {
+  return diffFuturesLadder(desired, live, REFILL_BELOW_RATIO);
+}
+
+/** 재고 한도 = 안쪽 수량 × 10, 최소 40계약 */
+export function optionMaxInventory(levelQty: number): number {
+  return Math.max(OPTION_MM_MAX_INVENTORY, levelQty * 10);
+}
 
 const MM_LOOP_MS = 4_000;
 const POSITION_REFRESH_MS = 10_000;
@@ -50,11 +78,11 @@ export function optionHalfSpread(tick: number, theo: number): number {
 
 /**
  * 이론가·재고로 호가를 짠다. 중심 = 이론가 − 재고 기울기, 한쪽 스프레드 = 이론가 × 4%(1~10호가),
- * 바깥으로 1호가씩 levels단(2·3·4계약). 매수 호가는 1호가 아래로 내려가지 않는다.
+ * 바깥으로 1호가씩 levels단(안쪽 수량 × 1·1.5·2, optionLevelQty). 매수 호가는 1호가 아래로 내려가지 않는다.
  * 재고가 한도를 넘으면 더 쌓이는 쪽 호가는 내지 않는다(쓰기 증거금 폭주 방지).
  */
 export function planOptionLadder(
-  def: Pick<OptionDef, "tickUnits">,
+  def: Pick<OptionDef, "tickUnits" | "unitValue">,
   theo: number,
   inventory: number,
   /** 거래를 끝낸 옵션: 보유자가 팔 수 있게 매수 호가만 둔다(새로 쓰지 않는다) */
@@ -62,15 +90,17 @@ export function planOptionLadder(
   levels: number = OPTION_LADDER_LEVELS,
 ): FutureQuote[] {
   const tick = def.tickUnits;
-  const skewTicks = Math.max(-MAX_SKEW_TICKS, Math.min(MAX_SKEW_TICKS, Math.trunc(inventory / INVENTORY_PER_SKEW_TICK)));
+  const baseQty = optionLevelQty(theo, def.unitValue);
+  const maxInventory = optionMaxInventory(baseQty);
+  const skewTicks = Math.max(-MAX_SKEW_TICKS, Math.min(MAX_SKEW_TICKS, Math.trunc(inventory / (maxInventory / 4))));
   const center = roundToTick(theo, tick) - skewTicks * tick;
   const half = optionHalfSpread(tick, theo);
   const quotes: FutureQuote[] = [];
   for (let level = 1; level <= levels; level++) {
-    const qty = level + 1;
+    const qty = Math.round((baseQty * (level + 1)) / 2);
     const bid = center - half - (level - 1) * tick;
-    if (bid >= tick && inventory < OPTION_MM_MAX_INVENTORY) quotes.push({ side: "BUY", price: bid, qty });
-    if (!bidOnly && inventory > -OPTION_MM_MAX_INVENTORY) quotes.push({ side: "SELL", price: Math.max(center + half, tick * 2) + (level - 1) * tick, qty });
+    if (bid >= tick && inventory < maxInventory) quotes.push({ side: "BUY", price: bid, qty });
+    if (!bidOnly && inventory > -maxInventory) quotes.push({ side: "SELL", price: Math.max(center + half, tick * 2) + (level - 1) * tick, qty });
   }
   return quotes;
 }
@@ -155,7 +185,7 @@ export async function runOptionsMarketMaker(client: ApiClient, family: OptionFam
         } else if (!row?.expired) {
           continue; // 시세가 아직 없으면 기존 호가를 건드리지 않는다
         }
-        const diff = diffFuturesLadder(desired, orders);
+        const diff = diffOptionLadder(desired, orders);
         for (const order of diff.cancel) {
           if (now - (cancelSentAt.get(order.id) ?? 0) < CANCEL_RESEND_MS) continue;
           cancelSentAt.set(order.id, now);

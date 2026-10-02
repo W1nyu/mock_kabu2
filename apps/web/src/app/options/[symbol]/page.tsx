@@ -6,14 +6,17 @@ import { use, useCallback, useEffect, useState } from "react";
 import AssetNews from "@/components/AssetNews";
 import FuturesBook from "@/components/FuturesBook";
 import DerivOpenOrders from "@/components/DerivOpenOrders";
+import DerivOrderSheet from "@/components/DerivOrderSheet";
+import { MobileTradeBar } from "@/components/MobileOrderSheet";
 import OptionOrderPanel from "@/components/OptionOrderPanel";
 import UnitCandleChart from "@/components/UnitCandleChart";
 import { api, getUser, won } from "@/lib/api";
 import type { FuturesAccount } from "@/lib/futures";
 import { fmtOption, fmtStrike, optionLabel, timeLeft, type OptionRow } from "@/lib/options";
+import { COMPACT_TRADE_QUERY, useMediaQuery } from "@/lib/media";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
-import { useT } from "@/lib/i18n";
+import { rich, useT } from "@/lib/i18n";
 
 function tone(n: number): string {
   return n > 0 ? "text-up" : n < 0 ? "text-down" : "text-ink-muted";
@@ -24,7 +27,8 @@ function strikeOfRow(rows: readonly OptionRow[], symbol: string): number | null 
 }
 
 /**
- * 옵션 거래 화면. PC는 왼쪽 차트·호가, 오른쪽 주문·내 포지션. 폰은 시세 → 주문 → 포지션 → 차트 → 호가 순.
+ * 옵션 거래 화면. PC는 왼쪽 차트·호가, 오른쪽 주문·내 포지션.
+ * 폰은 선물·현물 화면처럼 시세 → 차트 → 미체결·포지션 순으로 두고, 호가·주문은 하단 매수/매도 버튼이 여는 시트에 둔다.
  * 같은 기초자산의 다른 행사가·콜/풋은 위쪽 칩으로 바로 옮겨 간다.
  */
 export default function OptionPage({ params }: { params: Promise<{ symbol: string }> }) {
@@ -38,6 +42,11 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
   const [feeExempt, setFeeExempt] = useState(false);
   const [priceHint, setPriceHint] = useState<{ price: number; seq: number } | null>(null);
   const [orderRefreshKey, setOrderRefreshKey] = useState(0);
+  const compact = useMediaQuery(COMPACT_TRADE_QUERY);
+  const [sheet, setSheet] = useState<{ side: "BUY" | "SELL"; seq: number } | null>(null);
+  const closeSheet = useCallback(() => setSheet(null), []);
+  const [loggedIn, setLoggedIn] = useState(false);
+  useEffect(() => setLoggedIn(getUser() != null), []);
 
   useEffect(() => {
     if (!def) return;
@@ -104,9 +113,25 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
     row?.strike != null && row.underlying != null
       ? Math.max(0, def.type === "CALL" ? row.underlying - row.strike : row.strike - row.underlying)
       : null;
+  const orderPanel = (initialSide?: "BUY" | "SELL") => (
+    <OptionOrderPanel
+      retired={retired}
+      symbol={def.symbol}
+      lastPrice={price}
+      position={position}
+      available={available}
+      feeExempt={feeExempt}
+      priceHint={priceHint}
+      initialSide={initialSide}
+      onPlaced={() => {
+        refreshAccount();
+        setOrderRefreshKey((k) => k + 1);
+      }}
+    />
+  );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 max-lg:pb-10">
+    <div className="mx-auto max-w-6xl space-y-4 max-lg:pb-20">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Link
           href="/market?kind=futures"
@@ -171,7 +196,8 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-[auto_1fr]">
-        <div className="max-lg:order-3 lg:col-start-1 lg:row-start-1">
+        {/* DOM 순서 = 폰 순서(차트 → 미체결·포지션). PC는 격자 위치로 왼쪽 차트·호가, 오른쪽 주문·포지션. */}
+        <div className="lg:col-start-1 lg:row-start-1">
           <section className="glass p-3 sm:p-4">
             <UnitCandleChart
               candlesUrl={(interval, limit) =>
@@ -189,7 +215,7 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
             />
           </section>
         </div>
-        <div className="space-y-4 max-lg:order-1 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+        <div className="space-y-4 lg:col-start-2 lg:row-span-2 lg:row-start-1">
           {retired && (
             <p role="note" className="glass p-3 text-[13px] leading-5 text-warn">
               {expired
@@ -199,21 +225,7 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
                   )}
             </p>
           )}
-          {!expired && (
-            <OptionOrderPanel
-              retired={retired}
-              symbol={def.symbol}
-              lastPrice={price}
-              position={position}
-              available={available}
-              feeExempt={feeExempt}
-              priceHint={priceHint}
-              onPlaced={() => {
-                refreshAccount();
-                setOrderRefreshKey((k) => k + 1);
-              }}
-            />
-          )}
+          {!expired && !compact && orderPanel()}
           <DerivOpenOrders
             symbol={def.symbol}
             refreshKey={orderRefreshKey}
@@ -241,12 +253,14 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
             </section>
           )}
         </div>
-        <div className="max-lg:order-4 lg:col-start-1 lg:row-start-2 lg:self-start">
-          <FuturesBook
-            symbol={def.symbol}
-            onPick={(p) => setPriceHint({ price: p, seq: Date.now() })}
-          />
-        </div>
+        {!compact && (
+          <div className="lg:col-start-1 lg:row-start-2 lg:self-start">
+            <FuturesBook
+              symbol={def.symbol}
+              onPick={(p) => setPriceHint({ price: p, seq: Date.now() })}
+            />
+          </div>
+        )}
       </div>
 
       <AssetNews
@@ -261,6 +275,37 @@ export default function OptionPage({ params }: { params: Promise<{ symbol: strin
               : t("관련 뉴스")
         }
       />
+
+      {compact && loggedIn && !expired && (
+        <MobileTradeBar
+          onOpen={(side) => {
+            setPriceHint(null);
+            setSheet({ side, seq: Date.now() });
+          }}
+        />
+      )}
+      {compact && !loggedIn && !expired && (
+        <p className="text-center text-sm text-ink-muted">
+          {rich(t("옵션 주문은 {login} 후 이용할 수 있습니다."), {
+            login: (
+              <Link href="/login" className="text-sky">
+                {t("로그인")}
+              </Link>
+            ),
+          })}
+        </p>
+      )}
+      {compact && sheet && !expired && (
+        <DerivOrderSheet
+          key={sheet.seq}
+          symbol={def.symbol}
+          name={optionLabel(def.symbol, row?.strike)}
+          onPick={(p) => setPriceHint({ price: p, seq: Date.now() })}
+          onClose={closeSheet}
+        >
+          {orderPanel(sheet.side)}
+        </DerivOrderSheet>
+      )}
     </div>
   );
 }

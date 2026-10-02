@@ -47,6 +47,7 @@ export default function FuturesOrderPanel({
   const [dir, setDir] = useState<Dir>(initialSide === "BUY" ? "LONG" : "SHORT");
   const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT");
   const [priceText, setPriceText] = useState("");
+  // 0 = 지우고 다시 입력하는 중(빈 칸). 주문 버튼은 1 이상일 때만.
   const [qty, setQty] = useState(1);
   const [available, setAvailable] = useState<number | null>(null);
   const [feeExempt, setFeeExempt] = useState(false);
@@ -156,7 +157,7 @@ export default function FuturesOrderPanel({
   const invalidPrice = type === "LIMIT" && priceUnits == null;
 
   async function submit(target: Dir) {
-    if (invalidPrice) return;
+    if (invalidPrice || qty < 1) return;
     const orderSide = mode === "OPEN" ? (target === "LONG" ? "BUY" : "SELL") : target === "LONG" ? "SELL" : "BUY";
     const label = tr(mode === "OPEN" ? (target === "LONG" ? "롱 진입" : "숏 진입") : target === "LONG" ? "롱 청산" : "숏 청산");
     setBusy(true);
@@ -329,10 +330,11 @@ export default function FuturesOrderPanel({
           </button>
           <input
             inputMode="numeric"
-            value={qty}
+            value={qty === 0 ? "" : qty}
+            placeholder="0"
             onChange={(e) => {
               setActivePct(null);
-              setQty(Math.max(1, Math.min(MAX_FUTURES_ORDER_QTY, Number(e.target.value.replace(/\D/g, "")) || 1)));
+              setQty(Math.min(MAX_FUTURES_ORDER_QTY, Number(e.target.value.replace(/\D/g, "")) || 0));
             }}
             className="num w-full rounded-lg border border-hairline bg-surface-2/60 px-3 py-2 text-center"
           />
@@ -422,7 +424,7 @@ export default function FuturesOrderPanel({
           <button
             key={d}
             type="button"
-            disabled={busy || invalidPrice || (mode === "CLOSE" && closable[d] === 0)}
+            disabled={busy || invalidPrice || qty < 1 || (mode === "CLOSE" && closable[d] === 0)}
             onClick={() => void submit(d)}
             className={`min-h-11 rounded-xl text-sm font-semibold text-white disabled:opacity-50 ${d === "LONG" ? "bg-up" : "bg-down"}`}
           >

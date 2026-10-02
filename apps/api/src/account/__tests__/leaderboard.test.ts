@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoCache } from "../../core/memo-cache";
-import { AccountService } from "../account.service";
+import { AccountService, maskNickname } from "../account.service";
 
 const row = (accountId: string, equity: bigint, deposits: bigint) => ({
   account_id: accountId,
@@ -49,5 +49,14 @@ describe("leaderboard", () => {
       [2, "low", false],
       [3, "me", true],
     ]);
+    // 남의 닉네임은 첫 글자 + **, 내 닉네임은 그대로
+    expect(board.rows.map((r) => r.nickname)).toEqual(["t**", "l**", "me"]);
+  });
+
+  it("masks a nickname down to its first character", () => {
+    expect(maskNickname("홍길동")).toBe("홍**");
+    expect(maskNickname("ab")).toBe("a**");
+    expect(maskNickname("😀smile")).toBe("😀**");
+    expect(maskNickname("")).toBe("**");
   });
 });

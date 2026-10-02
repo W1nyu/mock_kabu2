@@ -39,6 +39,7 @@ export default function FuturesPositionActions({
   const long = qty > 0;
   const closeSide = long ? "SELL" : "BUY";
   const hedge = positionSide !== "NET";
+  // 0 = 지우고 다시 입력하는 중(빈 칸)
   const [closeQty, setCloseQty] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -46,7 +47,7 @@ export default function FuturesPositionActions({
   const [takeText, setTakeText] = useState("");
   const [waiting, setWaiting] = useState<ConditionalOrderDto[]>([]);
 
-  useEffect(() => setCloseQty((q) => Math.max(1, Math.min(q, closableQty || 1))), [closableQty]);
+  useEffect(() => setCloseQty((q) => (q === 0 ? 0 : Math.max(1, Math.min(q, closableQty || 1)))), [closableQty]);
 
   const loadWaiting = useCallback(() => {
     api<ConditionalOrderDto[]>(`/orders/conditional?symbol=${symbol}&status=WAITING&limit=20`)
@@ -141,11 +142,10 @@ export default function FuturesPositionActions({
         <div className="flex items-center gap-2">
           <input
             inputMode="numeric"
-            value={closeQty}
+            value={closeQty === 0 ? "" : closeQty}
+            placeholder="0"
             onChange={(e) =>
-              setCloseQty(
-                Math.max(1, Math.min(closableQty || 1, Number(e.target.value.replace(/\D/g, "")) || 1)),
-              )
+              setCloseQty(Math.min(closableQty || 1, Number(e.target.value.replace(/\D/g, "")) || 0))
             }
             className="num w-20 rounded-lg border border-hairline bg-surface-2/60 px-2.5 py-1.5 text-center"
           />
@@ -165,7 +165,7 @@ export default function FuturesPositionActions({
         </div>
         <button
           type="button"
-          disabled={busy || closableQty < 1}
+          disabled={busy || closableQty < 1 || closeQty < 1}
           onClick={closePart}
           className={`mt-2 min-h-10 w-full rounded-xl text-sm font-semibold text-white disabled:opacity-50 ${long ? "bg-down" : "bg-up"}`}
         >

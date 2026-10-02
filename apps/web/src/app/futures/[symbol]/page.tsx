@@ -6,8 +6,8 @@ import { use, useCallback, useEffect, useState } from "react";
 import AssetNews from "@/components/AssetNews";
 import FuturesBook from "@/components/FuturesBook";
 import FuturesOrderPanel from "@/components/FuturesOrderPanel";
-import FuturesOrderSheet from "@/components/FuturesOrderSheet";
 import DerivOpenOrders from "@/components/DerivOpenOrders";
+import DerivOrderSheet from "@/components/DerivOrderSheet";
 import FuturesPositionPanel from "@/components/FuturesPositionPanel";
 import { MobileTradeBar } from "@/components/MobileOrderSheet";
 import UnitCandleChart from "@/components/UnitCandleChart";
@@ -232,17 +232,21 @@ export default function FuturePage({ params }: { params: Promise<{ symbol: strin
         </p>
       )}
       {compact && sheet && (
-        <FuturesOrderSheet
+        <DerivOrderSheet
           key={sheet.seq}
           symbol={def.symbol}
           name={names.future(def.symbol, def.name)}
-          side={sheet.side}
-          lastPrice={price}
-          priceHint={priceHint}
           onPick={(p) => setPriceHint({ price: p, seq: Date.now() })}
-          onPlaced={() => setRefreshKey((k) => k + 1)}
           onClose={closeSheet}
-        />
+        >
+          <FuturesOrderPanel
+            symbol={def.symbol}
+            lastPrice={price}
+            priceHint={priceHint}
+            onPlaced={() => setRefreshKey((k) => k + 1)}
+            initialSide={sheet.side}
+          />
+        </DerivOrderSheet>
       )}
     </div>
   );

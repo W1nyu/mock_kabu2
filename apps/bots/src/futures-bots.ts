@@ -100,15 +100,18 @@ export interface LadderDiff {
 /**
  * 원하는 호가와 지금 걸린 주문을 맞춘다. 가격·방향이 같은 주문은 그대로 두고(부분 체결이어도),
  * 원하는 목록에 없는 주문만 취소하며, 비어 있는 칸만 새로 건다 — 불필요한 취소·재접수를 만들지 않는다.
+ * `minRemainingRatio`를 주면 남은 수량이 원하는 수량 × 비율보다 적은 주문은 취소하고 다시 건다(옵션 호가 수량 보충).
  */
-export function diffFuturesLadder(desired: readonly FutureQuote[], live: readonly LiveOrder[]): LadderDiff {
+export function diffFuturesLadder(desired: readonly FutureQuote[], live: readonly LiveOrder[], minRemainingRatio = 0): LadderDiff {
   const key = (side: string, price: number | null) => `${side}:${price}`;
-  const wanted = new Set(desired.map((quote) => key(quote.side, quote.price)));
+  const wanted = new Map(desired.map((quote) => [key(quote.side, quote.price), quote.qty]));
   const present = new Set<string>();
   const cancel: LiveOrder[] = [];
   for (const order of live) {
     const k = key(order.side, order.price);
-    if (order.type === "LIMIT" && wanted.has(k) && !present.has(k)) present.add(k);
+    const want = wanted.get(k);
+    const enough = want != null && order.qty - order.filledQty >= want * minRemainingRatio;
+    if (order.type === "LIMIT" && enough && !present.has(k)) present.add(k);
     else cancel.push(order);
   }
   return { cancel, place: desired.filter((quote) => !present.has(key(quote.side, quote.price))) };

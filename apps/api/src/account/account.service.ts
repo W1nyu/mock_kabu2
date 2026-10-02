@@ -13,6 +13,12 @@ const LEADERBOARD_STALE_MS = 5 * 60_000;
 
 export type LeaderboardPeriod = "all" | "today" | "week";
 
+/** 랭킹에 보이는 남의 닉네임 — 첫 글자(이모지·한글도 한 글자)만 두고 "**"로 가린다. */
+export function maskNickname(nickname: string): string {
+  const first = Array.from(nickname.trim())[0];
+  return `${first ?? ""}**`;
+}
+
 interface RealizedTotalsRow {
   today: bigint;
   today_qty: bigint;
@@ -314,7 +320,11 @@ export class AccountService {
     const ranked = await this.cache.getOrCompute(`leaderboard:${period}`, LEADERBOARD_TTL_MS, () => this.rankAccounts(period), {
       staleMs: LEADERBOARD_STALE_MS,
     });
-    const withViewer = ranked.map((row) => ({ ...row, me: row.accountId === viewerAccountId }));
+    // 남의 닉네임은 첫 글자만 보이고 나머지는 **로 가린다(2026-10-02 익명화). 내 행은 그대로.
+    const withViewer = ranked.map((row) => {
+      const me = row.accountId === viewerAccountId;
+      return { ...row, nickname: me ? row.nickname : maskNickname(row.nickname), me };
+    });
     const me = withViewer.find((row) => row.me) ?? null;
     const top = withViewer.slice(0, Math.min(Math.max(1, limit), 100));
     // 상위 밖이어도 내 순위는 항상 함께 돌려준다.
