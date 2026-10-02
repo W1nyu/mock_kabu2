@@ -7,7 +7,7 @@ import { useT } from "@/lib/i18n";
 /**
  * 폰 전용 하단 탭 (sm 미만). 데스크톱 상단 메뉴와 같은 페이지로 가지만, 폰에서는 증권 앱처럼
  * 엄지가 닿는 아래에 둔다. 지수는 `/market`(증권) 안에서 들어간다.
- * 거래 화면(`/symbol/*`, `/futures/*`)에서는 매수/매도 버튼이 이 자리를 쓰므로 숨긴다.
+ * 거래 화면(`/symbol/*`, `/futures/*`, `/options/*`)에서는 매수/매도 버튼이 이 자리를 쓰므로 숨긴다.
  */
 const TABS = [
   { href: "/", label: "홈", icon: HomeIcon, match: (p: string) => p === "/" },
@@ -22,7 +22,7 @@ const TABS = [
   { href: "/ranking", label: "랭킹", icon: TrophyIcon, match: (p: string) => p === "/ranking" },
 ] as const;
 
-const HIDDEN_PREFIXES = ["/symbol/", "/futures/", "/login", "/signup"];
+const HIDDEN_PREFIXES = ["/symbol/", "/futures/", "/options/", "/login", "/signup"];
 
 export default function MobileTabBar() {
   const t = useT();
