@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SYMBOLS } from "@mock-kabu/shared";
 import { api, getToken, getUser } from "@/lib/api";
 import { formatKstHm, formatKstMonthDay, MARKET_TIME_ZONE_LABEL } from "@/lib/time";
+import { MarketCyclePanel } from "./MarketCyclePanel";
 
 type Direction = "UP" | "DOWN";
 
@@ -168,7 +169,7 @@ export default function OpsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">시장 시나리오</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            정한 시간 동안 고른 종목에 호재 또는 악재가 더 자주, 더 세게 나오고 봇 주문이 그쪽으로 기웁니다.
+            평소에는 봇이 자동 장세(상승장·하락장·횡보장)를 스스로 돌립니다. 시나리오는 그 위에 더해 정한 시간 동안 고른 종목에 호재 또는 악재가 더 자주, 더 세게 나오고 봇 주문이 그쪽으로 기웁니다.
             가격을 직접 움직이지는 않으며, 시작·종료 10분 동안 서서히 켜지고 꺼집니다. 사용자에게는 보이지 않습니다.
             같은 종목에 이미 잡힌 시나리오와 시간이 겹치면, 새 시나리오는 그 시나리오가 끝난 뒤로 미뤄 등록됩니다.
           </p>
@@ -290,6 +291,7 @@ export default function OpsPage() {
       </section>
 
       <section className="space-y-4">
+        <MarketCyclePanel />
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">등록된 시나리오</h2>
           <p className="mt-1 text-sm text-ink-muted">최근 50건. 봇은 30초 안에 변경을 반영합니다.</p>

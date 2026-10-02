@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Headers, Param, Post, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { JwtUser } from "../auth/auth.service";
+import { MarketCycleService } from "./market-cycle.service";
 import { ScenarioService, type CreateScenarioDto } from "./scenario.service";
 
 /** 관리자 전용. 관리자가 아닌 계정에는 404로 응답한다. */
@@ -39,5 +40,28 @@ export class InternalScenarioController {
   @Get("active")
   active(@Headers("x-liquidity-bootstrap-token") token?: string) {
     return this.scenarios.internalActive(token);
+  }
+}
+
+/** 관리자 전용: 봇이 스스로 돌리는 자동 장세의 지금 국면(다음 국면·종료 시각은 없다). */
+@Controller("admin/market-cycle")
+@UseGuards(JwtAuthGuard)
+export class AdminMarketCycleController {
+  constructor(private cycles: MarketCycleService) {}
+
+  @Get()
+  current(@CurrentUser() user: JwtUser) {
+    return this.cycles.current(user.userId);
+  }
+}
+
+/** Internal endpoint: the bots report the current automatic market cycle once a minute. */
+@Controller("internal/market-cycle")
+export class InternalMarketCycleController {
+  constructor(private cycles: MarketCycleService) {}
+
+  @Post()
+  receive(@Headers("x-liquidity-bootstrap-token") token: string | undefined, @Body() body: unknown) {
+    return this.cycles.receive(token, body);
   }
 }

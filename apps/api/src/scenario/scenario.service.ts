@@ -248,7 +248,7 @@ function parseDate(value: unknown, field: string): Date {
   return date;
 }
 
-function assertInternalToken(presentedToken: string | undefined) {
+export function assertInternalToken(presentedToken: string | undefined) {
   const expected = Buffer.from(liquidityBootstrapToken());
   const presented = Buffer.from(presentedToken ?? "");
   if (expected.length !== presented.length || !timingSafeEqual(expected, presented)) {

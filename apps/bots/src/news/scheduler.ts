@@ -1,4 +1,5 @@
 import type { ReferenceCode, SymbolDef } from "@mock-kabu/shared";
+import type { MarketMood } from "../market-cycle";
 import type { MarketModel, RandomSource } from "../market-model";
 import { templateById } from "./catalog";
 import {
@@ -46,6 +47,8 @@ export interface NewsSchedulerOptions {
   readonly pressure?: (symbol: string, nowMs: number) => number;
   /** 선물 기초자산의 지금 값 — 환율·유가 기사 숫자를 실제 가격에 맞춘다 */
   readonly referenceValue?: (code: ReferenceCode) => number | null;
+  /** 자동 장세 — 기사 방향·강도·종류와 종목·업종 기사 빈도를 기울인다. 없으면 그대로. */
+  readonly mood?: (nowMs: number) => MarketMood;
 }
 
 interface PendingFollowUp {
@@ -84,6 +87,7 @@ export class NewsScheduler {
   private lastPublishedAtMs = Number.NEGATIVE_INFINITY;
   private lastMacroAtMs = Number.NEGATIVE_INFINITY;
   private readonly referenceValue?: (code: ReferenceCode) => number | null;
+  private readonly mood?: (nowMs: number) => MarketMood;
 
   constructor(
     private readonly model: MarketModel,
@@ -100,6 +104,7 @@ export class NewsScheduler {
     this.macroMuteMs = options.macroMuteMs ?? DEFAULT_MACRO_MUTE_MS;
     this.pressure = options.pressure ?? (() => 0);
     this.referenceValue = options.referenceValue;
+    this.mood = options.mood;
   }
 
   pendingFollowUpCount(): number {
@@ -149,7 +154,18 @@ export class NewsScheduler {
       nextSequence: () => ++this.sequence,
       pressure: (symbol) => this.pressure(symbol, nowMs),
       referenceValue: this.referenceValue,
+      ...(this.mood ? { mood: this.mood(nowMs) } : {}),
     };
+  }
+
+  /**
+   * Next gap for the company and industry streams. A bear market runs more
+   * stories and a range-bound one fewer; the draw itself is unchanged.
+   */
+  private storyGap(range: Range, nowMs: number): number {
+    const gap = randomInt(this.random, range.min, range.max);
+    const activity = this.mood?.(nowMs).newsActivity ?? 1;
+    return activity > 0 ? Math.round(gap / activity) : gap;
   }
 
   private tryFollowUp(nowMs: number): NewsItem | null {
@@ -190,7 +206,7 @@ export class NewsScheduler {
     const item = generateSectorNews(this.context(nowMs));
     if (!item) return null;
 
-    this.nextSectorAtMs = nowMs + randomInt(this.random, this.sectorGapMs.min, this.sectorGapMs.max);
+    this.nextSectorAtMs = nowMs + this.storyGap(this.sectorGapMs, nowMs);
     // Hold company news briefly, as after a macro story, so the move reads as the industry's.
     this.lastMacroAtMs = nowMs;
     return this.publish(item, nowMs);
@@ -203,7 +219,7 @@ export class NewsScheduler {
     const item = generateSymbolNews(this.context(nowMs), this.eligibleSymbols(nowMs));
     if (!item) return null;
 
-    this.nextSymbolAtMs = nowMs + randomInt(this.random, this.symbolGapMs.min, this.symbolGapMs.max);
+    this.nextSymbolAtMs = nowMs + this.storyGap(this.symbolGapMs, nowMs);
     return this.publish(item, nowMs);
   }
 

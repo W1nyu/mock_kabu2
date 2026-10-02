@@ -1,5 +1,6 @@
-import type { OrderSide, OrderType, OrderbookSnapshot } from "@mock-kabu/shared";
+import type { MarketCycleReport, OrderSide, OrderType, OrderbookSnapshot } from "@mock-kabu/shared";
 import { requiredRuntimeEnv } from "./env";
+import type { IndexMeta } from "./market-cycle";
 import type { PressureScenario } from "./scenario";
 
 const BASE = requiredRuntimeEnv("BOT_API_URL", "http://localhost:4100");
@@ -238,6 +239,27 @@ export class ApiClient {
       throw new ApiError(res.status, `GET /internal/scenarios/active returned ${res.status}`);
     }
     return res.json() as Promise<PressureScenario[]>;
+  }
+
+  /** 자동 장세의 지금 국면 — 관리자 화면 전용. 내부 토큰. */
+  async publishMarketCycle(report: MarketCycleReport): Promise<void> {
+    const res = await fetch(`${BASE}/internal/market-cycle`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-liquidity-bootstrap-token": LIQUIDITY_BOOTSTRAP_TOKEN,
+      },
+      body: JSON.stringify(report),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new ApiError(res.status, `POST /internal/market-cycle returned ${res.status} ${text.slice(0, 200)}`);
+    }
+  }
+
+  /** 시장 지수 구성(제수·상장 주식 수) — 봇 기준가로 지수를 계산해 밸류에이션에 쓴다. */
+  indexMeta() {
+    return this.request("GET", "/market/index/meta") as Promise<IndexMeta>;
   }
 
   /** 전 종목 최근 체결(최신순)을 한 요청으로. */

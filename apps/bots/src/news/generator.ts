@@ -13,6 +13,7 @@ import {
   type MarketEventSentiment,
   type RandomSource,
 } from "../market-model";
+import { symbolLean, type MarketMood } from "../market-cycle";
 import { MACRO_POOL, SECTOR_POOL, SYMBOL_POOL, templateById } from "./catalog";
 import { companyProfile, MIN_MACRO_BETA } from "./company-profiles";
 import { RecentNewsMemory, renderKey } from "./memory";
@@ -35,6 +36,27 @@ const MACRO_PERSISTENCE = { min: 0.93, max: 0.955 };
 const SCENARIO_TARGET_BOOST = 1.5;
 /** At full pressure a story in the scenario's direction lands up to 30% harder. */
 const SCENARIO_STRENGTH_BOOST = 0.3;
+/**
+ * Market-cycle reaction: in a bull market good news lands a little harder and
+ * bad news is shrugged off a little (and the other way round in a bear market).
+ * At a typical lean of 0.45 that is about ±7%.
+ */
+const MOOD_REACTION = 0.15;
+/**
+ * How hard the market cycle leans the macro and industry pickers. A story's
+ * weight is multiplied by e^(k · lean · effect), where effect is +1 for a story
+ * that lifts the market. At a bull lean of 0.45 this makes about two in three
+ * market-wide and industry stories good ones — the same mix the company stream
+ * gets from the lean.
+ */
+const MACRO_MARKET_LEAN_WEIGHT = 0.9;
+const SECTOR_MARKET_LEAN_WEIGHT = 0.9;
+/**
+ * How hard a rate/FX/oil/metals cycle leans its own channel's stories toward its
+ * direction. At a typical cycle lean of 0.7 about five in six of that channel's
+ * stories point the cycle's way: a hiking cycle is mostly hikes and hot prints.
+ */
+const MACRO_CHANNEL_LEAN_WEIGHT = 1.25;
 
 export interface GeneratorContext {
   readonly nowMs: number;
@@ -48,6 +70,55 @@ export interface GeneratorContext {
   readonly pressure?: (symbol: string) => number;
   /** 선물 기초자산의 지금 실제 값 — 기사 속 환율·유가 숫자를 실제 가격에 맞춘다. 없으면 템플릿 범위에서 뽑는다. */
   readonly referenceValue?: (code: ReferenceCode) => number | null;
+  /** 자동 장세(상승장·하락장·횡보장과 금리·환율·유가·원자재 사이클). 없으면 모든 추첨이 그대로다. */
+  readonly mood?: MarketMood;
+}
+
+/** 장세 강도 배율과 호재/악재 반응을 기사 강도에 얹는다. lean은 이 기사 대상의 장세 기울기. */
+function moodStrength(
+  strength: number,
+  sentiment: MarketEventSentiment,
+  lean: number,
+  mood: MarketMood | undefined,
+): number {
+  if (!mood) return strength;
+  const reaction = 1 + MOOD_REACTION * lean * (sentiment === "POSITIVE" ? 1 : -1);
+  return clamp(strength * mood.volatility * reaction, MIN_EVENT_STRENGTH, MAX_EVENT_STRENGTH);
+}
+
+/** 상장 종목 평균 매크로 베타 — 그 채널이 오를 때 시장 전체가 오르는 쪽인지(+) 내리는 쪽인지(−) */
+function meanMacroBeta(channel: NonNullable<NewsTemplate["macroChannel"]>, symbols: readonly SymbolDef[]): number {
+  let sum = 0;
+  let count = 0;
+  for (const symbol of symbols) {
+    const profile = companyProfile(symbol.symbol);
+    if (!profile) continue;
+    sum += profile.macroBeta[channel];
+    count++;
+  }
+  return count > 0 ? sum / count : 0;
+}
+
+/**
+ * 장세가 시장 기사 추첨에 주는 배율. 상승장엔 시장을 올리는 기사(위험 선호·금리 인하…)가,
+ * 금리 인상기엔 인상·물가 급등 기사가 더 자주 뽑힌다.
+ */
+export function macroMoodWeight(template: NewsTemplate, ctx: GeneratorContext): number {
+  const mood = ctx.mood;
+  const channel = template.macroChannel;
+  if (!mood || !channel) return 1;
+  const direction = template.macroDirection ?? 1;
+  const marketEffect = direction * meanMacroBeta(channel, ctx.symbols);
+  return Math.exp(
+    MACRO_MARKET_LEAN_WEIGHT * mood.marketLean * marketEffect +
+      MACRO_CHANNEL_LEAN_WEIGHT * mood.channelLean[channel] * direction,
+  );
+}
+
+/** 장세가 업종 기사 추첨에 주는 배율 — 상승장엔 업황 호재가, 하락장엔 악재가 더 자주. */
+export function sectorMoodWeight(template: NewsTemplate, ctx: GeneratorContext): number {
+  if (!ctx.mood) return 1;
+  return Math.exp(SECTOR_MARKET_LEAN_WEIGHT * ctx.mood.marketLean * (template.sentiment === "POSITIVE" ? 1 : -1));
 }
 
 /** 템플릿·{commodity}로 이 기사가 움직일 기초자산 가중치 */
@@ -168,11 +239,13 @@ export function generateSymbolNews(
   if (!symbol) return null;
   const profile = companyProfile(symbol.symbol);
   const pressure = ctx.pressure?.(symbol.symbol) ?? 0;
+  const lean = ctx.mood ? symbolLean(ctx.mood, symbol.symbol) : 0;
 
   // 2. Sentiment, before the template, so the catalog's shape cannot move the
-  //    market's long-run drift. An admin scenario leans this roll only while
-  //    it runs.
-  const sentiment = pressuredSentimentFromRoll(unitRandom(ctx.random), pressure);
+  //    market's long-run drift. The market cycle leans this roll (more good
+  //    news in a bull market, more bad in a bear market), and an admin
+  //    scenario leans it further only while it runs.
+  const sentiment = pressuredSentimentFromRoll(unitRandom(ctx.random), clamp(pressure + lean, -1, 1));
 
   // 3. Template, restricted to what this company could plausibly announce.
   const template = selectTemplate(SYMBOL_POOL, sentiment, profile?.sector ?? null, ctx);
@@ -182,13 +255,18 @@ export function generateSymbolNews(
   //    believable for this particular story. A story that goes the scenario's
   //    way lands harder; one against it keeps its ordinary size.
   const aligned = pressure !== 0 && (sentiment === "POSITIVE") === pressure > 0;
-  const strength = aligned
-    ? clamp(
-        sampleStrength(template, ctx.random) * (1 + SCENARIO_STRENGTH_BOOST * Math.abs(pressure)),
-        MIN_EVENT_STRENGTH,
-        MAX_EVENT_STRENGTH,
-      )
-    : sampleStrength(template, ctx.random);
+  const strength = moodStrength(
+    aligned
+      ? clamp(
+          sampleStrength(template, ctx.random) * (1 + SCENARIO_STRENGTH_BOOST * Math.abs(pressure)),
+          MIN_EVENT_STRENGTH,
+          MAX_EVENT_STRENGTH,
+        )
+      : sampleStrength(template, ctx.random),
+    sentiment,
+    lean,
+    ctx.mood,
+  );
 
   const slotContext: SlotContext = {
     random: ctx.random,
@@ -241,12 +319,16 @@ export function generateMacroNews(ctx: GeneratorContext, forcedTemplateId?: stri
       weight:
         (candidate.weight ?? 1) *
         ctx.memory.templatePenalty(candidate.id, ctx.nowMs) *
-        ctx.memory.categoryPenalty(candidate.category, ctx.nowMs),
+        ctx.memory.categoryPenalty(candidate.category, ctx.nowMs) *
+        macroMoodWeight(candidate, ctx),
     })),
   );
   if (!template) return null;
 
-  const macroStrength = sampleStrength(template, ctx.random);
+  // 하락장엔 같은 기사도 더 크게 흔든다(기초자산 움직임도 이 값으로 정한다).
+  const macroStrength = ctx.mood
+    ? clamp(sampleStrength(template, ctx.random) * ctx.mood.volatility, MIN_EVENT_STRENGTH, MAX_EVENT_STRENGTH)
+    : sampleStrength(template, ctx.random);
   const direction = template.macroDirection ?? 1;
   const slotContext: SlotContext = {
     random: ctx.random,
@@ -335,12 +417,15 @@ export function generateSectorNews(ctx: GeneratorContext): NewsItem | null {
       weight:
         (candidate.weight ?? 1) *
         ctx.memory.templatePenalty(candidate.id, ctx.nowMs) *
-        ctx.memory.categoryPenalty(candidate.category, ctx.nowMs),
+        ctx.memory.categoryPenalty(candidate.category, ctx.nowMs) *
+        sectorMoodWeight(candidate, ctx),
     })),
   );
   if (!template) return null;
 
-  const baseStrength = sampleStrength(template, ctx.random);
+  const baseStrength = ctx.mood
+    ? clamp(sampleStrength(template, ctx.random) * ctx.mood.volatility, MIN_EVENT_STRENGTH, MAX_EVENT_STRENGTH)
+    : sampleStrength(template, ctx.random);
   const slotContext: SlotContext = {
     random: ctx.random,
     nowMs: ctx.nowMs,

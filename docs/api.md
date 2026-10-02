@@ -91,6 +91,8 @@ WebSocket(socket.io, 같은 포트)은 단일 `"message"` 이벤트로 `{channel
 | GET | `/admin/lock-info` | 락 전략·충돌/재시도 카운터 |
 | GET | `/internal/operations` | API 컨테이너 loopback 전용 소켓 동접·프로세스 메모리 (공개 프록시에서 404) |
 | POST | `/internal/liquidity/ensure`, `/internal/news/publish` | 봇 프로세스 전용(부트스트랩 토큰) |
+| GET | `/admin/market-cycle` | 관리자 전용(아니면 404) — 봇이 스스로 돌리는 자동 장세의 지금 국면 `{report: {reportedAtMs, market: {phase: BULL\|BEAR\|SIDEWAYS, sinceMs, cycleLean, lean, positiveShare}, drivers: {RATE\|FX\|OIL\|COMMODITY: {phase: RISING\|FALLING\|STEADY, sinceMs, lean}}, valuation: {index, fairIndex, pull}} \| null}`. 다음 국면·종료 시각은 싣지 않는다. API 메모리에만 있어 API 재시작 후 1분간 null |
+| POST | `/internal/market-cycle` | 봇 전용(부트스트랩 토큰) — 위 보고를 1분마다 보낸다 |
 | POST | `/internal/news/force` | 운영자 도구(내부 토큰) `{templateId: "macro.oil.spike"}` — 봇이 5초 안에 그 시장 기사를 평소 경로로 발행(주가 영향·기초자산 반응 포함). 봇은 `/internal/news/force/take`로 꺼내 간다 |
 | GET | `/replay/datasets`, `/replay/datasets/:id/candles` | 실전 리플레이(레거시 메뉴) |
 

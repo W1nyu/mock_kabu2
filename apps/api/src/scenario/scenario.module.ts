@@ -1,9 +1,15 @@
 import { Module } from "@nestjs/common";
-import { AdminScenarioController, InternalScenarioController } from "./scenario.controller";
+import {
+  AdminMarketCycleController,
+  AdminScenarioController,
+  InternalMarketCycleController,
+  InternalScenarioController,
+} from "./scenario.controller";
+import { MarketCycleService } from "./market-cycle.service";
 import { ScenarioService } from "./scenario.service";
 
 @Module({
-  controllers: [AdminScenarioController, InternalScenarioController],
-  providers: [ScenarioService],
+  controllers: [AdminScenarioController, InternalScenarioController, AdminMarketCycleController, InternalMarketCycleController],
+  providers: [ScenarioService, MarketCycleService],
 })
 export class ScenarioModule {}

@@ -1,4 +1,4 @@
-import type { OrderSide, SymbolDef } from "@mock-kabu/shared";
+import type { MarketCyclePhase, OrderSide, SymbolDef } from "@mock-kabu/shared";
 
 type MarketRegime = "CALM" | "UPTREND" | "DOWNTREND" | "VOLATILE";
 
@@ -20,6 +20,17 @@ export interface MarketModelOptions {
    * flow the same way a live event would, without moving any price itself.
    */
   scenarioPressure?: (symbol: string) => number;
+  /**
+   * Signed automatic market-cycle lean in [-1, 1] per symbol (bull > 0). A
+   * gentler standing tilt on ordinary flow than an admin scenario.
+   */
+  marketLean?: (symbol: string) => number;
+  /**
+   * The automatic market cycle's phase. A bear market spends more of its time
+   * in volatile stretches and a range-bound one in calm stretches; neither
+   * changes the up/down odds of the short regimes.
+   */
+  marketPhase?: () => MarketCyclePhase;
 }
 
 export type MarketEventSentiment = "POSITIVE" | "NEGATIVE";
@@ -93,6 +104,12 @@ const MAX_SIDE_FLIP_CHANCE = 0.78;
  * the headlines the scenario brings supply the sharper moves.
  */
 const SCENARIO_FLOW_WEIGHT = 0.3;
+/**
+ * Standing flow lean at full market-cycle lean. Half the scenario weight: a
+ * typical bull lean (~0.45) flips about one in twenty opposite-side aggressive
+ * orders, so the cycle shows up mostly through the news it brings.
+ */
+const CYCLE_FLOW_WEIGHT = 0.15;
 /** A slight positive skew keeps good-news events marginally more common than bad-news events. */
 export const POSITIVE_EVENT_PROBABILITY = 0.52;
 /** A durable print this far from the synthetic reference establishes a new market level. */
@@ -351,6 +368,12 @@ export function hiddenEventSentimentFromRoll(roll: number): MarketEventSentiment
 /** How far full scenario pressure moves the good-news probability. */
 const SCENARIO_SENTIMENT_SHIFT = 0.36;
 
+/** Good-news probability of one company story under a signed lean (admin scenario + market cycle). */
+export function positiveNewsProbability(pressure: number): number {
+  if (!pressure || !Number.isFinite(pressure)) return POSITIVE_EVENT_PROBABILITY;
+  return clamp(POSITIVE_EVENT_PROBABILITY + SCENARIO_SENTIMENT_SHIFT * pressure, 0.08, 0.92);
+}
+
 /**
  * Same roll as hiddenEventSentimentFromRoll, with the threshold leaned by
  * scenario pressure. Pressure 0 is exactly the unbiased mix; full downward
@@ -358,8 +381,7 @@ const SCENARIO_SENTIMENT_SHIFT = 0.36;
  */
 export function pressuredSentimentFromRoll(roll: number, pressure: number): MarketEventSentiment {
   if (!pressure) return hiddenEventSentimentFromRoll(roll);
-  const threshold = clamp(POSITIVE_EVENT_PROBABILITY + SCENARIO_SENTIMENT_SHIFT * pressure, 0.08, 0.92);
-  return Number.isFinite(roll) && roll < threshold ? "POSITIVE" : "NEGATIVE";
+  return Number.isFinite(roll) && roll < positiveNewsProbability(pressure) ? "POSITIVE" : "NEGATIVE";
 }
 
 /** Checks whether an API/DB price can safely initialise a reference model. */
@@ -398,11 +420,15 @@ export class MarketModel {
   private marketVariance = REGIME.CALM.marketVolatility ** 2;
   private eventCooldownTicks = 0;
   private readonly scenarioPressure: (symbol: string) => number;
+  private readonly marketLean: (symbol: string) => number;
+  private readonly marketPhase?: () => MarketCyclePhase;
 
   constructor(symbols: SymbolDef[], options: MarketModelOptions = {}) {
     this.random = options.random ?? { next: () => Math.random() };
     this.eventSpawnChance = clamp(options.eventSpawnChance ?? DEFAULT_EVENT_SPAWN_CHANCE, 0, 1);
     this.scenarioPressure = options.scenarioPressure ?? (() => 0);
+    this.marketLean = options.marketLean ?? (() => 0);
+    this.marketPhase = options.marketPhase;
     for (const [index, symbol] of symbols.entries()) {
       const restoredPrice = options.initialPrices?.get(symbol.symbol);
       const price = isUsableReferencePrice(restoredPrice) ? restoredPrice : symbol.initialPrice;
@@ -592,13 +618,17 @@ export class MarketModel {
     return this.stateFor(symbol).sideways.assessment().score;
   }
 
-  /** Signed net demand pressure from the still-active hidden events and any admin scenario. */
+  /** Signed net demand pressure from the still-active hidden events, any admin scenario and the market cycle. */
   flowBias(symbol: string): number {
     const pressure = this.stateFor(symbol).events.reduce(
       (sum, event) => sum + this.eventFlowContribution(event),
       0,
     );
-    return clamp(pressure + SCENARIO_FLOW_WEIGHT * this.scenarioPressure(symbol), -1, 1);
+    return clamp(
+      pressure + SCENARIO_FLOW_WEIGHT * this.scenarioPressure(symbol) + CYCLE_FLOW_WEIGHT * this.marketLean(symbol),
+      -1,
+      1,
+    );
   }
 
   /**
@@ -633,7 +663,11 @@ export class MarketModel {
 
   private chooseNextRegime() {
     const roll = this.random.next();
-    if (this.regime === "VOLATILE") {
+    const phase = this.marketPhase?.();
+    if (phase) {
+      const odds = REGIME_ODDS_BY_PHASE[phase][this.regime === "VOLATILE" ? "afterVolatile" : "otherwise"];
+      this.regime = pickRegime(odds, roll);
+    } else if (this.regime === "VOLATILE") {
       this.regime = roll < 0.55 ? "CALM" : roll < 0.78 ? "UPTREND" : "DOWNTREND";
     } else if (roll < 0.58) {
       this.regime = "CALM";
@@ -698,6 +732,41 @@ export class MarketModel {
   private eventContributionMagnitude(event: HiddenMarketEvent): number {
     return Math.abs(this.eventFlowContribution(event));
   }
+}
+
+type RegimeOdds = Readonly<Record<MarketRegime, number>>;
+
+/**
+ * Short-regime odds per market-cycle phase. A bull market keeps the original
+ * mix. Up and down trends stay equally likely in every phase — direction comes
+ * from the cycle's news and flow lean — but a bear market lingers in volatile
+ * stretches (fear clusters) and a range-bound market in calm ones.
+ */
+const REGIME_ODDS_BY_PHASE: Readonly<
+  Record<MarketCyclePhase, { readonly otherwise: RegimeOdds; readonly afterVolatile: RegimeOdds }>
+> = {
+  BULL: {
+    otherwise: { CALM: 0.58, UPTREND: 0.19, DOWNTREND: 0.19, VOLATILE: 0.04 },
+    afterVolatile: { CALM: 0.55, UPTREND: 0.23, DOWNTREND: 0.22, VOLATILE: 0 },
+  },
+  BEAR: {
+    otherwise: { CALM: 0.5, UPTREND: 0.19, DOWNTREND: 0.19, VOLATILE: 0.12 },
+    afterVolatile: { CALM: 0.45, UPTREND: 0.2, DOWNTREND: 0.2, VOLATILE: 0.15 },
+  },
+  SIDEWAYS: {
+    otherwise: { CALM: 0.7, UPTREND: 0.13, DOWNTREND: 0.13, VOLATILE: 0.04 },
+    afterVolatile: { CALM: 0.7, UPTREND: 0.15, DOWNTREND: 0.15, VOLATILE: 0 },
+  },
+};
+
+function pickRegime(odds: RegimeOdds, roll: number): MarketRegime {
+  let cursor = (Number.isFinite(roll) ? clamp(roll, 0, 0.999_999) : 0) *
+    (odds.CALM + odds.UPTREND + odds.DOWNTREND + odds.VOLATILE);
+  for (const regime of ["CALM", "UPTREND", "DOWNTREND", "VOLATILE"] as const) {
+    cursor -= odds[regime];
+    if (cursor < 0) return regime;
+  }
+  return "CALM";
 }
 
 function chooseWeightedEventTarget(

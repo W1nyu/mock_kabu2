@@ -2,6 +2,7 @@ import { requiredRuntimeEnv } from "./env";
 import { ALL_OPTION_FAMILIES, FUTURES, liquidityReserveBotNumber, SYMBOLS, type OrderSide, type SymbolDef } from "@mock-kabu/shared";
 import { ApiClient, isRejection } from "./client";
 import { MarketMakerStartupBlockedError, runMarketMaker } from "./market-maker";
+import { MarketCycle, MarketMoodSource, startMarketCycleLoop, symbolLean } from "./market-cycle";
 import { MarketModel, referencePriceFromHistory } from "./market-model";
 import { ApiNewsSink } from "./news/api-sink";
 import { startNewsEngine } from "./news/scheduler";
@@ -624,12 +625,20 @@ async function main() {
   // the internal API; never shown to users.
   const scenarios = new ScenarioBook();
   startScenarioPolling(clients[0], scenarios);
+  // 자동 장세: 상승장·하락장·횡보장과 금리·환율·유가·원자재 사이클이 뉴스의 호재/악재 비율과
+  // 주문 흐름을 기울인다. 일정은 내부 토큰에서 만든 시드로 정해져 재시작해도 이어지고,
+  // 공개 저장소만 봐서는 다음 국면을 알 수 없다.
+  const marketMood = new MarketMoodSource(
+    new MarketCycle(requiredRuntimeEnv("LIQUIDITY_BOOTSTRAP_TOKEN", process.env.JWT_SECRET ?? "mock-kabu2-local-dev-secret")),
+  );
   // News is now the only source of market events. The model's own anonymous
   // generator is switched off so a price move always has a headline behind it.
   const ref = new MarketModel(SYMBOLS, {
     initialPrices: restoredMarket.initialPrices,
     eventSpawnChance: 0,
     scenarioPressure: (symbol) => scenarios.pressure(symbol),
+    marketLean: (symbol) => symbolLean(marketMood.at(Date.now()), symbol),
+    marketPhase: () => marketMood.at(Date.now()).phase,
   });
   for (const symbol of SYMBOLS) {
     ref.seedMarketHistory(symbol.symbol, restoredMarket.chartPrices.get(symbol.symbol) ?? []);
@@ -676,7 +685,20 @@ async function main() {
       pressure: (symbol, nowMs) => scenarios.pressure(symbol, nowMs),
       // 환율·유가 기사 속 숫자를 지금 기초자산 값에 맞춘다.
       referenceValue: (code) => reference.model.value(code),
+      mood: (nowMs) => marketMood.at(nowMs),
     },
+  );
+  // 1분마다 봇 기준가로 지수를 계산해 밸류에이션에 넣고, 지금 국면을 관리자 화면에 보고한다.
+  startMarketCycleLoop(
+    clients[0],
+    (symbol) => {
+      try {
+        return ref.get(symbol);
+      } catch {
+        return null;
+      }
+    },
+    marketMood,
   );
   // 운영자 도구: /internal/news/force로 요청된 시장 기사를 5초 안에 발행한다.
   setInterval(() => {
