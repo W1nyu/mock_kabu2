@@ -380,6 +380,7 @@ export const MESSAGES: Readonly<Record<string, readonly [string, string]>> = {
   "지금 만기라면 받을 금액(계약당 가격 단위)": ["What it would pay if it expired now (price units per contract)", "今が満期なら受け取る金額（1枚あたりの価格単位）"],
   "내재가치": ["Intrinsic", "本質的価値"],
   "취소 실패": ["Cancel failed", "取消に失敗しました"],
+  "취소 중…": ["Canceling…", "取消中…"],
   "{n}건은 취소하지 못했습니다(이미 체결됐을 수 있습니다)": ["{n} could not be canceled (they may already have filled)", "{n}件は取消できませんでした(既に約定した可能性があります)"],
   "전체 취소": ["Cancel all", "すべて取消"],
   "호가창을 누르면 가격이 들어갑니다 · 남은 {n}계약 이하 · 호가 단위 {tick}": ["Click the order book to fill the price · up to {n} remaining contracts · tick {tick}", "板をクリックすると価格が入ります · 残り{n}枚以下 · 呼値単位 {tick}"],

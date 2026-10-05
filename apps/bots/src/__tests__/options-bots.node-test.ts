@@ -6,23 +6,24 @@ import { OPTION_MM_MAX_INVENTORY, closingOrder, diffOptionLadder, heldToExpiry, 
 const K = { tickUnits: 5, unitValue: 100 };
 const U = { tickUnits: 1, unitValue: 1_000 };
 
-test("option ladder: 3 levels each side around theo with a 4% half-spread (min 1 tick)", () => {
-  // 이론가 5.00pt(500단위), 호가 5단위: 한쪽 스프레드 20 → 매수 480/475/470, 매도 520/525/530
+test("option ladder: 5 levels each side around theo with a 4% half-spread (min 1 tick)", () => {
+  // 이론가 5.00pt(500단위), 호가 5단위: 한쪽 스프레드 20 → 매수 480~460, 매도 520~540
   const quotes = planOptionLadder(K, 500, 0);
-  assert.deepEqual(
-    quotes.filter((q) => q.side === "BUY").map((q) => [q.price, q.qty]),
-    [[480, 5], [475, 8], [470, 10]],
-  );
-  assert.deepEqual(quotes.filter((q) => q.side === "SELL").map((q) => q.price), [520, 525, 530]);
+  assert.deepEqual(quotes.filter((q) => q.side === "BUY").map((q) => q.price), [480, 475, 470, 465, 460]);
+  assert.deepEqual(quotes.filter((q) => q.side === "SELL").map((q) => q.price), [520, 525, 530, 535, 540]);
+  // 수량은 단마다 다르지만 같은 가격이면 늘 같다(다시 짜도 재접수하지 않는다)
+  assert.deepEqual(planOptionLadder(K, 500, 0), quotes);
 });
 
 test("option ladder: cheap options quote tens of contracts, expensive ones a few", () => {
-  // 100pt(100만 원) → 2·3·4, 4pt → 6·9·12, 1pt → 12·18·24, 0.1pt(1천 원) → 20·30·40
-  const sizes = (theo: number) => planOptionLadder(K, theo, 0).filter((q) => q.side === "SELL").map((q) => q.qty);
-  assert.deepEqual(sizes(10_000), [2, 3, 4]);
-  assert.deepEqual(sizes(400), [6, 9, 12]);
-  assert.deepEqual(sizes(100), [12, 18, 24]);
-  assert.deepEqual(sizes(10), [20, 30, 40]);
+  // 한쪽 합계 ≈ 안쪽 수량 × 4.5 (예전 3단 1·1.5·2와 같은 총량, 단별 ×0.7~1.3 흔들림)
+  const total = (theo: number) =>
+    planOptionLadder(K, theo, 0).filter((q) => q.side === "SELL").reduce((sum, q) => sum + q.qty, 0);
+  const near = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) <= expected * 0.3 + 2, `${actual} vs ${expected}`);
+  near(total(10_000), 2 * 4.5);
+  near(total(400), 6 * 4.5);
+  near(total(100), 12 * 4.5);
+  near(total(10), 20 * 4.5);
   assert.equal(optionLevelQty(0, 100), 20);
   // 원/달러 0.1원(1천 원)짜리도 몇십 계약
   assert.equal(optionLevelQty(1, U.unitValue), 20);
@@ -30,7 +31,7 @@ test("option ladder: cheap options quote tens of contracts, expensive ones a few
 
 test("option ladder: a cheap option's bigger book also gets a bigger inventory limit", () => {
   // 0.1pt: 안쪽 20계약 → 재고 한도 200. 40계약 쓰였어도 매도 호가를 계속 낸다.
-  assert.equal(planOptionLadder(K, 10, -OPTION_MM_MAX_INVENTORY).filter((q) => q.side === "SELL").length, 3);
+  assert.equal(planOptionLadder(K, 10, -OPTION_MM_MAX_INVENTORY).filter((q) => q.side === "SELL").length, 5);
   assert.equal(planOptionLadder(K, 10, -200).filter((q) => q.side === "SELL").length, 0);
 });
 
@@ -79,7 +80,7 @@ test("option ladder: inventory skews the center and a full book stops adding to 
   assert.equal(Math.max(...long.filter((q) => q.side === "BUY").map((q) => q.price)), 100 - 2 - 4);
   const maxShort = planOptionLadder(U, 100, -OPTION_MM_MAX_INVENTORY);
   assert.equal(maxShort.filter((q) => q.side === "SELL").length, 0);
-  assert.equal(maxShort.filter((q) => q.side === "BUY").length, 3);
+  assert.equal(maxShort.filter((q) => q.side === "BUY").length, 5);
 });
 
 test("option flow picks at-the-money strikes most often, by distance from the underlying", () => {
@@ -104,7 +105,7 @@ test("far-from-the-money strikes quote fewer levels", () => {
 test("retired option families only bid, so holders can still sell before expiry", () => {
   const quotes = planOptionLadder(K, 450, -10, true);
   assert.equal(quotes.filter((q) => q.side === "SELL").length, 0);
-  assert.equal(quotes.filter((q) => q.side === "BUY").length, 3);
+  assert.equal(quotes.filter((q) => q.side === "BUY").length, 5);
 });
 
 test("closing an option position trades the opposite side for the whole quantity", () => {

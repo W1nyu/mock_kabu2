@@ -1,9 +1,19 @@
 import { ALL_OPTIONS, OPTIONS, type OptionDef, type OptionFamilyDef, type OrderSide } from "@mock-kabu/shared";
 import type { ApiClient, LiveOrder } from "./client";
-import { diffFuturesLadder, type FutureQuote } from "./futures-bots";
+import { diffFuturesLadder, jitteredQty, withoutSelfCross, type FutureQuote } from "./futures-bots";
 
-/** 옵션 호가 단수(한쪽). 종목이 많아(44) 선물보다 적게 둔다. */
-export const OPTION_LADDER_LEVELS = 3;
+/** 옵션 호가 단수(한쪽) — 화면 5단을 채운다. 먼 행사가는 FAR_LADDER_LEVELS. */
+export const OPTION_LADDER_LEVELS = 5;
+/**
+ * 단별 수량 = 안쪽 수량 × 이 배수. 합계(5단 4.5배·3단 2.5배)는 예전 3단(1·1.5·2)·2단(1·1.5)과 같아
+ * 단을 늘려도 매도 호가가 묶는 쓰기 증거금은 늘지 않는다.
+ */
+const LEVEL_QTY_WEIGHTS: Record<number, readonly number[]> = {
+  5: [0.6, 0.8, 0.9, 1, 1.2],
+  3: [0.7, 0.8, 1],
+};
+/** 이론가(지수 옵션은 체결가로 계산한 지수를 따라 튄다)를 이 시간 평균으로 본다 — futures-bots의 기초자산과 같은 창. */
+const THEO_WINDOW_MS = 20_000;
 /** 스프레드(한쪽) = 이론가의 이 비율(bps), 최소 1호가·최대 MAX_HALF_SPREAD_TICKS호가 */
 const HALF_SPREAD_BPS = 400;
 /** 깊은 내가격(이론가 수십 pt)은 4%면 수십 호가라 체결가가 이론가에서 크게 벗어난다 — 한쪽 10호가로 묶는다. */
@@ -47,7 +57,7 @@ const OVERVIEW_REFRESH_MS = 2_000;
 const CANCEL_RESEND_MS = 30_000;
 /** 등가격에서 이 행사가 칸 수보다 멀면(먼 외가격·내가격) 호가 단수를 줄인다 — 거래가 드문 자리의 주문 수를 아낀다. */
 const FAR_STRIKE_STEPS = 3.5;
-const FAR_LADDER_LEVELS = 2;
+const FAR_LADDER_LEVELS = 3;
 
 export interface OptionOverviewRow {
   symbol: string;
@@ -96,11 +106,13 @@ export function planOptionLadder(
   const center = roundToTick(theo, tick) - skewTicks * tick;
   const half = optionHalfSpread(tick, theo);
   const quotes: FutureQuote[] = [];
+  const weights = LEVEL_QTY_WEIGHTS[levels] ?? Array.from({ length: levels }, (_, i) => (i + 2) / 2);
   for (let level = 1; level <= levels; level++) {
-    const qty = Math.round((baseQty * (level + 1)) / 2);
+    const base = Math.max(1, baseQty * weights[level - 1]);
     const bid = center - half - (level - 1) * tick;
-    if (bid >= tick && inventory < maxInventory) quotes.push({ side: "BUY", price: bid, qty });
-    if (!bidOnly && inventory > -maxInventory) quotes.push({ side: "SELL", price: Math.max(center + half, tick * 2) + (level - 1) * tick, qty });
+    const ask = Math.max(center + half, tick * 2) + (level - 1) * tick;
+    if (bid >= tick && inventory < maxInventory) quotes.push({ side: "BUY", price: bid, qty: jitteredQty(base, `B:${bid}`) });
+    if (!bidOnly && inventory > -maxInventory) quotes.push({ side: "SELL", price: ask, qty: jitteredQty(base, `S:${ask}`) });
   }
   return quotes;
 }
@@ -115,6 +127,7 @@ export function strikeSteps(row: Pick<OptionOverviewRow, "strike" | "underlying"
 export class OptionsMarketView {
   private rows = new Map<string, OptionOverviewRow>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private theoHistory = new Map<string, { ts: number; value: number }[]>();
 
   constructor(private readonly client: ApiClient) {}
 
@@ -124,6 +137,8 @@ export class OptionsMarketView {
         .optionsOverview()
         .then((rows) => {
           this.rows = new Map(rows.map((row) => [row.symbol, row]));
+          const now = Date.now();
+          for (const row of rows) if (row.theo != null) this.recordTheo(row.symbol, now, row.theo);
         })
         .catch((error) => console.warn("[options] overview failed", error instanceof Error ? error.message : error));
     void load();
@@ -132,6 +147,20 @@ export class OptionsMarketView {
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
+  }
+
+  recordTheo(symbol: string, ts: number, value: number): void {
+    const list = this.theoHistory.get(symbol) ?? [];
+    list.push({ ts, value });
+    while (list.length > 0 && list[0].ts < ts - THEO_WINDOW_MS) list.shift();
+    this.theoHistory.set(symbol, list);
+  }
+
+  /** 최근 20초 이론가 평균 — 지수가 체결마다 튀는 만큼을 걸러낸다. 기록이 없으면 지금 이론가. */
+  smoothedTheo(symbol: string, now = Date.now()): number | null {
+    const recent = (this.theoHistory.get(symbol) ?? []).filter((point) => point.ts >= now - THEO_WINDOW_MS);
+    if (recent.length === 0) return this.rows.get(symbol)?.theo ?? null;
+    return recent.reduce((sum, point) => sum + point.value, 0) / recent.length;
   }
 
   row(symbol: string): OptionOverviewRow | null {
@@ -178,7 +207,10 @@ export async function runOptionsMarketMaker(client: ApiClient, family: OptionFam
         let desired: FutureQuote[] = [];
         if (row && !row.expired && row.theo != null && row.strike != null) {
           const previous = lastTheo.get(def.symbol);
-          const theo = previous != null && Math.abs(row.theo - previous) <= def.tickUnits ? previous : row.theo;
+          const target = market.smoothedTheo(def.symbol) ?? row.theo;
+          // 스프레드의 절반 넘게 벗어날 때만 옮긴다(최소 1호가) — 그 사이엔 빈 칸·얇아진 칸만 채운다.
+          const threshold = Math.max(def.tickUnits, optionHalfSpread(def.tickUnits, target) / 2);
+          const theo = previous != null && Math.abs(target - previous) <= threshold ? previous : target;
           const levels = strikeSteps(row, family) > FAR_STRIKE_STEPS ? FAR_LADDER_LEVELS : OPTION_LADDER_LEVELS;
           desired = planOptionLadder(def, theo, inventory.get(def.symbol) ?? 0, bidOnly, levels);
           lastTheo.set(def.symbol, theo);
@@ -191,7 +223,7 @@ export async function runOptionsMarketMaker(client: ApiClient, family: OptionFam
           cancelSentAt.set(order.id, now);
           await client.cancelOrder(order.id).catch(() => undefined);
         }
-        for (const quote of diff.place) {
+        for (const quote of withoutSelfCross(diff.place, orders)) {
           await client
             .placeOrder({ symbol: def.symbol, side: quote.side, type: "LIMIT", price: quote.price, qty: quote.qty })
             .catch((error) => console.warn(`[options-mm:${def.symbol}] place failed`, error instanceof Error ? error.message : error));

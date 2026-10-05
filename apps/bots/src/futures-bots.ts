@@ -1,15 +1,31 @@
 import { FUTURES, futureMarginPerContract, MARKET_BUY_HOLD_FACTOR, type FutureDef, type OrderSide } from "@mock-kabu/shared";
 import type { ApiClient, LiveOrder } from "./client";
 
-/** 선물 호가 단수(한쪽) — 현물보다 적게 둬 호가 교체 부하를 줄인다. */
-export const FUTURES_LADDER_LEVELS = 5;
-/** 중심이 이만큼(틱) 움직여야 호가를 옮긴다. 그 사이에는 비어 있는 칸만 채운다. */
-export const FUTURES_RECENTER_TICKS = 2;
+/** 선물 호가 단수(한쪽) — 화면은 5단을 보이고, 안쪽이 체결돼도 5단이 차 있게 2단을 더 둔다. */
+export const FUTURES_LADDER_LEVELS = 7;
+/** 단별 기본 수량(안쪽 → 바깥). 한쪽 합계 약 42계약(예전 5단 40계약과 비슷한 증거금). */
+const FUTURES_LEVEL_QTY = [3, 4, 5, 6, 7, 8, 9] as const;
+/** 체결로 남은 수량이 원하는 수량의 이 비율 아래로 줄면 그 단을 다시 채운다(현물 마켓메이커 0.45와 비슷하게). */
+const FUTURES_REFILL_RATIO = 0.4;
+/**
+ * 중심이 멀리 벗어나도 한 루프에 이만큼(칸)만, 또는 남은 거리의 1/3만 옮긴다 — 현물 호가처럼 미끄러지듯 따라간다.
+ * 한 번에 통째로 옮기면 호가 전체가 취소·재접수돼 그 사이 호가창이 비었다.
+ */
+const MAX_GLIDE_STEPS = 2;
+/** 중심이 이만큼(호가 간격) 움직여야 호가를 옮긴다. 그 사이에는 비어 있는 칸만 채운다. */
+export const FUTURES_RECENTER_STEPS = 2;
+/** 호가 간격의 목표 크기(bps). 틱이 이보다 훨씬 잘면(KABUF 0.05pt ≈ 0.4bp) 여러 틱을 한 칸으로 쓴다. */
+const LADDER_STEP_BPS = 1;
+/**
+ * 마켓메이커가 보는 기초자산 = 최근 이 시간 평균. KABU 지수는 현물 최근가로 계산해 호가 사이 체결이 튈 때마다
+ * 2초 만에 ±1pt(수십 틱)씩 오르내린다 — 그대로 따라가면 매 루프 호가 전체를 취소·재접수해 호가창이 비고 널뛴다.
+ */
+export const FUTURES_FAIR_WINDOW_MS = 20_000;
 /** 재고 20계약마다 중심을 1틱 반대로 기울인다(최대 3틱). */
 const INVENTORY_PER_SKEW_TICK = 20;
 const MAX_SKEW_TICKS = 3;
 
-const MM_LOOP_MS = 2_500;
+const MM_LOOP_MS = 2_000;
 const POSITION_REFRESH_MS = 10_000;
 const OVERVIEW_REFRESH_MS = 2_000;
 const HISTORY_MS = 5 * 60_000;
@@ -78,16 +94,55 @@ export function futuresQuoteCenter(def: FutureDef, fairUnits: number, inventory:
 }
 
 /**
- * 중심 양쪽 1~N틱에 걸 호가. 안쪽은 얇고 바깥은 두껍게(4~12계약) — 거래 봇이 한 번에 최대 5계약을 가져가도
- * 다음 호가 교체(2.5초)까지 한쪽이 비지 않게 한다. 수량만 늘려 주문 건수(부하)는 그대로다.
+ * 가격마다 고정된 수량 흔들림(×0.7~1.3). 같은 가격을 다시 걸어도 수량이 같아 불필요한 재접수가 없고,
+ * 단마다 수량이 달라 4·6·8·10·12처럼 기계적으로 보이지 않는다.
  */
-export function planFuturesLadder(def: FutureDef, center: number): FutureQuote[] {
+export function jitteredQty(base: number, key: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i++) hash = Math.imul(hash ^ key.charCodeAt(i), 16777619);
+  const unit = ((hash >>> 0) % 1000) / 1000;
+  return Math.max(1, Math.round(base * (0.7 + unit * 0.6)));
+}
+
+/** 지난 중심에서 목표 중심 쪽으로 이번 루프에 옮길 중심 — 최대 MAX_GLIDE_STEPS칸 또는 남은 거리의 1/3(더 큰 쪽). */
+export function glideCenter(previous: number, target: number, step: number): number {
+  const gapSteps = Math.round((target - previous) / step);
+  const move = Math.min(Math.abs(gapSteps), Math.max(MAX_GLIDE_STEPS, Math.ceil(Math.abs(gapSteps) / 3)));
+  return previous + Math.sign(gapSteps) * move * step;
+}
+
+/**
+ * 아직 살아 있는 반대편 주문(취소를 보냈어도 엔진이 처리하기 전)과 가격이 겹치는 새 호가는 이번에 내지 않는다
+ * — 자기 주문끼리 체결되지 않게. 취소가 끝나면 다음 루프에 걸린다.
+ */
+export function withoutSelfCross<T extends { side: OrderSide; price: number }>(quotes: readonly T[], live: readonly LiveOrder[]): T[] {
+  let lowestAsk = Infinity;
+  let highestBid = -Infinity;
+  for (const order of live) {
+    if (order.price == null) continue;
+    if (order.side === "SELL") lowestAsk = Math.min(lowestAsk, order.price);
+    else highestBid = Math.max(highestBid, order.price);
+  }
+  return quotes.filter((quote) => (quote.side === "BUY" ? quote.price < lowestAsk : quote.price > highestBid));
+}
+
+/** 호가 한 칸(정수 단위) — 틱의 정수배로 가격의 약 1bp. 대부분 1틱이고 KABUF만 여러 틱이다. */
+export function futuresLadderStep(def: FutureDef, center: number): number {
+  return def.tickUnits * Math.max(1, Math.round((center * LADDER_STEP_BPS) / 10_000 / def.tickUnits));
+}
+
+/**
+ * 중심 양쪽 1~N칸에 걸 호가. 안쪽은 얇고 바깥은 두껍게(단별 3~9계약 ×0.7~1.3) — 거래 봇이 한 번에 최대 5계약을
+ * 가져가도 다음 호가 교체까지 한쪽이 비지 않게 한다.
+ */
+export function planFuturesLadder(def: FutureDef, center: number, step = futuresLadderStep(def, center)): FutureQuote[] {
   const quotes: FutureQuote[] = [];
   for (let level = 1; level <= FUTURES_LADDER_LEVELS; level++) {
-    const qty = (level + 1) * 2;
-    const bid = center - level * def.tickUnits;
-    if (bid > 0) quotes.push({ side: "BUY", price: bid, qty });
-    quotes.push({ side: "SELL", price: center + level * def.tickUnits, qty });
+    const base = FUTURES_LEVEL_QTY[level - 1];
+    const bid = center - level * step;
+    const ask = center + level * step;
+    if (bid > 0) quotes.push({ side: "BUY", price: bid, qty: jitteredQty(base, `${def.symbol}:B:${bid}`) });
+    quotes.push({ side: "SELL", price: ask, qty: jitteredQty(base, `${def.symbol}:S:${ask}`) });
   }
   return quotes;
 }
@@ -151,6 +206,13 @@ export class FuturesMarketView {
     return row.underlying ?? row.lastPrice;
   }
 
+  /** 최근 windowMs 동안 기초자산 평균 — 순간 튐을 걸러낸 값. 기록이 없으면 fair(). */
+  smoothedFair(symbol: string, windowMs = FUTURES_FAIR_WINDOW_MS, now = Date.now()): number | null {
+    const recent = (this.history.get(symbol) ?? []).filter((point) => point.ts >= now - windowMs);
+    if (recent.length === 0) return this.fair(symbol);
+    return recent.reduce((sum, point) => sum + point.value, 0) / recent.length;
+  }
+
   last(symbol: string): number | null {
     return this.rows.get(symbol)?.lastPrice ?? null;
   }
@@ -190,7 +252,7 @@ export async function runFuturesMarketMaker(client: ApiClient, def: FutureDef, m
   const cancelSentAt = new Map<string, number>();
   while (true) {
     try {
-      const fair = market.fair(def.symbol);
+      const fair = market.smoothedFair(def.symbol);
       if (fair != null) {
         if (Date.now() - inventoryAt > POSITION_REFRESH_MS) {
           const account = await client.futuresPositions();
@@ -199,9 +261,10 @@ export async function runFuturesMarketMaker(client: ApiClient, def: FutureDef, m
         }
         const center = futuresQuoteCenter(def, fair, inventory);
         const state = await client.quoteState(def.symbol);
-        const recenter: boolean = lastCenter == null || Math.abs(center - lastCenter) >= FUTURES_RECENTER_TICKS * def.tickUnits;
-        const effectiveCenter: number = recenter ? center : (lastCenter as number);
-        const diff = diffFuturesLadder(planFuturesLadder(def, effectiveCenter), state.orders);
+        const step = futuresLadderStep(def, center);
+        const recenter: boolean = lastCenter == null || Math.abs(center - lastCenter) >= FUTURES_RECENTER_STEPS * step;
+        const effectiveCenter: number = lastCenter == null ? center : recenter ? glideCenter(lastCenter, center, step) : lastCenter;
+        const diff = diffFuturesLadder(planFuturesLadder(def, effectiveCenter, step), state.orders, FUTURES_REFILL_RATIO);
         const now = Date.now();
         const liveIds = new Set(state.orders.map((order) => order.id));
         for (const id of [...cancelSentAt.keys()]) if (!liveIds.has(id)) cancelSentAt.delete(id);
@@ -210,7 +273,8 @@ export async function runFuturesMarketMaker(client: ApiClient, def: FutureDef, m
           cancelSentAt.set(order.id, now);
           await client.cancelOrder(order.id).catch(() => undefined);
         }
-        for (const quote of diff.place) {
+        // 취소 중인 주문도 엔진이 처리하기 전까지는 체결될 수 있다 — 살아 있는 모든 주문과 겹치지 않게.
+        for (const quote of withoutSelfCross(diff.place, state.orders)) {
           await client.placeOrder({ symbol: def.symbol, side: quote.side, type: "LIMIT", price: quote.price, qty: quote.qty })
             .catch((error) => console.warn(`[futures-mm:${def.symbol}] place failed`, error instanceof Error ? error.message : error));
         }
@@ -274,7 +338,7 @@ export async function runFuturesTrader(
         continue;
       }
       const def = FUTURES[Math.floor(Math.random() * FUTURES.length)];
-      const fair = market.fair(def.symbol);
+      const fair = market.smoothedFair(def.symbol);
       const last = market.last(def.symbol);
       if (fair == null || last == null) continue;
       const position = account.positions.find((p) => p.symbol === def.symbol)?.qty ?? 0;

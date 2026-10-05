@@ -6,6 +6,7 @@ import { api, fmt, getUser } from "@/lib/api";
 import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { fmtFuture } from "@/lib/futures";
 import { serverText, useT } from "@/lib/i18n";
+import { useOrderCancel } from "@/lib/order-cancel";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
 
@@ -59,7 +60,7 @@ export default function DerivOpenOrders({
   const [orders, setOrders] = useState<LiveOrder[]>([]);
   const [editing, setEditing] = useState<{ id: string; price: string; qty: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     if (!getUser()) return;
@@ -67,6 +68,21 @@ export default function DerivOpenOrders({
       .then(setOrders)
       .catch(() => {});
   }, [symbol]);
+
+  const afterCancel = useCallback(() => {
+    refresh();
+    onChanged?.();
+  }, [refresh, onChanged]);
+  // 실패 사유(점검 중 503, 이미 체결 등)를 보여 주고, 접수된 취소는 목록에서 빠질 때까지 "취소 중"으로 둔다.
+  const { pending: cancelling, error: cancelError, setError: setCancelError, cancel: requestCancel } = useOrderCancel(
+    orders.map((o) => o.id),
+    afterCancel,
+  );
+  const error = editError ?? cancelError;
+  const setError = (message: string | null) => {
+    setEditError(message);
+    setCancelError(null);
+  };
 
   useEffect(() => {
     refresh();
@@ -104,16 +120,9 @@ export default function DerivOpenOrders({
     onChanged?.();
   };
 
-  async function cancel(id: string) {
-    setError(null);
-    try {
-      await api(`/orders/${id}`, { method: "DELETE" });
-    } catch (err) {
-      // 이미 체결·취소된 주문이면 새로 읽어 반영한다.
-      setError(err instanceof Error ? err.message : t("취소 실패"));
-    } finally {
-      after();
-    }
+  function cancel(id: string) {
+    setEditError(null);
+    void requestCancel(id, t("취소 실패"));
   }
 
   async function cancelAll() {
@@ -272,9 +281,10 @@ export default function DerivOpenOrders({
               <button
                 type="button"
                 onClick={() => cancel(o.id)}
+                disabled={cancelling[o.id] != null}
                 className="btn btn-ghost btn-sm shrink-0"
               >
-                {t("취소|동작")}
+                {cancelling[o.id] != null ? t("취소 중…") : t("취소|동작")}
               </button>
             </li>
           );

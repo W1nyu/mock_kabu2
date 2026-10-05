@@ -7,6 +7,7 @@ import { ACCOUNT_REFRESH_DEBOUNCE_MS, debounce } from "@/lib/debounce";
 import { subscribe } from "@/lib/socket";
 import { everyVisible } from "@/lib/visible-interval";
 import { serverText, useT } from "@/lib/i18n";
+import { useOrderCancel } from "@/lib/order-cancel";
 
 interface OrderRow {
   id: string;
@@ -98,15 +99,12 @@ export default function MyOpenOrders({
     }
   }
 
-  async function cancel(id: string) {
-    try {
-      await api(`/orders/${id}`, { method: "DELETE" });
-      refresh();
-    } catch {
-      // 이미 체결된 경우 등 — 새로고침으로 상태 반영
-      refresh();
-    }
-  }
+  // 실패 사유(점검 중 503, 이미 체결 등)를 보여 주고, 접수된 취소는 목록에서 빠질 때까지 "취소 중"으로 둔다.
+  const { pending: cancelling, error: cancelError, cancel: requestCancel } = useOrderCancel(
+    orders.map((o) => o.id),
+    refresh,
+  );
+  const cancel = (id: string) => requestCancel(id, tr("취소 실패"));
 
   return (
     <div className="glass flex flex-col overflow-hidden">
@@ -203,9 +201,10 @@ export default function MyOpenOrders({
               )}
               <button
                 onClick={() => cancel(o.id)}
+                disabled={cancelling[o.id] != null}
                 className="btn btn-ghost btn-sm relative shrink-0"
               >
-                {tr("취소|동작")}
+                {cancelling[o.id] != null ? tr("취소 중…") : tr("취소|동작")}
               </button>
             </li>
           );
@@ -214,6 +213,11 @@ export default function MyOpenOrders({
           <li className="px-4 py-8 text-center text-ink-faint">{tr("미체결 주문 없음")}</li>
         )}
       </ul>
+      {cancelError && (
+        <p role="alert" className="border-t border-hairline-soft px-4 py-2 text-[11px] text-warn">
+          {cancelError}
+        </p>
+      )}
     </div>
   );
 }

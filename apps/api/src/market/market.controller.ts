@@ -103,6 +103,12 @@ const SPARK_INTERVAL_SECONDS = 300;
 const SPARK_POINTS = 72;
 const SPARK_CONCURRENCY = 4;
 const INDEX_TTL_MS = { "1d": 15_000, "1w": 60_000, all: 120_000 } as const;
+/**
+ * 지수 이력은 봉 전체를 다시 묶어 계산해 DB가 바쁠 때 1~3초 걸린다. 방문이 뜸하면 15초 TTL이 거의 매번
+ * 지나 있어 화면의 등락폭·등락률(이력의 09:00 값이 기준)이 그만큼 늦게 떴다. 만료 뒤에도 10분까지는
+ * 이전 값을 바로 주고 뒤에서 다시 계산한다 — 현재 값은 화면이 실시간 체결로 따로 계산한다.
+ */
+const INDEX_STALE_MS = 10 * 60_000;
 const INDEX_META_TTL_MS = 10_000;
 /** 재상장 전 체결은 시세에서 뺀다 (listed_at이 없으면 전체). */
 const LISTED_SINCE = Prisma.sql`COALESCE(s.listed_at, '-infinity'::timestamp)`;
@@ -289,7 +295,7 @@ export class MarketController {
   marketIndex(@Query("range") range = "1d") {
     const normalized = range === "all" || range === "1w" ? range : "1d";
     return this.cache.getOrCompute(`index:${normalized}`, INDEX_TTL_MS[normalized], () => this.computeMarketIndex(normalized), {
-      staleMs: INDEX_TTL_MS[normalized],
+      staleMs: INDEX_STALE_MS,
     });
   }
 
