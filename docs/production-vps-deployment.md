@@ -175,7 +175,8 @@ cron 예시(실제 저장소 경로·사용자에 맞게 수정):
 0 3 * * 1-6 flock -n /tmp/mock-kabu2-pgbackrest.lock sh /srv/mock-kabu2/deploy/production/scripts/backup-postgres.sh incr >>/var/log/mock-kabu2-backup.log 2>&1
 ```
 
-현재 repository retention은 최근 full backup 2개(그에 딸린 incremental/differential backup)를 보관한다.
+현재 repository retention은 최근 full backup 1개와 최신 differential backup 1개를 보관한다.
+이전 차등 백업은 다음 백업 성공 후 pgBackRest가 정리하며, 최신 차등 백업 이후의 WAL만 연속 시점 복구에 보관한다.
 VPS의 디스크와 실제 DB 성장량을 측정한 뒤 retention을 늘린다. 주기적으로 다음 명령의 출력과 cron 로그를
 확인한다.
 
