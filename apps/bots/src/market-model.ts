@@ -64,8 +64,8 @@ interface SymbolProfile {
   meanReversion: number;
 }
 
-/** Spot reference moves are 50% gentler; scale amplitudes before squaring into variance. */
-const SPOT_PRICE_MOVE_SCALE = 0.5;
+/** Spot reference moves use 30% of the original amplitude; scale before squaring into variance. */
+const SPOT_PRICE_MOVE_SCALE = 0.3;
 
 const REGIME: Record<
   MarketRegime,

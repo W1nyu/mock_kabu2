@@ -2,7 +2,7 @@ import { requiredRuntimeEnv } from "./env";
 import { ALL_OPTION_FAMILIES, FUTURES, liquidityReserveBotNumber, SYMBOLS, type OrderSide, type SymbolDef } from "@mock-kabu/shared";
 import { ApiClient, isRejection } from "./client";
 import { MarketMakerStartupBlockedError, runMarketMaker } from "./market-maker";
-import { MarketCycle, MarketMoodSource, startMarketCycleLoop, symbolLean } from "./market-cycle";
+import { MarketCycle, MarketMoodSource, parseSidewaysWindow, startMarketCycleLoop, symbolLean } from "./market-cycle";
 import { MarketModel, referencePriceFromHistory } from "./market-model";
 import { ApiNewsSink } from "./news/api-sink";
 import { startNewsEngine } from "./news/scheduler";
@@ -629,7 +629,11 @@ async function main() {
   // 주문 흐름을 기울인다. 일정은 내부 토큰에서 만든 시드로 정해져 재시작해도 이어지고,
   // 공개 저장소만 봐서는 다음 국면을 알 수 없다.
   const marketMood = new MarketMoodSource(
-    new MarketCycle(requiredRuntimeEnv("LIQUIDITY_BOOTSTRAP_TOKEN", process.env.JWT_SECRET ?? "mock-kabu2-local-dev-secret")),
+    new MarketCycle(
+      requiredRuntimeEnv("LIQUIDITY_BOOTSTRAP_TOKEN", process.env.JWT_SECRET ?? "mock-kabu2-local-dev-secret"),
+      undefined,
+      parseSidewaysWindow(process.env.MARKET_SIDEWAYS_WINDOW),
+    ),
   );
   // News is now the only source of market events. The model's own anonymous
   // generator is switched off so a price move always has a headline behind it.

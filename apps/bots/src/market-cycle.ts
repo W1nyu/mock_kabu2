@@ -27,9 +27,17 @@ const HOUR = 60 * MINUTE;
 /** 모든 일정의 기점. 이 값이나 시드를 바꾸면 국면 일정 전체가 새로 섞인다. */
 export const MARKET_CYCLE_EPOCH_MS = Date.UTC(2026, 9, 1);
 
+/** Keep existing phases intact; only bull phases starting from this time use the 36-hour maximum. */
+export const BULL_DURATION_EFFECTIVE_AT_MS = Date.parse("2026-10-05T00:22:31Z");
+
+/** Keep existing phases intact; only bear phases starting from this time use the 24-hour maximum. */
+export const BEAR_DURATION_EFFECTIVE_AT_MS = Date.parse("2026-10-06T16:16:00Z");
+
 interface PhaseSpec {
   /** 한 번 이어지는 기간 */
   readonly hours: Range;
+  /** Preserve durations drawn before a rule change, including an ongoing phase after restart. */
+  readonly hoursBefore?: { readonly untilMs: number; readonly range: Range };
   /** 국면이 자리 잡는 기울기 크기 */
   readonly lean: Range;
   /** +1 상승 쪽, −1 하락 쪽, 0은 어느 쪽이든 아주 조금(박스권은 한쪽으로 살짝 기운 채 오르내린다) */
@@ -51,20 +59,22 @@ interface TrackSpec<P extends string> {
 
 /**
  * 상승장은 길고 완만하게, 하락장은 짧고 가파르게 — 실제 증시에서 강세장이 약세장보다 오래 가고
- * 약세장은 더 빨리 떨어지는 비대칭을 따랐다(평균 약 22시간 대 15시간, 횡보장 12시간).
+ * 약세장은 더 빨리 떨어지는 비대칭을 따랐다(평균 약 24시간 대 16시간, 횡보장 12시간).
  * 하락장은 기사 강도·빈도도 커진다(PHASE_VOLATILITY·PHASE_NEWS_ACTIVITY).
  */
 const MARKET_TRACK: TrackSpec<MarketCyclePhase> = {
   phases: {
     BULL: {
-      hours: { min: 12, max: 32 },
+      hours: { min: 12, max: 36 },
+      hoursBefore: { untilMs: BULL_DURATION_EFFECTIVE_AT_MS, range: { min: 12, max: 32 } },
       lean: { min: 0.25, max: 0.5 },
       sign: 1,
       swing: { min: 0.05, max: 0.12 },
       swingHours: { min: 3, max: 8 },
     },
     BEAR: {
-      hours: { min: 8, max: 22 },
+      hours: { min: 8, max: 24 },
+      hoursBefore: { untilMs: BEAR_DURATION_EFFECTIVE_AT_MS, range: { min: 8, max: 22 } },
       lean: { min: 0.3, max: 0.6 },
       sign: -1,
       swing: { min: 0.06, max: 0.15 },
@@ -162,10 +172,7 @@ const DRIVER_TRACKS: Readonly<Record<MacroCycleDriver, TrackSpec<MacroCyclePhase
   COMMODITY: PRICE_DRIVER_TRACK,
 };
 
-/**
- * 금리 → 장세. 다음 장세를 고를 때 금리 기울기만큼 하락장 쪽 확률을 e^(k·r)배, 상승장 쪽을
- * e^(−k·r)배 한다. 인상기(r≈0.7)면 상승장 다음에 하락장이 올 확률이 45% → 약 55%.
- */
+/** 금리 인상기에는 다음 자동 장세가 하락장일 확률을 높인다. */
 const RATE_TO_MARKET = 0.6;
 
 /** 하락장은 기사 한 건이 더 크게 흔들고, 박스권은 덜 흔든다. */
@@ -258,18 +265,19 @@ class CycleTrack<P extends string> {
     private readonly spec: TrackSpec<P>,
     private readonly random: () => number,
     private readonly epochMs: number,
-    /** 다음 국면 확률을 그때의 다른 사이클로 조정한다(금리 → 장세) */
     private readonly adjustNext?: (odds: Readonly<Partial<Record<P, number>>>, atMs: number) => Partial<Record<P, number>>,
+    private readonly firstSegment?: { phase: P; durationMs: number; enteredFrom: number; next: Readonly<Partial<Record<P, number>>> },
   ) {}
 
   segmentAt(nowMs: number): Segment<P> {
     if (this.segments.length === 0) {
-      const first = pickPhase(this.spec.first, this.random());
-      this.segments.push(this.makeSegment(first, first, this.epochMs, 0));
+      const first = this.firstSegment?.phase ?? pickPhase(this.spec.first, this.random());
+      this.segments.push(this.makeSegment(first, first, this.epochMs, this.firstSegment?.enteredFrom ?? 0, this.firstSegment?.durationMs));
     }
     let last = this.segments[this.segments.length - 1];
     while (last.endMs <= nowMs) {
-      const odds = this.adjustNext ? this.adjustNext(this.spec.next[last.phase], last.endMs) : this.spec.next[last.phase];
+      const firstNext = last.startMs === this.epochMs ? this.firstSegment?.next : undefined;
+      const odds = firstNext ?? (this.adjustNext ? this.adjustNext(this.spec.next[last.phase], last.endMs) : this.spec.next[last.phase]);
       const phase = pickPhase(odds, this.random());
       last = this.makeSegment(phase, last.phase, last.endMs, settledLean(last, last.endMs));
       this.segments.push(last);
@@ -289,10 +297,11 @@ class CycleTrack<P extends string> {
     return leanOf(this.segmentAt(nowMs), nowMs);
   }
 
-  private makeSegment(phase: P, previous: P, startMs: number, enteredFrom: number): Segment<P> {
+  private makeSegment(phase: P, previous: P, startMs: number, enteredFrom: number, firstDurationMs?: number): Segment<P> {
     const spec = this.spec.phases[phase];
     const draw = (range: Range) => range.min + (range.max - range.min) * this.random();
-    const durationMs = Math.round(draw(spec.hours) * HOUR);
+    const hours = spec.hoursBefore && startMs < spec.hoursBefore.untilMs ? spec.hoursBefore.range : spec.hours;
+    const durationMs = firstDurationMs ?? Math.round(draw(hours) * HOUR);
     const size = draw(spec.lean);
     const sign = spec.sign !== 0 ? spec.sign : this.random() < 0.5 ? -1 : 1;
     const swing = draw(spec.swing);
@@ -307,7 +316,7 @@ class CycleTrack<P extends string> {
       swing,
       swingPeriodMs,
       swingOffset,
-      easeMs: Math.min(this.spec.easeMs, durationMs / 3),
+      easeMs: Math.min(firstDurationMs ? 10 * MINUTE : this.spec.easeMs, durationMs / 3),
       enteredFrom,
     };
   }
@@ -330,11 +339,30 @@ export interface CycleSnapshot {
   readonly drivers: Readonly<Record<MacroCycleDriver, CyclePhaseState<MacroCyclePhase>>>;
 }
 
+export interface SidewaysWindow {
+  readonly startsAtMs: number;
+  readonly endsAtMs: number;
+}
+
+/** Absolute times survive restarts; the window starts a new market schedule. */
+export function parseSidewaysWindow(value: string | undefined): SidewaysWindow | undefined {
+  if (!value) return undefined;
+  const parts = value.split(",");
+  const startsAtMs = Date.parse(parts[0]);
+  const endsAtMs = Date.parse(parts[1]);
+  if (parts.length !== 2 || !Number.isFinite(startsAtMs) || !Number.isFinite(endsAtMs)
+    || endsAtMs - startsAtMs < 5 * MINUTE || endsAtMs - startsAtMs > 24 * HOUR) {
+    throw new Error("MARKET_SIDEWAYS_WINDOW must contain start,end ISO times spanning 5 minutes to 24 hours");
+  }
+  return { startsAtMs, endsAtMs };
+}
+
 export class MarketCycle {
   private readonly market: CycleTrack<MarketCyclePhase>;
+  private readonly rebasedMarket?: CycleTrack<MarketCyclePhase>;
   private readonly drivers: Record<MacroCycleDriver, CycleTrack<MacroCyclePhase>>;
 
-  constructor(secret: string, epochMs: number = MARKET_CYCLE_EPOCH_MS) {
+  constructor(secret: string, epochMs: number = MARKET_CYCLE_EPOCH_MS, private readonly sideways?: SidewaysWindow) {
     this.drivers = Object.fromEntries(
       MACRO_CYCLE_DRIVERS.map((driver) => [
         driver,
@@ -342,18 +370,34 @@ export class MarketCycle {
       ]),
     ) as Record<MacroCycleDriver, CycleTrack<MacroCyclePhase>>;
     const rate = this.drivers.RATE;
-    this.market = new CycleTrack(MARKET_TRACK, seededRandom(seedFor(secret, "market")), epochMs, (odds, atMs) => {
+    const adjustNext = (odds: Readonly<Partial<Record<MarketCyclePhase, number>>>, atMs: number) => {
       const tilt = RATE_TO_MARKET * rate.leanAt(atMs);
       return {
         ...odds,
         ...(odds.BEAR !== undefined ? { BEAR: odds.BEAR * Math.exp(tilt) } : {}),
         ...(odds.BULL !== undefined ? { BULL: odds.BULL * Math.exp(-tilt) } : {}),
       };
-    });
+    };
+    this.market = new CycleTrack(MARKET_TRACK, seededRandom(seedFor(secret, "market")), epochMs, adjustNext);
+    if (sideways) {
+      this.rebasedMarket = new CycleTrack<MarketCyclePhase>(
+        MARKET_TRACK,
+        seededRandom(seedFor(secret, `market:sideways:${sideways.startsAtMs}`)),
+        sideways.startsAtMs,
+        adjustNext,
+        {
+          phase: "SIDEWAYS",
+          durationMs: sideways.endsAtMs - sideways.startsAtMs,
+          enteredFrom: this.market.leanAt(sideways.startsAtMs),
+          next: { BULL: 1, BEAR: 1, SIDEWAYS: 1 },
+        },
+      );
+    }
   }
 
   snapshot(nowMs: number): CycleSnapshot {
-    const segment = this.market.segmentAt(nowMs);
+    const track = this.sideways && nowMs >= this.sideways.startsAtMs ? this.rebasedMarket! : this.market;
+    const segment = track.segmentAt(nowMs);
     const progress = easeProgress(segment, nowMs);
     const blend = (table: Readonly<Record<MarketCyclePhase, number>>) =>
       table[segment.previous] + (table[segment.phase] - table[segment.previous]) * progress;

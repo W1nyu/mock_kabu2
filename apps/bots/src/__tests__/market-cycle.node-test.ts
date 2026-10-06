@@ -3,11 +3,13 @@ import { test } from "node:test";
 import { SYMBOLS } from "@mock-kabu/shared";
 import {
   fairIndex,
+  BULL_DURATION_EFFECTIVE_AT_MS,
   MARKET_CYCLE_EPOCH_MS,
   MarketCycle,
   MarketMoodSource,
   marketIndexFrom,
   marketSensitivity,
+  parseSidewaysWindow,
   symbolLean,
   valuationPull,
   type MarketMood,
@@ -59,7 +61,7 @@ function sampleSchedules(secrets: number, days: number) {
       leanByPhase[snapshot.market.phase].push(snapshot.market.lean);
       if (previous) {
         maxStep = Math.max(maxStep, Math.abs(snapshot.market.lean - previous.market.lean));
-        if (previous.market.phase !== snapshot.market.phase) {
+        if (previous.market.sinceMs !== snapshot.market.sinceMs) {
           runs[previous.market.phase].push(snapshot.market.sinceMs - previous.market.sinceMs);
           const counts = intoBearByRate[snapshot.drivers.RATE.phase];
           counts[1]++;
@@ -73,6 +75,81 @@ function sampleSchedules(secrets: number, days: number) {
 }
 
 const average = (values: readonly number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+
+test("the duration change preserves an ongoing bull phase and its end after restart", () => {
+  // Captured from the previous 32-hour implementation, before changing the rule.
+  const secret = "duration-history-0";
+  const oldStart = 1_791_150_151_207;
+  const oldEnd = 1_791_245_999_882;
+  const cycle = new MarketCycle(secret);
+  const current = cycle.snapshot(BULL_DURATION_EFFECTIVE_AT_MS).market;
+  assert.equal(current.phase, "BULL");
+  assert.equal(current.sinceMs, oldStart);
+  assert.equal(current.lean, 0.4551823368802461);
+  assert.equal(cycle.snapshot(oldEnd - 1).market.sinceMs, oldStart);
+  assert.deepEqual(new MarketCycle(secret).snapshot(oldEnd - 1), cycle.snapshot(oldEnd - 1));
+  assert.equal(cycle.snapshot(oldEnd).market.sinceMs, oldEnd);
+  assert.notEqual(cycle.snapshot(oldEnd).market.phase, "BULL");
+});
+
+test("a sideways window preserves macro schedules and starts a new schedule that survives restart", () => {
+  const startsAtMs = MARKET_CYCLE_EPOCH_MS + 2 * DAY;
+  const endsAtMs = startsAtMs + 12 * HOUR;
+  const window = parseSidewaysWindow(`${new Date(startsAtMs).toISOString()},${new Date(endsAtMs).toISOString()}`);
+  const automatic = new MarketCycle("override-secret");
+  const forced = new MarketCycle("override-secret", undefined, window);
+  for (const t of [startsAtMs - DAY, startsAtMs - 1]) {
+    assert.deepEqual(forced.snapshot(t), automatic.snapshot(t));
+  }
+  for (let t = startsAtMs + 10 * MINUTE; t <= endsAtMs - 10 * MINUTE; t += MINUTE) {
+    const snapshot = forced.snapshot(t);
+    assert.equal(snapshot.market.phase, "SIDEWAYS");
+    assert.ok(Math.abs(snapshot.market.lean) <= 0.210001);
+    assert.equal(snapshot.market.volatility, 0.88);
+    assert.ok(Math.abs(snapshot.market.newsActivity - 0.85) < 1e-9);
+    assert.deepEqual(snapshot.drivers, automatic.snapshot(t).drivers);
+  }
+  const middle = startsAtMs + 6 * HOUR;
+  assert.deepEqual(new MarketCycle("override-secret", undefined, window).snapshot(middle), forced.snapshot(middle));
+  assert.ok(Math.abs(forced.snapshot(startsAtMs).market.lean - automatic.snapshot(startsAtMs).market.lean) < 1e-9);
+  const next = forced.snapshot(endsAtMs);
+  assert.ok(["BULL", "BEAR", "SIDEWAYS"].includes(next.market.phase));
+  assert.equal(next.market.sinceMs, endsAtMs);
+  assert.ok(Math.abs(forced.snapshot(endsAtMs - 1).market.lean - next.market.lean) < 0.001);
+  assert.notDeepEqual(forced.snapshot(endsAtMs + DAY).market, automatic.snapshot(endsAtMs + DAY).market);
+  assert.deepEqual(new MarketCycle("override-secret", undefined, window).snapshot(endsAtMs + DAY), forced.snapshot(endsAtMs + DAY));
+  const nextPhases = new Set(Array.from({ length: 24 }, (_, n) => new MarketCycle(`secret-${n}`, undefined, window).snapshot(endsAtMs).market.phase));
+  assert.deepEqual(nextPhases, new Set(["BULL", "BEAR", "SIDEWAYS"]));
+});
+
+test("sideways window rejects malformed, reversed, short and unbounded times", () => {
+  assert.equal(parseSidewaysWindow(undefined), undefined);
+  assert.equal(parseSidewaysWindow(""), undefined);
+  const start = "2026-10-03T12:00:00Z";
+  for (const input of ["bad", `${start},bad`, `${start},${start}`, `${start},2026-10-03T12:04:00Z`, `${start},2026-10-04T12:01:00Z`, `${start},2026-10-03T13:00:00Z,extra`]) {
+    assert.throws(() => parseSidewaysWindow(input), /MARKET_SIDEWAYS_WINDOW/);
+  }
+});
+
+test("only the first transition after the manual window draws all three phases equally", () => {
+  const startsAtMs = MARKET_CYCLE_EPOCH_MS + 2 * DAY;
+  const endsAtMs = startsAtMs + 12 * HOUR;
+  const window = { startsAtMs, endsAtMs };
+  const counts = { BULL: 0, BEAR: 0, SIDEWAYS: 0 };
+  for (let seed = 0; seed < 3000; seed++) {
+    const cycle = new MarketCycle(`equal-${seed}`, undefined, window);
+    counts[cycle.snapshot(endsAtMs).market.phase]++;
+  }
+  for (const count of Object.values(counts)) assert.ok(Math.abs(count / 3000 - 1 / 3) < 0.03);
+  // Once the special draw has happened, the existing rule forbids repeating a phase.
+  const cycle = new MarketCycle("later-rules", undefined, window);
+  let previous = cycle.snapshot(endsAtMs).market;
+  for (let t = endsAtMs + 10 * MINUTE; t < endsAtMs + 30 * DAY; t += 10 * MINUTE) {
+    const current = cycle.snapshot(t).market;
+    if (current.sinceMs !== previous.sinceMs) assert.notEqual(current.phase, previous.phase);
+    previous = current;
+  }
+});
 
 test("the same secret gives the same phases whatever order they are asked in", () => {
   const forward = new MarketCycle("prod-secret");
@@ -100,7 +177,12 @@ test("bull, bear and range-bound markets all come round, bulls lasting longer th
   assert.ok(share.BEAR / total > 0.2 && share.BEAR / total < 0.4, `bear share ${share.BEAR / total}`);
   assert.ok(share.SIDEWAYS / total > 0.15, `range share ${share.SIDEWAYS / total}`);
   assert.ok(average(runs.BULL) > average(runs.BEAR), "a bull market outlasts a bear market on average");
-  assert.ok(average(runs.BEAR) >= 8 * HOUR && average(runs.BULL) <= 32 * HOUR);
+  assert.ok(average(runs.BEAR) >= 8 * HOUR && average(runs.BULL) <= 36 * HOUR);
+  assert.ok(runs.BULL.every((duration) => duration >= 12 * HOUR && duration <= 36 * HOUR));
+  assert.ok(runs.BULL.some((duration) => duration > 32 * HOUR), "bull markets can now last beyond 32 hours");
+  assert.ok(runs.BEAR.every((duration) => duration >= 8 * HOUR && duration <= 24 * HOUR));
+  assert.ok(runs.BEAR.some((duration) => duration > 22 * HOUR), "bear markets can now last beyond 22 hours");
+  assert.ok(runs.SIDEWAYS.every((duration) => duration >= 6 * HOUR && duration <= 18 * HOUR));
   assert.ok(average(leanByPhase.BULL) > 0.25, `bull lean ${average(leanByPhase.BULL)}`);
   assert.ok(average(leanByPhase.BEAR) < -0.3, `bear lean ${average(leanByPhase.BEAR)}`);
   assert.ok(Math.abs(average(leanByPhase.SIDEWAYS)) < 0.08, `range lean ${average(leanByPhase.SIDEWAYS)}`);
